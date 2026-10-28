@@ -39,6 +39,7 @@ into ``data/plugins`` still has no approval record and is still refused.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -358,6 +359,62 @@ def create_app() -> FastAPI:
                 "uptime_seconds": round(uptime, 3),
             }
         )
+
+    @app.get("/healthz", tags=["system"], include_in_schema=False)
+    async def healthz() -> JSONResponse:
+        """Kubernetes-style liveness probe: identical to ``/api/health``.
+
+        Two paths for one fact, because the container healthcheck and every reverse
+        proxy config in the wild expect different names, and "which one is it" is not
+        a question an operator should answer by reading the source.
+        """
+        return await health()
+
+    @app.get("/readyz", tags=["system"])
+    async def readyz() -> JSONResponse:
+        """Readiness: can this process do its job right now?
+
+        Deliberately narrower than ``/api/runtime``. A readiness probe that fails
+        because a QQ account is offline would pull the console out of a load balancer
+        precisely when the operator needs it to investigate.
+
+        What is checked is what makes the process useless: the data directory cannot be
+        written (SQLite writes through it, so a full disk or a read-only mount shows up
+        here first), or the runtime was asked for and failed to build.
+        """
+        problems: list[str] = []
+
+        from soapbot.config import settings as live_settings
+
+        data_dir = Path(live_settings.data_dir)
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            probe = data_dir / f".readyz-{os.getpid()}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+        except OSError as exc:
+            problems.append(f"data directory not writable: {exc}")
+
+        runtime = get_runtime()
+        if live_settings.enable_runtime and runtime is None:
+            problems.append("runtime was requested but is not built")
+        if runtime is not None and not getattr(runtime, "_running", False):
+            problems.append("runtime is built but not running")
+
+        errors = get_startup_errors()
+        if errors:
+            # Startup errors are warnings by policy (a missing adapter must not stop
+            # the process), so they are reported without failing readiness.
+            logger.debug("readiness note: %d startup errors", len(errors))
+
+        payload = {
+            "status": "ok" if not problems else "unavailable",
+            "version": __version__,
+            "data_dir": str(data_dir),
+            "problems": problems,
+            "startup_errors": errors,
+        }
+        return JSONResponse(payload, status_code=200 if not problems else 503)
 
     app.include_router(auth_router)
     app.include_router(security_router)
