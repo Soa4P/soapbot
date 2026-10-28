@@ -260,6 +260,29 @@ class NullLedger:
 _CHILD_BOOTSTRAP = r'''
 import asyncio, importlib.util, inspect, json, os, sys
 
+class _HostPackageBlocker:
+    """Refuse to import the host package inside a plugin process.
+
+    ``-I`` drops PYTHON* variables and the *user* site directory, but it keeps the
+    interpreter's own site-packages on sys.path. The host package is installed there
+    in every real deployment (the Dockerfile does ``pip install``), so ``import
+    soapbot`` succeeded in the child and the guarantee in docs/plugin-isolation.md
+    only held on a machine where the package was *not* installed. Measured on Linux
+    CI, where ``pip install -e .`` made that test fail; it passed locally for the
+    wrong reason.
+
+    A meta path finder is the narrow fix: third-party libraries stay importable
+    (plugins legitimately use httpx), only the host namespace is refused.
+    """
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "soapbot" or name.startswith("soapbot."):
+            raise ImportError("plugin processes may not import " + name)
+        return None
+
+
+sys.meta_path.insert(0, _HostPackageBlocker())
+
 def _send(msg):
     data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
     sys.stdout.buffer.write(len(data).to_bytes(4, "big"))
