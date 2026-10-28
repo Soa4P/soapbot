@@ -39,6 +39,7 @@ class BotRuntime:
         providers=None,
         bilibili=None,
         traces=None,
+        mcp=None,
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
         self.pipeline = pipeline or Pipeline()
@@ -69,6 +70,14 @@ class BotRuntime:
         ``None`` when a runtime was assembled by hand (some tests build a bare
         ``Pipeline``); the trace endpoints answer 503 in that case rather than
         fabricating an empty history that reads as "nothing has happened".
+        """
+
+        self.mcp = mcp
+        """Optional :class:`soapbot.mcp.client.McpManager`.
+
+        Held by the runtime rather than by the tool registry alone because MCP servers
+        are child processes: their lifetime has to follow the bot's, otherwise a
+        restart leaves orphans holding ports and file handles.
         """
 
         self.bilibili = bilibili
@@ -104,6 +113,14 @@ class BotRuntime:
     async def start(self) -> None:
         self._running = True
         self.metrics["started_at"] = time.time()
+        if self.mcp is not None:
+            try:
+                await self.mcp.ensure_tools()
+            except Exception as exc:
+                # A broken MCP server must not stop the bot: the chat works without
+                # external tools, and a process that refuses to start because an
+                # optional integration is down is worse than one that starts degraded.
+                logger.error("mcp tool discovery failed: %s", exc)
         for adapter in self.adapters.values():
             try:
                 await adapter.start()
@@ -114,6 +131,9 @@ class BotRuntime:
 
     async def stop(self) -> None:
         self._running = False
+        if self.mcp is not None:
+            with contextlib.suppress(Exception):
+                await self.mcp.close()
         for adapter in self.adapters.values():
             try:
                 await adapter.stop()

@@ -115,6 +115,21 @@ async def runtime_status(_: dict = Depends(require_api_auth)) -> dict:
     }
 
 
+@router.get("/mcp")
+async def mcp_status(_: dict = Depends(require_api_auth)) -> dict:
+    """External tool sources: which servers are configured, how many tools each.
+
+    A server that failed to start is listed with its error rather than omitted. "This
+    server has no tools" and "this server crashed" are the same empty list otherwise,
+    and they call for opposite fixes.
+    """
+    runtime = _runtime()
+    manager = getattr(runtime, "mcp", None)
+    if manager is None:
+        return {"configured": False, "servers": [], "tools": 0}
+    return {"configured": True, **manager.status()}
+
+
 @router.get("/adapters")
 async def list_adapters(_: dict = Depends(require_api_auth)) -> dict:
     """Configured adapters with live connection health."""
