@@ -112,11 +112,12 @@ export const api = {
    * Install a plugin package. The server answers `approved: false` on purpose — the
    * caller must send the operator to the approval flow, never assume it is live.
    */
-  installPlugin: (file: File) => {
-    const form = new FormData()
-    form.append('file', file)
-    return request<any>('/api/plugins/install', { method: 'POST', body: form })
-  },
+  installPlugin: (file: File) =>
+    request<any>('/api/plugins/install', {
+      method: 'POST',
+      body: file,
+      headers: { 'Content-Type': 'application/zip' },
+    }),
   pluginErrors: (name: string) => request<any>(`/api/plugins/${encodeURIComponent(name)}/errors`),
   loadPlugin: (name: string) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}/load`, { method: 'POST' }),

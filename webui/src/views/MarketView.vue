@@ -76,7 +76,7 @@ function onDrop(event: DragEvent): void {
   if (file) void upload(file)
 }
 
-function open(plugin: any): void {
+function openPlugins(): void {
   // Approval lives on the plugin page; sending the operator there is the point of
   // the second action, not a convenience.
   void router.push({ name: 'plugins' })
@@ -195,7 +195,7 @@ function open(plugin: any): void {
             <i class="dot" />{{ plugin.loaded ? '运行中' : '未加载' }}
           </span>
           <span class="strip__spacer" />
-          <button class="btn ghost" @click="open(plugin)">
+          <button class="btn ghost" @click="openPlugins()">
             {{ plugin.approved ? '查看' : '去批准' }}
           </button>
         </div>

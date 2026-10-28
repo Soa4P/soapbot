@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,8 @@ def _manager():
 
 
 @router.post("/install")
-async def install_plugin(request: Request, file: UploadFile = File(...)) -> dict:
-    """Upload a plugin package. **This does not approve it.**
+async def install_plugin(request: Request) -> dict:
+    """Upload a plugin package as the raw request body. **This does not approve it.**
 
     The security model keys on the manifest digest and on an explicit, per-capability
     grant. If installation also approved the plugin, uploading a file would be the
@@ -69,15 +69,30 @@ async def install_plugin(request: Request, file: UploadFile = File(...)) -> dict
     this endpoint stops at "the bytes are on disk and discovered", and the response
     says ``approved: false`` so a caller cannot mistake one for the other.
 
+    The body is the archive itself, not multipart: FastAPI's ``UploadFile`` requires
+    ``python-multipart``, and adding a parser (plus a dependency that must be present
+    in the image or the app fails at import) to accept one file is a poor trade. The
+    plugin's name comes from its manifest, so the multipart filename carried no
+    information anyway.
+
     The caller is expected to send the operator to ``POST /{name}/approve`` next; the
     console does exactly that.
     """
     _authorize(request)
     from soapbot.plugins.installer import MAX_ARCHIVE_BYTES, InstallError, install_from_zip
 
-    # Read one byte past the limit so an oversized upload is rejected by size rather
-    # than silently truncated into a malformed archive.
-    payload = await file.read(MAX_ARCHIVE_BYTES + 1)
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_ARCHIVE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"archive is larger than {MAX_ARCHIVE_BYTES // 1024} KiB",
+                )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid content-length") from None
+
+    payload = await request.body()
     manager = _manager()
     loader = manager.loader
     try:
@@ -87,14 +102,10 @@ async def install_plugin(request: Request, file: UploadFile = File(...)) -> dict
             host_version=loader.host_version,
         )
     except InstallError as exc:
-        logger.warning("plugin install rejected name=%s: %s", file.filename, exc)
+        logger.warning("plugin install rejected: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    logger.info(
-        "plugin uploaded name=%s actor=remote sender=%s",
-        result.name,
-        file.filename,
-    )
+    logger.info("plugin uploaded name=%s bytes=%d", result.name, len(payload))
     return result.to_dict()
 
 

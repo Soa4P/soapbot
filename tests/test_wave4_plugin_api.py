@@ -188,7 +188,8 @@ def test_upload_installs_but_does_not_approve(client: TestClient) -> None:
     """If upload approved, uploading a file would be the whole attack."""
     response = client.post(
         "/api/plugins/install",
-        files={"file": ("uploaded.zip", _package(), "application/zip")},
+        content=_package(),
+        headers={"Content-Type": "application/zip"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -205,7 +206,8 @@ def test_upload_installs_but_does_not_approve(client: TestClient) -> None:
 def test_upload_rejects_traversal_with_a_readable_reason(client: TestClient) -> None:
     response = client.post(
         "/api/plugins/install",
-        files={"file": ("evil.zip", _package({"../evil.py": "x"}), "application/zip")},
+        content=_package({"../evil.py": "x"}),
+        headers={"Content-Type": "application/zip"},
     )
     assert response.status_code == 400
     assert "traversal" in response.json()["detail"] or "escapes" in response.json()["detail"]
@@ -214,6 +216,7 @@ def test_upload_rejects_traversal_with_a_readable_reason(client: TestClient) -> 
 def test_upload_rejects_a_non_zip(client: TestClient) -> None:
     response = client.post(
         "/api/plugins/install",
-        files={"file": ("notes.txt", b"not a zip", "text/plain")},
+        content=b"not a zip",
+        headers={"Content-Type": "application/zip"},
     )
     assert response.status_code == 400
