@@ -1,0 +1,125 @@
+# Hardened deployment profile.
+#
+# Every control here exists because a plugin process is *untrusted code* that shares
+# the kernel with the bot. Process isolation (see src/soapbot/plugins/supervisor.py)
+# gives containment inside one host; these settings give containment between the
+# host and everything else.
+#
+# Read the comments: several settings are deliberate trade-offs, and relaxing them
+# without understanding which attack they close is how the guarantees erode.
+
+services:
+  soapbot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: soapbot:hardened
+    restart: unless-stopped
+
+    # ---- privilege -------------------------------------------------------------
+    user: "10001:10001"
+    # Drop every capability. The bot needs none: it binds a high port, does not
+    # configure the network, and does not change file ownership.
+    cap_drop:
+      - ALL
+    # no-new-privileges blocks setuid binaries from raising privileges. Without it,
+    # any setuid binary incidentally present in the image is a local root path.
+    security_opt:
+      - no-new-privileges:true
+      # seccomp default profile blocks ~44 dangerous syscalls (ptrace, mount,
+      # bpf, ...). A plugin that tries to escape the interpreter usually needs one
+      # of these, so this is the layer that turns "a Python bug" into "a crash".
+      - seccomp:default
+    # A writable root filesystem lets a compromised dependency drop a payload that
+    # survives a container restart. The app writes only to /data and /tmp.
+    read_only: true
+    tmpfs:
+      # noexec/nosuid: a plugin that writes a binary to /tmp cannot run it.
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+
+    # ---- resources -------------------------------------------------------------
+    # Bounds the blast radius of a fork bomb or a memory leak. The per-worker rlimit
+    # is a second, finer bound; this one protects the host if a worker somehow
+    # escapes its own limits.
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 256
+    cpus: "2.0"
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+
+    # ---- network ---------------------------------------------------------------
+    # Publish on loopback only. The control API manages plugins and capabilities and
+    # now requires a signed token for non-loopback clients — but a loopback publish
+    # still means "only reachable from this host", which is the narrower default.
+    # If remote access is genuinely needed: keep the token flow, and terminate TLS in
+    # a reverse proxy that also strips any client-supplied Authorization header it
+    # does not vouch for.
+    ports:
+      - "127.0.0.1:6185:6185"
+
+    # ---- configuration ---------------------------------------------------------
+    # Mounted read-only. A plugin that can rewrite adapters.yaml could redirect the
+    # bot's protocol connection on the next restart, which is persistence without
+    # touching the plugin directory.
+    #
+    # ---- secrets ---------------------------------------------------------------
+    # The master key is mounted as a *file*, never passed as an environment
+    # variable. Env vars are readable via `docker inspect`, /proc/<pid>/environ and
+    # crash dumps; a file mode 0400 is not.
+    #
+    # The bootstrap token is *not* mounted or set here. It is generated on first start
+    # into /data/init_token.txt (mode 0600) and consumed by the first login — a
+    # credential in an environment variable would be readable from `docker inspect`
+    # for the life of the container.
+    volumes:
+      - soapbot-data:/data
+      - ../config:/app/config:ro
+    environment:
+      SOAPBOT_DATA_DIR: /data
+      # 0.0.0.0 inside the container is required, not a weakening: a port mapping
+      # targets the container's eth0, so binding the container's own loopback would
+      # make `ports:` below connect to nothing. The isolation comes from publishing on
+      # the *host* loopback (127.0.0.1:6185), which is the line below `ports:`.
+      SOAPBOT_HOST: 0.0.0.0
+      SOAPBOT_CONFIG_DIR: /app/config
+      # The master key is delivered as a file path only when one is mounted. Left
+      # commented out on purpose: a `- ./secrets/master.key:/run/secrets/master_key:ro`
+      # line whose source does not exist does not fail the start — Docker creates an
+      # empty *directory* at that path, the app fails to read it, and (by design in
+      # builder.py) plugin secrets silently fall back to plaintext while the container
+      # reports healthy.
+      #
+      # To enable file-based secrets:
+      #   1. mkdir -p deploy/secrets
+      #   2. python -c "from cryptography.fernet import Fernet; \
+      #        open('deploy/secrets/master.key','w').write(Fernet.generate_key().decode())"
+      #   3. chmod 0400 deploy/secrets/master.key
+      #   4. uncomment the volume line and the SOAPBOT_MASTER_KEY_FILE line below
+      # Until then the key is generated into /data/secret.key on first start, which is
+      # inside the data volume and therefore persistent — weaker than a separate file,
+      # but correct rather than silently plaintext.
+      # SOAPBOT_MASTER_KEY_FILE: /run/secrets/master_key
+
+    healthcheck:
+      # Only checks that the process answers, not that it is healthy in a business
+      # sense — a plugin crash loop should not restart the whole bot.
+      test: ["CMD", "python", "-c", "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',6185))==0 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      # Unbounded logs on a read-only rootfs fill the host disk, which is a
+      # denial-of-service against every other service on the machine.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  soapbot-data:
+    driver: local

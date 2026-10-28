@@ -1,0 +1,33 @@
+# Normalise line endings so a Windows clone and a Linux deploy produce the same bytes.
+#
+# Why this file exists: without it, `git add` on Windows stores CRLF for text files, and
+# Git then warns "LF will be replaced by CRLF". Two concrete failures follow:
+#   * `Makefile` with CRLF makes GNU make abort with "missing separator" on the server —
+#     the tab is fine but the trailing CR is not. This project's deploy path runs make.
+#   * Shell scripts with CRLF fail with `/usr/bin/env: 'bash\r': No such file or directory`.
+# Setting `eol=lf` for both keeps the repository canonical and the checkout correct on
+# Linux, while Windows tooling still handles LF fine.
+
+* text=auto eol=lf
+
+# Batch/PowerShell on Windows genuinely need CRLF to behave well in legacy consoles.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Never touch binaries: a "text" transform on an image or a wheel corrupts it silently.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.whl   binary
+*.zip   binary
+*.gz    binary
+
+# Lockfiles: generated, large diffs are noise, but they must stay in the repo for
+# reproducible installs. Marking them as generated keeps `git diff` readable.
+package-lock.json  linguist-generated=true -diff

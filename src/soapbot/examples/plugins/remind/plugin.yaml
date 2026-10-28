@@ -1,0 +1,25 @@
+name: remind
+version: 1.0.0
+entry: main:RemindPlugin
+description: 查询本群记忆与知识库（只读）
+author: soapbot
+trust: trusted
+min_host_version: 0.1.0
+
+# Three capabilities, three different risks — declared separately so the operator
+# can grant them one at a time and see each on its own in the UI:
+#
+#   memory_read -> reads what group members said. Sensitive: it is other people's
+#                  data, and recall returns text an attacker typed.
+#   session     -> which group/user is asking. Lower risk, but it is reconnaissance,
+#                  so it is not bundled silently into memory_read.
+#   kb_read     -> operator-uploaded documents. Usually internal material, so the
+#                  tightest quota of the three.
+#
+# A plugin that only needs one of these should declare only that one; the host
+# refuses capabilities that were never declared even if the operator grants them.
+capabilities:
+  - command
+  - memory_read
+  - session
+  - kb_read

@@ -1,0 +1,63 @@
+# Build context exclusions.
+#
+# Two of these are not about speed:
+#
+# `data/` holds the runtime SQLite database, the Fernet key, the bootstrap token and
+# uploaded files. Docker copies the whole context to the daemon before the build starts,
+# and anything COPYed lands in an image layer — so leaving it in means a key file can be
+# recovered from a layer even if a later stage deletes it.
+#
+# `.venv/` and `node_modules/` are hundreds of megabytes that would be transferred on
+# every build and then never used: the image installs its own dependencies.
+#
+# `config/` is NOT excluded. The Dockerfile copies it deliberately (a container started
+# without it had no adapters at all — see the comment in deploy/Dockerfile).
+
+# --- runtime state that must never enter an image layer
+data/
+logs/
+uploads/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.key
+*.pem
+secret.key
+init_token.txt
+jwt.key
+cookies.txt
+.env
+.env.*
+
+# --- tooling caches and environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+node_modules/
+webui/node_modules/
+webui/.vite/
+src/webui/dist/
+
+# --- build outputs of the host (the image builds its own)
+dist/
+build/
+dist_check/
+
+# --- not needed to build the wheel
+tests/
+docs/
+.github/
+scripts/
+plugins/
+Makefile
+*.md
+!README.md
+.codebuddy/
+.git/
+.gitignore

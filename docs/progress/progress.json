@@ -1,0 +1,437 @@
+{
+  "title": "soapbot 完整化路线",
+  "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
+  "updated_at": "2026-10-28T23:20:00+08:00",
+  "current": {
+    "phase": "ph1",
+    "task": "ph1-t6",
+    "step": "阶段 1 代码侧完成并验证；首次提交待确认 git 身份"
+  },
+  "phases": [
+    {
+      "id": "ph1",
+      "index": "01",
+      "name": "交付阻断解除",
+      "goal": "让仓库可交付：分支与 CI 对齐、清理残留、类型标记、token 子命令、社区文件",
+      "tasks": [
+        {
+          "id": "ph1-t1",
+          "name": "CI 分支对齐与检查补全",
+          "status": "done",
+          "note": "CI 原只在 main 触发而实际分支是 master，等于 800 项测试没有执行点；同时把 contrast 与 deploy-check 补进 CI，使其与 make check 一致",
+          "files": [
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph1-t2",
+          "name": "清理残留与忽略规则",
+          "status": "done",
+          "note": "移除空 plugins/ 与 dist/；dist_check/ 与 secrets/ 补进 .gitignore",
+          "files": [
+            {
+              "path": ".gitignore",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph1-t3",
+          "name": "soapbot token 子命令",
+          "status": "done",
+          "note": "文档已承诺但解析器未注册。实现后 5 项测试；令牌是一次性凭据，消费后文件仍留在磁盘，因此命令必须说明这一点，否则用户会拿着死令牌去登录",
+          "files": [
+            {
+              "path": "src/soapbot/cli.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_cli_token.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph1-t4",
+          "name": "类型标记",
+          "status": "done",
+          "note": "PEP 561 py.typed，hatchling 随 wheel 打包，下游可做类型检查",
+          "files": [
+            {
+              "path": "src/soapbot/py.typed",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph1-t5",
+          "name": "社区与协作文件",
+          "status": "done",
+          "note": "CONTRIBUTING / SECURITY / UPDATING / .editorconfig / pre-commit",
+          "files": [
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "SECURITY.md",
+              "status": "done"
+            },
+            {
+              "path": "UPDATING.md",
+              "status": "done"
+            },
+            {
+              "path": ".editorconfig",
+              "status": "done"
+            },
+            {
+              "path": ".pre-commit-config.yaml",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph1-t6",
+          "name": "首次提交",
+          "status": "todo",
+          "note": "本机 git 无 user.name/user.email；改 git config 需用户确认。工作区已就绪，差一个身份与一次 commit",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph2",
+      "index": "02",
+      "name": "流式输出贯通",
+      "goal": "Provider 流式 → 句子聚合 → 分句渐进发送，首包延迟有上界",
+      "tasks": [
+        {
+          "id": "ph2-t1",
+          "name": "句子聚合器",
+          "status": "todo",
+          "note": "ai/streaming.py：标点/长度/首包超时三阈值，纯函数可单测",
+          "files": []
+        },
+        {
+          "id": "ph2-t2",
+          "name": "Provider 契约补 stream",
+          "status": "todo",
+          "note": "BaseProvider.stream 默认回退到一次 chat，使「声明了但未实现」不可能发生",
+          "files": []
+        },
+        {
+          "id": "ph2-t3",
+          "name": "ModelStage 流式分支",
+          "status": "todo",
+          "note": "仅最后一轮且无 tool_calls 时启用，避免与工具循环纠缠",
+          "files": []
+        },
+        {
+          "id": "ph2-t4",
+          "name": "ReplyStage 分句发送",
+          "status": "todo",
+          "note": "复用 core/ratelimit；适配器不支持分段时退化为单条",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph3",
+      "index": "03",
+      "name": "插件市场",
+      "goal": "上传即安装，安装不等于批准",
+      "tasks": [
+        {
+          "id": "ph3-t1",
+          "name": "installer 六类攻击防护",
+          "status": "todo",
+          "note": "zip slip / 压缩炸弹 / 多插件包 / 路径歧义 / digest 伪造 / 越界符号链接",
+          "files": []
+        },
+        {
+          "id": "ph3-t2",
+          "name": "install 路由",
+          "status": "todo",
+          "note": "只落地文件，不写批准记录——否则安装即提权",
+          "files": []
+        },
+        {
+          "id": "ph3-t3",
+          "name": "11 页插件市场",
+          "status": "todo",
+          "note": "",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph4",
+      "index": "04",
+      "name": "MCP 客户端",
+      "goal": "外部工具与插件工具汇入同一张表、同一次过滤",
+      "tasks": [
+        {
+          "id": "ph4-t1",
+          "name": "MCP 连接与握手",
+          "status": "todo",
+          "note": "stdio，只允许 config/mcp.yaml 显式声明的命令",
+          "files": []
+        },
+        {
+          "id": "ph4-t2",
+          "name": "汇入 PluginToolRegistry",
+          "status": "todo",
+          "note": "wiring 测试断言越权角色看不到 MCP 工具",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph5",
+      "index": "05",
+      "name": "语音",
+      "goal": "入站转写参与对话，出站按配置合成，不支持时降级",
+      "tasks": [
+        {
+          "id": "ph5-t1",
+          "name": "STT 经 Provider transcribe",
+          "status": "todo",
+          "note": "不引本地模型；SegmentType.RECORD 与 Capability.RECORD 早已预留但无人使用",
+          "files": []
+        },
+        {
+          "id": "ph5-t2",
+          "name": "TTS 可选依赖",
+          "status": "todo",
+          "note": "[voice] 组；缺依赖时报明确错误而非静默",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph6",
+      "index": "06",
+      "name": "多语言",
+      "goal": "界面与对外文案双语，日志保持英文",
+      "tasks": [
+        {
+          "id": "ph6-t1",
+          "name": "后端 gettext + JSON 目录",
+          "status": "todo",
+          "note": "只翻译面向使用者的文案；日志是运维搜索用的，翻译会破坏 grep",
+          "files": []
+        },
+        {
+          "id": "ph6-t2",
+          "name": "前端 t() 与 12 页系统设置",
+          "status": "todo",
+          "note": "",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph7",
+      "index": "07",
+      "name": "可运维面",
+      "goal": "探活、迁移、备份恢复可演练",
+      "tasks": [
+        {
+          "id": "ph7-t1",
+          "name": "healthz / readyz",
+          "status": "todo",
+          "note": "/readyz 需在 DB 不可写时返回非 200",
+          "files": []
+        },
+        {
+          "id": "ph7-t2",
+          "name": "soapbot migrate + 顺序迁移",
+          "status": "todo",
+          "note": "UPDATING.md 已承诺该命令，必须真实存在——否则重蹈 soapbot token 的覆辙",
+          "files": []
+        },
+        {
+          "id": "ph7-t3",
+          "name": "backup / restore 脚本",
+          "status": "todo",
+          "note": "UPDATING.md 已引用 scripts/backup.py 与 restore.py；判据是备份→清空→恢复后数据一致",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph8",
+      "index": "08",
+      "name": "评估报告 v2 与回归",
+      "goal": "新报告反映当前状态；旧报告保留为历史",
+      "tasks": [
+        {
+          "id": "ph8-t1",
+          "name": "delivery-readiness-v2.md",
+          "status": "todo",
+          "note": "旧报告顶部已声明不随后续改动重写，因此新开一份而非改数字",
+          "files": []
+        },
+        {
+          "id": "ph8-t2",
+          "name": "全新 venv 安装实测",
+          "status": "done",
+          "note": "已实测：%TEMP%\\soapvenv 干净环境 pip install . 成功；soapbot version 正常；create_app() 14 路由；面板产物随包；实际启动后 /api/health 返回 200、面板 JS 119910 字节正常",
+          "files": []
+        }
+      ]
+    },
+    {
+      "id": "ph9",
+      "index": "09",
+      "name": "容器部署",
+      "goal": "静态检查通过；实测待云服务器",
+      "tasks": [
+        {
+          "id": "ph9-t1",
+          "name": "部署配置静态检查",
+          "status": "done",
+          "note": "抓出并修掉 2 个会导致 compose up 直接失败的阻断：① 容器内绑 127.0.0.1 却声明 ports；② secrets/master.key 挂载源不存在（被 gitignore，Docker 会建空目录→读目录当密钥→静默退化为明文）。14 项检查 + 11 项测试，并用变异测试证明测试有效",
+          "files": [
+            {
+              "path": "scripts/check_deploy.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_deploy_config.py",
+              "status": "done"
+            },
+            {
+              "path": "deploy/docker-compose.yml",
+              "status": "done"
+            },
+            {
+              "path": "deploy/Dockerfile",
+              "status": "done"
+            },
+            {
+              "path": ".dockerignore",
+              "status": "done"
+            },
+            {
+              "path": "deploy/daemon-mirror.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph9-t2",
+          "name": "容器实测",
+          "status": "todo",
+          "note": "本机 Docker 装不上：winget 下载与校验成功但安装需 UAC 提权，退出码 4294967291；账户 IsAdmin=False；无 WSL 发行版；VirtualizationFirmwareEnabled=False；家庭版无 Hyper-V。待云服务器",
+          "files": []
+        }
+      ]
+    }
+  ],
+  "archive": [
+    {
+      "id": "a1",
+      "index": "A1",
+      "name": "开发进度看板",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a1-t1",
+          "name": "board 页面与数据",
+          "status": "done"
+        },
+        {
+          "id": "a1-t2",
+          "name": "陈旧检测与显式失败",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "a2",
+      "index": "A2",
+      "name": "浅色地基与可访问性",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a2-t1",
+          "name": "token 重写与 8 页换肤",
+          "status": "done"
+        },
+        {
+          "id": "a2-t2",
+          "name": "check_contrast.py 与 14 组色对",
+          "status": "done"
+        },
+        {
+          "id": "a2-t3",
+          "name": "焦点陷阱、确认框、表格语义",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "a3",
+      "index": "A3",
+      "name": "配置写入与审计",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a3-t1",
+          "name": "字段级 patch 与密钥哨兵",
+          "status": "done"
+        },
+        {
+          "id": "a3-t2",
+          "name": "读→diff→apply 三步与 409",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "a4",
+      "index": "A4",
+      "name": "追踪层与 09/10 页",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a4-t1",
+          "name": "trace.py 环形缓冲与接线",
+          "status": "done"
+        },
+        {
+          "id": "a4-t2",
+          "name": "手写 SVG 图表与 StageGraph",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "a5",
+      "index": "A5",
+      "name": "07 页可视化编辑",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a5-t1",
+          "name": "表格编辑与 diff 确认",
+          "status": "done"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "pytest": "815 passed, 4 skipped",
+    "ruff": "All checks passed",
+    "contrast": "PASS（14 组色对）",
+    "deploy_check": "0 阻断 / 0 告警 / 14 通过",
+    "deps": "依赖清单一致",
+    "clean_venv": "pip install . 成功并实际启动，/api/health 200",
+    "docker_runtime": "未验证（本机无 Docker，装不上）"
+  }
+}

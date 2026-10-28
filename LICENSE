@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 soapbot contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+Note on third-party projects
+
+soapbot's layering (adapter / provider / pipeline / plugin) was informed by
+reading AstrBot <https://github.com/AstrBotDevs/AstrBot> (AGPL-3.0). No AstrBot
+source code is included here, and none of its files were copied or adapted:
+this repository was written from the architectural description, and the code,
+identifiers and comments are original. The layering idea itself is not
+copyrightable, but the distinction matters to anyone auditing the licence, so
+it is stated here rather than left to inference.
+
+If AstrBot code is ever vendored into this project, this notice is not enough:
+that code would carry AGPL-3.0 and force this project's distribution terms to
+change. See docs/architecture.md, section "Relationship to AstrBot".

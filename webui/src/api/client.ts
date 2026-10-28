@@ -1,0 +1,329 @@
+/**
+ * Thin fetch wrapper.
+ *
+ * Two deliberate choices:
+ *
+ * 1. **The token lives in localStorage, not a cookie.** The API is same-origin but a
+ *    cookie would be attached by the browser to *any* cross-site request aimed at it,
+ *    which is the CSRF shape the backend's Origin check exists to defend against. A
+ *    header cannot be forged cross-origin without CORS, so it is the narrower choice
+ *    for an admin surface.
+ * 2. **A 401 clears the token and raises an event.** Silently retrying or rendering an
+ *    empty page would make an expired session look like an empty system.
+ */
+
+const TOKEN_KEY = 'soapbot.token'
+export const UNAUTHORIZED_EVENT = 'soapbot:unauthorized'
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* private mode: the session simply will not survive a reload */
+  }
+}
+
+export function clearToken(): void {
+  setToken('')
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  let response: Response
+  try {
+    response = await fetch(path, { ...init, headers })
+  } catch (err) {
+    // fetch only rejects on transport failure, and the message it gives ("Failed to
+    // fetch") is useless to an operator looking at a blank panel.
+    throw new ApiError(0, `无法连接到服务（${(err as Error).message}）`)
+  }
+
+  if (response.status === 401) {
+    clearToken()
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+  }
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`
+    try {
+      const body = await response.json()
+      if (typeof body?.detail === 'string') detail = body.detail
+      else if (Array.isArray(body?.detail)) detail = body.detail.map((d: any) => d.msg).join('; ')
+    } catch {
+      /* non-JSON error body: keep the status line */
+    }
+    throw new ApiError(response.status, detail)
+  }
+
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
+
+export const api = {
+  authStatus: () => request<AuthStatus>('/api/auth/status'),
+  login: (initToken: string) =>
+    request<LoginResult>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ init_token: initToken }),
+    }),
+
+  runtime: () => request<any>('/api/runtime'),
+  adapters: () => request<any>('/api/adapters'),
+  providers: () => request<any>('/api/providers'),
+  personas: () => request<any>('/api/personas'),
+  access: () => request<any>('/api/access'),
+  logs: (params: { limit?: number; level?: string; contains?: string } = {}) => {
+    const query = new URLSearchParams()
+    if (params.limit) query.set('limit', String(params.limit))
+    if (params.level) query.set('level', params.level)
+    if (params.contains) query.set('contains', params.contains)
+    return request<any>(`/api/logs?${query.toString()}`)
+  },
+
+  plugins: () => request<any>('/api/plugins'),
+  pluginErrors: (name: string) => request<any>(`/api/plugins/${encodeURIComponent(name)}/errors`),
+  loadPlugin: (name: string) =>
+    request<any>(`/api/plugins/${encodeURIComponent(name)}/load`, { method: 'POST' }),
+  unloadPlugin: (name: string) =>
+    request<any>(`/api/plugins/${encodeURIComponent(name)}/unload`, { method: 'POST' }),
+  approvePlugin: (name: string, capabilities: string[]) =>
+    request<any>(`/api/plugins/${encodeURIComponent(name)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ capabilities }),
+    }),
+  // Revoke is separate from unload on purpose: "do not start this again" and
+  // "stop this now" are different decisions, and a single button would make the
+  // dangerous one (permanent) look like the safe one (reversible).
+  revokePlugin: (name: string) =>
+    request<any>(`/api/plugins/${encodeURIComponent(name)}/revoke`, { method: 'POST' }),
+  deletePlugin: (name: string) =>
+    request<any>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  audit: (limit = 100, kind = '') =>
+    request<any>(`/api/security/audit?limit=${limit}&kind=${encodeURIComponent(kind)}`),
+  denials: (limit = 100) => request<any>(`/api/security/denials?limit=${limit}`),
+
+  memorySessions: (limit = 50) => request<any>(`/api/memory/sessions?limit=${limit}`),
+  memoryTimeline: (sessionKey: string, limit = 50) =>
+    request<any>(
+      `/api/memory/timeline?session_key=${encodeURIComponent(sessionKey)}&limit=${limit}`,
+    ),
+  memoryStats: () => request<any>('/api/memory/stats'),
+  knowledge: () => request<any>('/api/knowledge'),
+  knowledgeDetail: (docId: string) =>
+    request<any>(`/api/knowledge/${encodeURIComponent(docId)}`),
+  // Server-side fingerprinting picks the doc id when `doc_id` is omitted, and the
+  // response says whether it replaced an existing document — the operator needs to
+  // know they overwrote something, not just that the upload succeeded.
+  ingestKnowledge: (payload: { title: string; content: string; doc_id?: string }) =>
+    request<any>('/api/knowledge', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteKnowledge: (docId: string) =>
+    request<any>(`/api/knowledge/${encodeURIComponent(docId)}`, { method: 'DELETE' }),
+
+  budget: (params: { status?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.status) query.set('status', params.status)
+    query.set('limit', String(params.limit ?? 100))
+    return request<any>(`/api/budget?${query.toString()}`)
+  },
+  bilibili: () => request<any>('/api/bilibili'),
+
+  // --- pipeline: read-only topology, traces and metrics ---------------------
+  //
+  // Reordering is intentionally absent. The stage order is the security model, so the
+  // only "reorder" call is the sandbox check, which writes nothing.
+  pipelineTopology: () => request<PipelineTopology>('/api/pipeline/topology'),
+  pipelineTraces: (limit = 50) => request<TraceResponse>(`/api/pipeline/traces?limit=${limit}`),
+  pipelineTrace: (traceId: string) =>
+    request<MessageTrace>(`/api/pipeline/traces/${encodeURIComponent(traceId)}`),
+  pipelineMetrics: (limit = 720) =>
+    request<MetricsResponse>(`/api/pipeline/metrics?limit=${limit}`),
+  reorderCheck: (order: string[]) =>
+    request<ReorderCheck>('/api/pipeline/reorder-check', {
+      method: 'POST',
+      body: JSON.stringify({ order }),
+    }),
+
+  // --- config write: read -> diff -> apply ----------------------------------
+  //
+  // Three calls rather than one PUT: the operator approves a concrete diff, and the
+  // apply carries both the base hash (was the file still what we read?) and the
+  // approved hash (is this the diff they saw?). See api/config_write.py for why.
+  configProviders: () => request<ProvidersDocument>('/api/config/providers'),
+  configProvidersDiff: (payload: ProvidersPatch) =>
+    request<DiffResult>('/api/config/providers/diff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  configProvidersApply: (payload: ProvidersPatch & { approved_hash: string }) =>
+    request<ApplyResult>('/api/config/providers/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+}
+
+export interface AuthStatus {
+  mode: 'none' | 'token' | 'loopback' | 'invalid'
+  subject: string
+  expires_at: number
+  loopback: boolean
+  login_available: boolean
+  init_token_generated: boolean
+  ttl_seconds: number
+}
+
+export interface LoginResult {
+  access_token: string
+  token_type: string
+  expires_in: number
+  expires_at: number
+  role: string
+}
+
+export interface StageInfo {
+  name: string
+  label: string
+  order: number
+}
+
+export interface OrderConstraint {
+  before: string
+  after: string
+  why: string
+}
+
+export interface PipelineTopology {
+  stages: StageInfo[]
+  constraints: OrderConstraint[]
+  reorderable: boolean
+  note: string
+}
+
+export interface StageTiming {
+  name: string
+  elapsed_ms: number
+  order: number
+}
+
+export interface MessageTrace {
+  trace_id: string
+  ts: number
+  session_key: string
+  total_ms: number
+  halted: boolean
+  halt_reason: string
+  stages: StageTiming[]
+  slowest: { name: string; elapsed_ms: number } | null
+  extras?: Record<string, string | number | boolean>
+}
+
+export interface TraceSummary {
+  traces_kept: number
+  counters: { handled: number; halted: number; failed: number }
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+  historical: boolean
+  note: string
+}
+
+export interface TraceResponse {
+  traces: MessageTrace[]
+  summary: TraceSummary
+}
+
+export interface MetricSample {
+  ts: number
+  handled: number
+  halted: number
+  failed: number
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+}
+
+export interface MetricsResponse {
+  samples: MetricSample[]
+  summary: TraceSummary
+  interval_seconds: number
+}
+
+export interface ReorderCheck {
+  order: string[]
+  violations: OrderConstraint[]
+  safe: boolean
+  applies_to_runtime: boolean
+}
+
+export interface ProviderEntry {
+  id: string
+  kind?: string
+  label?: string
+  base_url?: string
+  api_key?: string
+  model?: string
+  embed_model?: string
+  vision_model?: string
+  timeout?: number
+  max_retries?: number
+  priority?: number
+  enabled?: boolean
+  [key: string]: unknown
+}
+
+export interface ProvidersDocument {
+  document: { providers?: ProviderEntry[]; [key: string]: unknown }
+  base_hash: string
+  path: string
+  mask: string
+  unchanged_sentinel: string
+  restart_required: boolean
+  hint: string
+}
+
+export interface ProvidersPatch {
+  base_hash: string
+  /** One entry per provider; only `id` is required, other fields are merged. */
+  providers: (Partial<ProviderEntry> & { id: string })[]
+}
+
+export interface DiffResult {
+  diff: string
+  changed_fields: string[]
+  base_hash: string
+  new_hash: string
+  empty: boolean
+}
+
+export interface ApplyResult {
+  written: boolean
+  changed_fields: string[]
+  base_hash?: string
+  restart_required?: boolean
+  reason?: string
+}

@@ -1,0 +1,42 @@
+# 模型 Provider 配置
+#
+# 本文件描述"进程启动时连接哪些模型端点"。它必须能被文本编辑器直接读懂：
+# 一个连不上协议端的机器人收不到让它自己被配置的那条消息。
+#
+# secrets 支持三种写法：
+#   api_key: sk-literal           # 字面量，仅建议本地实验使用
+#   api_key: env:DEEPSEEK_API_KEY # 从环境变量读取；变量未设置会在启动时报错
+#   api_key: enc:v1:gAAAAA...     # Fernet 密文，密钥见 data/secret.key
+#
+# 用 env: 时如果变量为空会直接启动失败，而不是带着空 key 运行——
+# 后者会把配置错误变成一串 401，并被归咎于上游服务商。
+#
+# priority 越小越先尝试；某个 Provider 连续失败 3 次会进入冷却期。
+
+providers: []
+# 示例（把下面的 providers: [] 替换掉）：
+#
+# providers:
+#   - id: deepseek
+#     kind: openai_compat          # openai_compat / anthropic / gemini / ollama
+#     label: DeepSeek
+#     base_url: https://api.deepseek.com/v1
+#     api_key: env:DEEPSEEK_API_KEY
+#     model: deepseek-chat
+#     priority: 10
+#
+#   - id: qwen-vision
+#     kind: openai_compat
+#     label: 通义千问（视觉）
+#     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+#     api_key: env:DASHSCOPE_API_KEY
+#     model: qwen-vl-max
+#     vision_model: qwen-vl-max
+#     priority: 20
+#
+#   - id: local-embed
+#     kind: ollama
+#     base_url: http://127.0.0.1:11434
+#     model: llama3.1
+#     embed_model: nomic-embed-text
+#     priority: 30

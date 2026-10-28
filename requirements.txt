@@ -1,0 +1,27 @@
+# Runtime dependencies, pinned.
+#
+# Kept in sync with pyproject.toml by hand only because some deployment targets
+# (bare `pip install -r`) still expect a flat file; `pyproject.toml` is the source
+# of truth and `make check-deps` fails if the two disagree.
+#
+# Removed from an earlier revision, with the reason each was never used:
+#   structlog        logging is stdlib + a bounded ring buffer (logging_setup.py)
+#   watchdog         plugin reload is an explicit API call, not a filesystem watch
+#   python-multipart no endpoint accepts multipart/form-data
+#   edge-tts         voice output was never implemented; declaring it advertised a
+#                    capability the project does not have
+fastapi==0.162.0
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0
+httpx==0.28.1
+websockets==14.1
+pyyaml==6.0.2
+pillow==13.0.0
+numpy==2.2.1
+pyjwt==2.15.1
+cryptography==50.0.2
+croniter==6.0.0
+apscheduler==3.11.0
