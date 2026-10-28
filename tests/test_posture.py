@@ -31,6 +31,30 @@ from soapbot.security.posture import (
     run_posture_checks,
 )
 
+#: Substrings the detector treats as secret-bearing, mirrored here so the tests can
+#: clear the environment the same way the check reads it.
+_SECRET_MARKERS = ("SECRET", "PASSWORD", "PASSWD", "TOKEN", "API_KEY", "APIKEY", "MASTER_KEY")
+
+
+@pytest.fixture(autouse=True)
+def _empty_secret_environment(monkeypatch):
+    """Run every test in this module against a known-empty secret environment.
+
+    ``check_secrets_in_env`` reads the *whole* ``os.environ``, and assertions here are
+    exact (a PASS verdict, a count of 12). A CI runner exports its own variables, and
+    some match the detector — ``ACTIONS_RUNTIME_TOKEN`` is the one that bit: four of
+    these tests went red on Windows for a reason unrelated to the code under test.
+
+    Stripping first keeps the assertion about the detector instead of about whoever
+    launched pytest. It does not weaken the check: the variables each test needs are
+    set by the test itself, and no test asserts on ambient state.
+    """
+    for key in list(os.environ):
+        if any(marker in key.upper() for marker in _SECRET_MARKERS):
+            monkeypatch.delenv(key, raising=False)
+    yield
+
+
 # ------------------------------------------------------------------ gate logic
 
 
