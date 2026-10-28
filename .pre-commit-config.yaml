@@ -1,0 +1,54 @@
+# Pre-commit hooks.
+#
+# Scope note: these run ruff and cheap file hygiene. They deliberately do NOT run the
+# test suite — a hook that takes 40 seconds gets disabled within a week, and a disabled
+# hook protects nothing. `make check` is the real gate, and CI runs it.
+#
+# Install:  pip install pre-commit && pre-commit install
+# Run all:  pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        # Markdown uses two trailing spaces as a hard line break; trailing-whitespace
+        # would silently join lines that were meant to break.
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+        # tsconfig.json in a fresh Vue scaffold permits comments; Vite's own configs do.
+        exclude: ^webui/(tsconfig.*\.json|\.vscode/)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # The built panel is committed on purpose, so chunks are legitimately a few
+        # hundred KB. 2 MB still catches an accidentally committed database or wheel.
+        args: [--maxkb=2048]
+      - id: check-case-conflict
+
+  - repo: local
+    hooks:
+      # The contrast check is a project-specific rule that a generic hook cannot cover,
+      # and a palette regression is the accessibility bug most likely to recur.
+      - id: contrast
+        name: WCAG contrast (base.css + board.css)
+        entry: python scripts/check_contrast.py
+        language: system
+        files: \.(css)$
+        pass_filenames: false
+
+      - id: deploy-config
+        name: container config static checks (no docker needed)
+        entry: python scripts/check_deploy.py
+        language: system
+        files: ^deploy/.*|^\.dockerignore$
+        pass_filenames: false

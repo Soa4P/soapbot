@@ -1,0 +1,189 @@
+name: ci
+
+# Three jobs, because they fail for different reasons and an operator reading a red
+# badge should not have to guess which one:
+#   backend  — does the code work
+#   frontend — does the panel build (a broken panel means `soapbot start` serves a
+#              "not built" page on a deployment that has no npm)
+#   package  — does the *wheel* contain what the tests tested
+#
+# The package job exists because of a measured defect: the built panel was inside a
+# gitignored directory, so the wheel shipped an app without a UI while every test
+# passed against the source tree.
+
+on:
+  push:
+    # `master` is the actual default branch of this repository. Listing only `main`
+    # meant the workflow never ran on a push at all — the badge would stay grey while
+    # 800 tests silently went unexecuted. Both names are kept so a future rename to
+    # `main` does not reintroduce the same dead badge.
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  SOAPBOT_ENABLE_RUNTIME: "false"
+
+jobs:
+  backend:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is in the matrix on purpose: the code has platform-specific
+        # branches (permission tightening, subprocess transport) that Linux CI
+        # cannot exercise, and the maintainer develops on Windows.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Dependency manifests agree
+        run: python scripts/check_deps.py
+
+      - name: Container config is consistent
+        # Runs on the CI runner, not on the maintainer's machine: this is the only
+        # place where the Linux-only assumptions (bind address reachability, read_only
+        # plus tmpfs) are checked against a Linux host. It still cannot start a
+        # container — there is no daemon here either — so it verifies configuration,
+        # not runtime. `docker build` happens on the deployment host.
+        run: python scripts/check_deploy.py
+
+      - name: Lint
+        run: python -m ruff check src tests
+
+      - name: Contrast
+        # `make check` runs this; CI must run the same set or the two gates disagree
+        # and the local one becomes decorative.
+        run: python scripts/check_contrast.py
+
+      # mypy is deliberately *not* a gate here. The baseline is 42 errors across 17
+      # files, and none of them are new: making the job fail would mean the first
+      # push to this repository is red, which teaches everyone to ignore the badge.
+      # Silencing them wholesale (ignore_errors per module) would be worse — it
+      # hides the next real error in the same file. The `types` job below reports
+      # the number and keeps it visible without blocking.
+      - name: Test
+        # No `data/` directory exists in a fresh checkout. That is the point: the
+        # suite must pass without it, which is exactly what used to fail.
+        run: python -m pytest -q
+
+  types:
+    # Advisory: reports the current type-error count so it cannot grow silently,
+    # without turning a pre-existing baseline into a red build. When the count
+    # reaches zero this job should become gating and move into `backend`.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Type check (advisory)
+        run: python -m mypy src
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Install
+        run: cd webui && (test -f package-lock.json && npm ci || npm install)
+
+      - name: Type check
+        run: cd webui && npm run typecheck
+
+      - name: Build panel
+        run: cd webui && npm run build
+
+  package:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build panel
+        run: cd webui && (test -f package-lock.json && npm ci || npm install) && npm run build
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Wheel contains the panel
+        # Checked against the *wheel*, not the source tree: hatchling selects files
+        # with VCS rules by default, and a gitignored build output is exactly what
+        # those rules drop.
+        run: |
+          python - <<'PY'
+          import sys, zipfile
+          from pathlib import Path
+          wheels = list(Path("dist").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          names = zipfile.ZipFile(wheels[0]).namelist()
+          required = [
+              "soapbot/webui/dist/index.html",
+              "soapbot/examples/plugins/echo/plugin.yaml",
+              "soapbot/examples/plugins/echo/main.py",
+          ]
+          missing = [r for r in required if not any(n.endswith(r) for n in names)]
+          if missing:
+              print("wheel is missing:", missing, file=sys.stderr)
+              sys.exit(1)
+          print(f"wheel ok: {len(names)} entries")
+          PY
+
+      - name: Wheel installs and serves the panel
+        run: |
+          python -m venv /tmp/wheelcheck
+          /tmp/wheelcheck/bin/pip install dist/*.whl
+          /tmp/wheelcheck/bin/python - <<'PY'
+          from soapbot.app import create_app
+          from soapbot.examples import bundled_plugins_dir
+          app = create_app()
+          assert bundled_plugins_dir().joinpath("echo", "plugin.yaml").is_file()
+          print("installed wheel builds an app:", len(app.routes), "routes")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: soapbot-wheel
+          path: dist/*.whl
+          retention-days: 7

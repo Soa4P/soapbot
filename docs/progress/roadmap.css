@@ -1,0 +1,452 @@
+/*
+ * Roadmap page styles. Shares tokens with board.css — no second palette.
+ *
+ * Layout choice: a vertical spine with numbered markers, not a horizontal pipeline
+ * with arrowheads. The content per stage is 3–6 lines of prose plus a gate; laid out
+ * horizontally it would either overflow or shrink to unreadable, and the reading order
+ * (each stage depends on the previous) is exactly top-to-bottom.
+ *
+ * The connector is drawn with a pseudo-element on the marker, so it disappears on the
+ * last item without a special class and never overhangs the container.
+ */
+
+/* ------------------------------------------------- shared utilities (missing) */
+
+/* roadmap.html reuses the console's vocabulary — .hint, .data, .mono,
+ * .visually-hidden — but board.css never defined them: the board itself does not
+ * need a data table or a caption. Declaring them here rather than in board.css keeps
+ * the board untouched while making the shared vocabulary honest. */
+.hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.data th,
+.data td {
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data thead th {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.data tbody th {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.data tbody tr:last-child th,
+.data tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Status pill — mirrors .pill in board.css, which carries the same four states.
+ * Repeating the rules instead of reusing .pill keeps the roadmap readable on its own
+ * and avoids depending on a class that is scoped to the board's grid; the values are
+ * identical, so a palette change still only happens in :root. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--todo);
+  background: var(--todo-soft);
+  white-space: nowrap;
+}
+
+.status-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+[data-status='done'] .status-pill {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+}
+
+[data-status='doing'] .status-pill {
+  color: var(--doing);
+  background: var(--doing-soft);
+  border-color: var(--doing-line);
+}
+
+[data-status='blocked'] .status-pill {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+}
+
+[data-status='unverified'] .status-pill {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+  border-style: dashed;
+}
+
+/* ---------------------------------------------------------------- content */
+
+.lede {
+  margin: 0 0 12px;
+  max-width: 74ch;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ------------------------------------------------------------------ legend */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--todo);
+  flex: 0 0 auto;
+}
+
+.dot[data-status='done'] { background: var(--ok); }
+.dot[data-status='doing'] { background: var(--doing); }
+.dot[data-status='todo'] { background: var(--todo); }
+.dot[data-status='blocked'] { background: var(--danger); }
+.dot[data-status='unverified'] {
+  background: transparent;
+  border: 2px dashed var(--warn);
+  width: 10px;
+  height: 10px;
+}
+
+/* -------------------------------------------------------------------- flow */
+
+.flow {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0;
+}
+
+.flow__item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 14px;
+  padding-bottom: 26px;
+  position: relative;
+}
+
+.flow__item:last-child {
+  padding-bottom: 0;
+}
+
+/* Connector: a line from this marker down to the next. Drawn on the marker column
+ * so it never crosses the text, and omitted on the last item. */
+.flow__item:not(:last-child) .flow__marker::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 30px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border), var(--border) 60%, transparent);
+}
+
+.flow__marker {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.flow__num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  color: var(--ink-3);
+  z-index: 1;
+}
+
+[data-status='done'] .flow__num {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+[data-status='doing'] .flow__num {
+  background: var(--doing-soft);
+  border-color: var(--doing);
+  color: var(--doing);
+  box-shadow: 0 0 0 4px var(--doing-soft);
+}
+
+[data-status='blocked'] .flow__num {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+[data-status='unverified'] .flow__num {
+  border-style: dashed;
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.flow__body {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.flow__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.flow__title h3 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+.flow__what,
+.flow__why {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  max-width: 76ch;
+}
+
+.flow__why {
+  padding-left: 10px;
+  border-left: 2px solid var(--brand-line);
+  color: var(--ink-3);
+}
+
+.flow__why strong {
+  color: var(--ink-2);
+}
+
+/* -------------------------------------------------------------------- gate */
+
+.gate {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+.gate--warn {
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+}
+
+.gate__label {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+
+.gate--warn .gate__label {
+  background: var(--warn);
+}
+
+/* -------------------------------------------------------------- side boxes */
+
+.side {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--surface-2);
+  margin-bottom: 12px;
+}
+
+.side:last-child {
+  margin-bottom: 0;
+}
+
+.side__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.side__head h3 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.side p {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  max-width: 92ch;
+}
+
+.side p:last-child {
+  margin-bottom: 0;
+}
+
+/* The blocking fact, set apart. A dashed left rule instead of a coloured fill so it
+ * reads as "this is a caveat", not as an error state. */
+.side__block {
+  padding-left: 10px;
+  border-left: 2px dashed var(--warn);
+}
+
+[data-node='docker'] {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+[data-node='docker'] .side__head h3 {
+  color: var(--warn);
+}
+
+.rules {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+.rules li {
+  margin-bottom: 6px;
+}
+
+.rules li:last-child {
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------------ matrix */
+
+.row--unverified th,
+.row--unverified td {
+  background: var(--warn-soft);
+}
+
+.row--unverified th {
+  color: var(--warn);
+}
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 720px) {
+  .flow__item {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .flow__marker::after {
+    left: 12px;
+  }
+
+  .flow__num {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .flow__body {
+    padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .flow__body {
+    transition: box-shadow 160ms ease, border-color 160ms ease;
+  }
+
+  .flow__body:hover {
+    border-color: var(--border-strong);
+  }
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>开发进度 · soapbot 可视化操作台</title>
+    <link rel="stylesheet" href="board.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">跳到主要内容</a>
+
+    <header class="top">
+      <div class="top__title">
+        <strong id="project-name">开发进度</strong>
+        <span id="updated-line">尚未读取数据</span>
+      </div>
+      <div class="top__spacer"></div>
+      <button class="btn" id="refresh-btn" type="button">刷新</button>
+      <label class="btn" for="auto-poll" style="display: inline-flex; align-items: center; gap: 6px">
+        <input type="checkbox" id="auto-poll" checked />
+        自动刷新
+      </label>
+    </header>
+
+    <main id="main">
+      <!-- Load failure is rendered here and nowhere else: showing an empty board
+           would read as "nothing has been done", which is a different claim. -->
+      <div id="banners"></div>
+
+      <section class="card" id="summary-card" hidden>
+        <div class="card__head">
+          <h2>整体进度</h2>
+          <span class="pct__label" id="summary-sub"></span>
+        </div>
+        <div class="card__body">
+          <div class="summary">
+            <div class="pct">
+              <div class="pct__value" id="pct-value">--<small>%</small></div>
+              <div class="pct__label">加权完成度</div>
+            </div>
+            <div>
+              <div class="bar" role="progressbar" id="overall-bar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="整体完成度">
+                <div class="bar__fill" id="overall-fill" style="width: 0%"></div>
+              </div>
+              <div class="counts">
+                <div class="count is-done"><div class="count__n" id="count-done">0</div><div class="count__k">已完成</div></div>
+                <div class="count is-doing"><div class="count__n" id="count-doing">0</div><div class="count__k">进行中</div></div>
+                <div class="count is-todo"><div class="count__n" id="count-todo">0</div><div class="count__k">未启动</div></div>
+                <div class="count is-blocked"><div class="count__n" id="count-blocked">0</div><div class="count__k">受阻</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="current-card" hidden>
+        <div class="card__head"><h2>当前环节</h2></div>
+        <div class="card__body">
+          <div class="current" id="current-body"></div>
+        </div>
+      </section>
+
+      <section class="card" id="filter-card" hidden>
+        <div class="card__body">
+          <div class="filters" role="group" aria-label="按状态筛选任务">
+            <button class="chip" type="button" data-filter="all" aria-pressed="true">全部</button>
+            <button class="chip" type="button" data-filter="todo" aria-pressed="false">只看未启动</button>
+            <button class="chip" type="button" data-filter="doing" aria-pressed="false">只看进行中</button>
+            <button class="chip" type="button" data-filter="done" aria-pressed="false">只看已完成</button>
+            <button class="chip" type="button" data-filter="blocked" aria-pressed="false">只看受阻</button>
+            <span class="filters__meta" id="filter-meta"></span>
+          </div>
+        </div>
+      </section>
+
+      <div id="phases"></div>
+
+      <div class="empty-state" id="initial-empty">
+        正在读取 progress.json …
+      </div>
+    </main>
+
+    <footer class="foot">
+      <span>数据源 progress.json</span>
+      <span>百分比由文件清单复算，不可手工填写</span>
+      <span id="foot-stale"></span>
+    </footer>
+
+    <script src="board.js"></script>
+  </body>
+</html>

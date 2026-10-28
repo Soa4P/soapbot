@@ -1,0 +1,53 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+# Build-output verification droppings. The `dist/` rule above does not match this name
+# because it is a different directory, so a wheel dropped here was showing up as an
+# untracked 369 KB binary in `git status` — noise that makes the real diff harder to read.
+dist_check/
+secrets/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+webui/.vite/
+*.local
+# The built panel ships inside the Python package, so it must not be gitignored:
+# the Docker image builds a wheel from src/ alone and would otherwise have no UI.
+!src/soapbot/webui/dist/
+!src/soapbot/webui/dist/**
+
+# Runtime data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+logs/
+uploads/
+cookies.txt
+*.session
+
+# Secrets
+.env
+.env.*
+!.env.example
+keys/
+*.pem
+*.key
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# CodeBuddy plan artifacts
+.codebuddy/

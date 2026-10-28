@@ -1,0 +1,486 @@
+"""Deployment posture checks — security you can *run*, not just document.
+
+Why this module exists
+----------------------
+The isolation review ended with a set of deployment requirements: run as non-root,
+bind the control API to loopback, keep secrets out of the container environment,
+use a read-only root filesystem. Those are correct and none of them are verifiable
+from inside the application, so in practice they were **aspirations**. A deployment
+that skipped all of them looked identical to one that followed every rule, right up
+until someone found the exposed port.
+
+The fix is the same one applied to capabilities: turn the requirement into a check
+with a name, a severity and a remediation string, and let a command run it. A finding
+an operator can act on is worth more than a paragraph they can skip.
+
+What is checkable from inside the process
+-----------------------------------------
+* **privilege** — effective uid/gid, and whether the host is uid 0;
+* **filesystem mode** — is the plugin directory writable by the host user (a plugin
+  that can write its own ``main.py`` can rewrite itself between restarts);
+* **key material** — is the master key a file readable by group/other, is it passed
+  through the environment (visible in ``/proc/<pid>/environ`` and ``docker inspect``);
+* **bind address** — the control API must not listen on a public interface;
+* **secret env leakage** — are host secrets present in the process environment at all
+  (the exact thing measured leaking to plugin children before the allowlist);
+* **container signals** — cgroup membership and read-only rootfs, used to report
+  whether the *deployment-layer* mitigations the docs require are actually in place.
+
+What is not checkable
+---------------------
+Whether a reverse proxy in front of the API enforces auth, and whether the network
+policy isolates containers. Those are reported as ``unknown`` with a remediation
+line instead of being silently marked "pass" — a checklist that lies is worse than
+no checklist.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
+
+
+class Severity(StrEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
+
+
+class Status(StrEnum):
+    PASS = "pass"
+    FAIL = "fail"
+    WARN = "warn"
+    UNKNOWN = "unknown"
+
+
+@dataclass(slots=True)
+class Finding:
+    check: str
+    status: Status
+    severity: Severity
+    detail: str
+    remediation: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "check": self.check,
+            "status": str(self.status),
+            "severity": str(self.severity),
+            "detail": self.detail,
+            "remediation": self.remediation,
+        }
+
+
+@dataclass(slots=True)
+class PostureReport:
+    findings: list[Finding] = field(default_factory=list)
+
+    @property
+    def failed(self) -> list[Finding]:
+        return [f for f in self.findings if f.status is Status.FAIL]
+
+    @property
+    def critical(self) -> list[Finding]:
+        return [f for f in self.findings if f.status is Status.FAIL and f.severity is Severity.CRITICAL]
+
+    @property
+    def ok(self) -> bool:
+        """True when nothing serious is wrong.
+
+        Deliberately not "no findings at all": a medium warning (say, the plugin dir
+        being writable by the deployment user, normal in a container) should not fail
+        a deploy gate and train operators to ignore it.
+
+        The rule is severity-first, not status-first: anything at CRITICAL or HIGH
+        that is not a PASS fails the gate. An earlier version keyed only on
+        ``Status.FAIL``, so a HIGH-severity ``WARN`` — which is what ``secrets.env``
+        used to return — passed silently. Severity is the thing that expresses "how
+        bad if wrong", so it should decide the gate; status is just the wording.
+        """
+        return not any(
+            f.severity in (Severity.CRITICAL, Severity.HIGH)
+            and f.status not in (Status.PASS, Status.UNKNOWN)
+            for f in self.findings
+        )
+
+    def summary(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for f in self.findings:
+            key = f"{f.severity}:{f.status}"
+            out[key] = out.get(key, 0) + 1
+        return out
+
+
+#: Environment variable names that must never be visible to a plugin or, ideally, to
+#: the host process at all. Matched case-insensitively by substring, because the set
+#: of provider-specific names is unbounded (``AWS_SECRET_ACCESS_KEY``,
+#: ``AZURE_CLIENT_SECRET``, ``HF_TOKEN``, ...).
+_SECRET_MARKERS = ("SECRET", "PASSWORD", "PASSWD", "APIKEY", "API_KEY", "TOKEN", "MASTER_KEY", "PRIVATE_KEY")
+
+
+def _is_secret_env_name(name: str) -> bool:
+    upper = name.upper()
+    # ``*_FILE`` / ``*_PATH`` variables hold a *location*, not a secret. Flagging them
+    # is actively harmful: ``SOAPBOT_MASTER_KEY_FILE`` is the remediation this very
+    # check recommends, so counting it made the correct deployment fail the gate and
+    # told the operator to do the thing they had already done.
+    if upper.endswith(("_FILE", "_PATH", "_DIR", "_FILENAME")):
+        return False
+    return any(marker in upper for marker in _SECRET_MARKERS)
+
+
+def check_privilege() -> Finding:
+    """Running as root inside a container is the single most common way a plugin
+    escape becomes a host escape."""
+    if sys.platform == "win32":
+        return Finding(
+            check="privilege.uid",
+            status=Status.UNKNOWN,
+            severity=Severity.MEDIUM,
+            detail="Windows: uid model does not apply; run the service as a dedicated "
+            "low-privilege account instead",
+            remediation="Create a dedicated service account and run the bot under it.",
+        )
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:  # pragma: no cover - exotic platform
+        return Finding(
+            check="privilege.uid",
+            status=Status.UNKNOWN,
+            severity=Severity.MEDIUM,
+            detail="uid unavailable on this platform",
+        )
+    uid = getuid()
+    if uid == 0:
+        return Finding(
+            check="privilege.uid",
+            status=Status.FAIL,
+            severity=Severity.CRITICAL,
+            detail="process runs as uid 0 (root)",
+            remediation="Run as a non-root user (USER 10001 in the Dockerfile, or "
+            "'user:' in compose). A plugin writing to its own directory would "
+            "otherwise be able to modify host files.",
+        )
+    return Finding(
+        check="privilege.uid",
+        status=Status.PASS,
+        severity=Severity.CRITICAL,
+        detail=f"running as uid {uid} (non-root)",
+    )
+
+
+def check_plugin_dir_writable(plugin_dir: Path | None) -> Finding:
+    """A plugin that can write its own source can rewrite itself between restarts.
+
+    This is a *supply-chain* issue rather than a runtime one, which is why it is
+    medium: the code already runs, so the immediate gain is small. It matters because
+    it survives restarts and defeats a "reviewed the plugin once" assumption.
+    """
+    if plugin_dir is None or not plugin_dir.exists():
+        return Finding(
+            check="fs.plugin_dir",
+            status=Status.UNKNOWN,
+            severity=Severity.LOW,
+            detail="plugin directory not present",
+        )
+    writable = os.access(plugin_dir, os.W_OK)
+    if writable:
+        return Finding(
+            check="fs.plugin_dir",
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=f"{plugin_dir} is writable by the bot process",
+            remediation="Mount the plugin directory read-only for the bot if plugins "
+            "are deployed as artefacts (':ro' in compose), so a compromised plugin "
+            "cannot persist changes to its own code.",
+        )
+    return Finding(
+        check="fs.plugin_dir",
+        status=Status.PASS,
+        severity=Severity.MEDIUM,
+        detail=f"{plugin_dir} is not writable",
+    )
+
+
+def check_key_file_mode(key_path: Path | None) -> Finding:
+    """The master key decrypts every stored API key, so its file mode matters."""
+    if key_path is None or not key_path.exists():
+        return Finding(
+            check="secrets.key_file",
+            status=Status.UNKNOWN,
+            severity=Severity.HIGH,
+            detail="master key file not found (key may be supplied another way)",
+        )
+    if sys.platform == "win32":  # pragma: no cover - Windows ACLs need a different API
+        return Finding(
+            check="secrets.key_file",
+            status=Status.UNKNOWN,
+            severity=Severity.HIGH,
+            detail="Windows: verify the key file ACL manually",
+            remediation="Use icacls to restrict the key file to the service account.",
+        )
+    mode = key_path.stat().st_mode
+    if mode & (stat.S_IRGRP | stat.S_IROTH):
+        return Finding(
+            check="secrets.key_file",
+            status=Status.FAIL,
+            severity=Severity.HIGH,
+            detail=f"{key_path} is readable by group/other (mode {oct(mode & 0o777)})",
+            remediation=f"chmod 600 {key_path}",
+        )
+    return Finding(
+        check="secrets.key_file",
+        status=Status.PASS,
+        severity=Severity.HIGH,
+        detail=f"{key_path} mode {oct(mode & 0o777)}",
+    )
+
+
+def check_secrets_in_env() -> Finding:
+    """Secrets in the environment leak three ways: ``/proc/<pid>/environ``, crash
+    dumps, and ``docker inspect``. They are also what the child-process allowlist is
+    designed to keep out of plugins — but the allowlist only helps if the host's own
+    environment is the thing holding them."""
+    found = sorted({k for k in os.environ if _is_secret_env_name(k)})
+    if found:
+        # FAIL, not WARN. This finding was previously reported as ``WARN`` at HIGH
+        # severity, which made it invisible to ``PostureReport.ok``: that property
+        # only counts ``FAIL``, so a deployment with the master key sitting in the
+        # environment still printed "verdict: PASS" and exited 0 under ``--strict``.
+        # The gate therefore passed precisely the leak it exists to catch. WARN
+        # should mean "works, but could be better"; a readable master key is not in
+        # that category — any process on the host can decrypt every stored API key.
+        return Finding(
+            check="secrets.env",
+            status=Status.FAIL,
+            severity=Severity.HIGH,
+            detail=f"{len(found)} secret-looking variables in the environment: "
+            + ", ".join(found[:6])
+            + ("..." if len(found) > 6 else ""),
+            remediation="Pass secrets as files (SOAPBOT_MASTER_KEY_FILE) rather than "
+            "environment variables; env vars are visible to 'docker inspect' and "
+            "/proc/<pid>/environ.",
+        )
+    return Finding(
+        check="secrets.env",
+        status=Status.PASS,
+        severity=Severity.HIGH,
+        detail="no secret-looking variables in the process environment",
+    )
+
+
+def check_bind_address(host: str | None) -> Finding:
+    """The control API manages plugins and capabilities; a public bind is an
+    unauthenticated admin surface waiting to be found."""
+    if host is None:
+        return Finding(
+            check="net.bind",
+            status=Status.UNKNOWN,
+            severity=Severity.HIGH,
+            detail="bind address not specified",
+        )
+    loopback = host in ("127.0.0.1", "::1", "localhost")
+    if host in ("0.0.0.0", "::", ""):
+        return Finding(
+            check="net.bind",
+            status=Status.FAIL,
+            severity=Severity.CRITICAL,
+            detail=f"control API binds to all interfaces ({host!r})",
+            remediation="Bind to 127.0.0.1 and put an authenticating reverse proxy in "
+            "front, or keep it on a private network.",
+        )
+    if not loopback:
+        return Finding(
+            check="net.bind",
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=f"control API binds to {host!r} (not loopback)",
+            remediation="Confirm a firewall or authenticating proxy protects this address.",
+        )
+    return Finding(
+        check="net.bind",
+        status=Status.PASS,
+        severity=Severity.HIGH,
+        detail=f"control API bound to {host}",
+    )
+
+
+def check_container() -> Finding:
+    """Report whether the process is containerised, because the deployment-layer
+    mitigations in the docs (read-only rootfs, network policy, seccomp) only exist
+    inside a container runtime."""
+    in_container = Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
+    if not in_container and sys.platform != "win32":
+        with open("/proc/1/cgroup", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+        in_container = any(t in content for t in ("docker", "kubepods", "containerd", "lxc"))
+    if in_container:
+        return Finding(
+            check="deploy.container",
+            status=Status.PASS,
+            severity=Severity.MEDIUM,
+            detail="running inside a container runtime",
+        )
+    return Finding(
+        check="deploy.container",
+        status=Status.WARN,
+        severity=Severity.MEDIUM,
+        detail="not running in a container: the deployment-layer controls "
+        "(read-only rootfs, network policy, seccomp) are not being applied",
+        remediation="Deploy with deploy/docker-compose.yml, which sets read_only, "
+        "cap_drop: ALL, no-new-privileges and a non-root user.",
+    )
+
+
+def check_rootfs_readonly() -> Finding:
+    """A writable root filesystem lets a compromised plugin or dependency drop a
+    persistent payload outside its own directory."""
+    if sys.platform == "win32":
+        return Finding(
+            check="deploy.readonly_rootfs",
+            status=Status.UNKNOWN,
+            severity=Severity.MEDIUM,
+            detail="read-only rootfs is a container concept; not applicable here",
+        )
+    probe = Path("/usr")
+    if not probe.exists():  # pragma: no cover
+        return Finding(
+            check="deploy.readonly_rootfs",
+            status=Status.UNKNOWN,
+            severity=Severity.MEDIUM,
+            detail="/usr not present",
+        )
+    if os.access(probe, os.W_OK):
+        return Finding(
+            check="deploy.readonly_rootfs",
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail="/usr is writable (root filesystem not read-only)",
+            remediation="Set 'read_only: true' in compose and mount explicit tmpfs "
+            "for /tmp; the app writes only under /data.",
+        )
+    return Finding(
+        check="deploy.readonly_rootfs",
+        status=Status.PASS,
+        severity=Severity.MEDIUM,
+        detail="root filesystem appears read-only",
+    )
+
+
+def check_isolation_enabled(plugin_manager) -> Finding:
+    """Whether plugins actually run in separate processes.
+
+    This check exists because the *previous* iteration shipped a subprocess runner
+    with zero call sites. A posture report that does not verify the boundary is
+    active would have called that deployment secure.
+    """
+    supervisor = getattr(getattr(plugin_manager, "loader", None), "supervisor", None)
+    if supervisor is None:
+        return Finding(
+            check="isolation.process",
+            status=Status.FAIL,
+            severity=Severity.CRITICAL,
+            detail="plugins run in the host process (in-process mode)",
+            remediation="Build the plugin manager with isolate=True (the default). "
+            "In-process plugins share the host's address space, so every capability "
+            "check is a speed bump rather than a boundary.",
+        )
+    health = supervisor.health()
+    return Finding(
+        check="isolation.process",
+        status=Status.PASS,
+        severity=Severity.CRITICAL,
+        detail=f"process isolation enabled ({len(health)} plugin worker(s) registered)",
+    )
+
+
+def check_single_instance(data_dir: Path | None) -> Finding:
+    """Two bot processes sharing a SQLite file will corrupt it or fight over the
+    same session locks. Cheap to detect, expensive to debug later."""
+    if data_dir is None or not data_dir.exists():
+        return Finding(
+            check="deploy.single_instance",
+            status=Status.UNKNOWN,
+            severity=Severity.LOW,
+            detail="data directory not present",
+        )
+    lock = data_dir / "soapbot.pid"
+    if not lock.exists():
+        return Finding(
+            check="deploy.single_instance",
+            status=Status.PASS,
+            severity=Severity.LOW,
+            detail="no competing instance lock",
+        )
+    try:
+        pid = int(lock.read_text(encoding="utf-8").strip() or 0)
+    except (ValueError, OSError):
+        pid = 0
+    if pid and pid != os.getpid():
+        alive = True
+        if sys.platform != "win32":
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                alive = False
+        if alive:
+            return Finding(
+                check="deploy.single_instance",
+                status=Status.WARN,
+                severity=Severity.MEDIUM,
+                detail=f"another instance appears to be running (pid {pid})",
+                remediation="Run one bot process per data directory.",
+            )
+    return Finding(
+        check="deploy.single_instance",
+        status=Status.PASS,
+        severity=Severity.LOW,
+        detail="no competing instance",
+    )
+
+
+def run_posture_checks(
+    *,
+    plugin_manager=None,
+    plugin_dir: Path | None = None,
+    key_path: Path | None = None,
+    data_dir: Path | None = None,
+    bind_host: str | None = None,
+) -> PostureReport:
+    """Run every check and return the report. Never raises: a failing check is a
+    finding, not an exception, so one broken probe cannot hide the other nine."""
+    report = PostureReport()
+    probes = [
+        lambda: check_privilege(),
+        lambda: check_isolation_enabled(plugin_manager) if plugin_manager else Finding(
+            check="isolation.process",
+            status=Status.UNKNOWN,
+            severity=Severity.CRITICAL,
+            detail="plugin manager not supplied to the posture check",
+        ),
+        check_secrets_in_env,
+        lambda: check_bind_address(bind_host),
+        lambda: check_key_file_mode(key_path),
+        lambda: check_plugin_dir_writable(plugin_dir),
+        check_container,
+        check_rootfs_readonly,
+        lambda: check_single_instance(data_dir),
+    ]
+    for probe in probes:
+        try:
+            report.findings.append(probe())
+        except Exception as exc:  # pragma: no cover - defensive
+            report.findings.append(
+                Finding(
+                    check="posture.probe",
+                    status=Status.UNKNOWN,
+                    severity=Severity.LOW,
+                    detail=f"probe raised {type(exc).__name__}",
+                )
+            )
+    return report

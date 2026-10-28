@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>任务流程图 · soapbot 完整化</title>
+    <link rel="stylesheet" href="board.css" />
+    <link rel="stylesheet" href="roadmap.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">跳到主要内容</a>
+
+    <header class="top">
+      <div class="top__title">
+        <strong>任务流程图</strong>
+        <span>从「单链路可跑」到「可交付 + 对标 AstrBot」</span>
+      </div>
+      <div class="top__spacer"></div>
+      <a class="btn" href="./index.html">返回看板</a>
+    </header>
+
+    <main id="main">
+      <div id="roadmap-banner" class="banner" hidden></div>
+
+      <!-- ---------------------------------------------------------- reading key -->
+      <section class="card">
+        <div class="card__head">
+          <h2>怎么读这张图</h2>
+        </div>
+        <div class="card__body">
+          <p class="lede">
+            每个阶段右侧的<strong>验收门</strong>是可执行的判据，不是描述。门没过，下一阶段不开工——
+            因为下一阶段的证据建立在上一阶段的产物上。例如流式输出要证明「群里按序收到多条」，
+            而这需要先有一个能跑的 CI 和一个干净的提交。
+          </p>
+          <ul class="legend" role="list">
+            <li><span class="dot" data-status="done"></span>已完成</li>
+            <li><span class="dot" data-status="doing"></span>进行中</li>
+            <li><span class="dot" data-status="todo"></span>未启动</li>
+            <li><span class="dot" data-status="blocked"></span>受阻</li>
+            <li><span class="dot" data-status="unverified"></span>未验证（能写代码，但不能声称测过）</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------- the flow -->
+      <section class="card">
+        <div class="card__head">
+          <h2>八个阶段</h2>
+          <span class="hint">纵向箭头是硬依赖；虚线框是贯穿约束，不是阶段</span>
+        </div>
+        <div class="card__body">
+          <ol class="flow" role="list">
+            <!-- P1 -->
+            <li class="flow__item" data-node="p1" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">1</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>交付阻断解除</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  首次提交、分支与 CI 对齐、清理残留空目录与构建临时产物、补
+                  <code>py.typed</code>、补 <code>soapbot token</code> 子命令、社区文件。
+                </p>
+                <p class="flow__why">
+                  为什么排第一：仓库零提交时，其余七个阶段的「已验证」全部无法被他人复现。
+                  另外 CI 只在 <code>main</code> 触发而本地是 <code>master</code>，等于 800 项测试没有执行点。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  <code>git log</code> 有提交 · <code>git status</code> 干净 · CI 在目标分支真实跑通 ·
+                  无 <code>data/</code> 的干净副本 pytest 不退化
+                </div>
+              </div>
+            </li>
+
+            <!-- P2 -->
+            <li class="flow__item" data-node="p2" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">2</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>流式输出贯通</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  <code>SentenceAggregator</code> 纯函数聚合器 · <code>respond_stream()</code> ·
+                  <code>ModelStage</code> 仅末轮分支 · <code>ReplyStage</code> 分句发送 + 复用
+                  <code>core/ratelimit</code> · 追踪页展示分句序列。
+                </p>
+                <p class="flow__why">
+                  形态是<strong>分句渐进发送</strong>而非逐字刷新：OneBot 与 QQ 官方都不提供消息编辑接口，
+                  逐字只能靠撤回重发，结果是刷屏且撞 5 msg/s 限频。首包上界 1.2s——否则模型吐字慢时
+                  首包延迟等于总延迟，流式收益归零。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  单测证明分段与首包上界 · 真实 OneBot mock 端观察到多条按序到达 ·
+                  <code>STAGE_ORDER</code> 未变（不新增 Stage）
+                </div>
+              </div>
+            </li>
+
+            <!-- P3 -->
+            <li class="flow__item" data-node="p3" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">3</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>插件市场</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  <code>plugins/installer.py</code> 六类攻击防护 · <code>POST /install</code> ·
+                  11 页市场界面（卡片、上传、能力风险分级、安装后引导批准）。
+                </p>
+                <p class="flow__why">
+                  <strong>安装 ≠ 批准</strong>，是两个动作。若安装顺手批准，上传一个包就等于获得其声明的全部能力，
+                  而「改 manifest 加能力必须重新审批」这条既有防线会从侧面被绕过。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  六类恶意包（zip slip / 压缩炸弹 / 多插件包 / 路径歧义 / digest 伪造 / 越界符号链接）
+                  全部被拒 · 正常包安装后出现在列表且<strong>未被批准</strong>
+                </div>
+              </div>
+            </li>
+
+            <!-- P4 -->
+            <li class="flow__item" data-node="p4" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">4</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>MCP 客户端</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  <code>mcp/client.py</code> 连接与握手 · <code>mcp/config.py</code> 只允许显式声明的命令 ·
+                  工具汇入 <code>PluginToolRegistry</code> · 状态查询接口。
+                </p>
+                <p class="flow__why">
+                  必须与插件工具<strong>汇入同一张表、走同一次权限过滤</strong>。另开旁路的直接后果是
+                  MCP 工具绕过角色校验，于是「能力逐项授权」在不同工具来源上口径不一。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  MCP 工具出现在 <code>available_for(principal)</code> 返回值中 ·
+                  越权角色看不到（wiring 测试，非注册表自测）
+                </div>
+              </div>
+            </li>
+
+            <!-- P5 -->
+            <li class="flow__item" data-node="p5" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">5</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>语音入站与出站</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  STT 走 <code>BaseProvider.transcribe</code> 新槽位（不引本地模型）· TTS 作为可选依赖
+                  <code>[voice]</code> · 适配器不支持 <code>RECORD</code> 时降级为文本。
+                </p>
+                <p class="flow__why">
+                  <code>SegmentType.RECORD</code> 与 <code>Capability.RECORD</code> 早已预留但无人使用——
+                  这正是「声明了但没接线」的典型。要么接上，要么删掉声明。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  不支持 RECORD 的适配器正确降级 · TTS 依赖缺失时报明确错误而非静默 ·
+                  语音消息转写后进入同一对话上下文
+                </div>
+              </div>
+            </li>
+
+            <!-- P6 -->
+            <li class="flow__item" data-node="p6" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">6</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>多语言</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  后端标准库 <code>gettext</code> + JSON 目录 · 前端自研 <code>t()</code> + 响应式 locale ·
+                  12 页系统设置（语言、语音、MCP 状态、运行时信息）。
+                </p>
+                <p class="flow__why">
+                  只翻译<strong>面向使用者</strong>的文案，不翻译日志。日志是给运维做关键字搜索的，
+                  同一事件在不同语言下变成不同字符串会破坏搜索与告警规则。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  切换语言后界面与对外回复变化 · 日志保持英文 · 缺失 key 回落中文并记 warning
+                </div>
+              </div>
+            </li>
+
+            <!-- P7 -->
+            <li class="flow__item" data-node="p7" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">7</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>可运维面</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  <code>/healthz</code> 存活 · <code>/readyz</code> 就绪（DB 可写、配置可读）·
+                  DB 版本迁移 · <code>scripts/backup.py</code> / <code>restore.py</code> · <code>UPDATING.md</code>。
+                </p>
+                <p class="flow__why">
+                  「可运维」的判据不是有文档，而是<strong>备份→清空→恢复后数据一致</strong>。
+                  没有可执行的恢复演练，备份脚本只是心理安慰。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  <code>/readyz</code> 在 DB 不可写时返回非 200 · 备份恢复后数据一致 ·
+                  迁移可从 v1 升到当前版本
+                </div>
+              </div>
+            </li>
+
+            <!-- P8 -->
+            <li class="flow__item" data-node="p8" data-status="todo">
+              <div class="flow__marker"><span class="flow__num">8</span></div>
+              <div class="flow__body">
+                <div class="flow__title">
+                  <h3>评估报告 v2 与全量回归</h3>
+                  <span class="node__status status-pill">未启动</span>
+                </div>
+                <p class="flow__what">
+                  <code>docs/delivery-readiness-v2.md</code> 反映当前状态 · 保留旧报告作历史 ·
+                  依赖安装实测（clean venv）· 全量测试、lint、类型、构建、对比度。
+                </p>
+                <p class="flow__why">
+                  旧报告记录的是修复<strong>前</strong>的状态，且明确声明「不随后续改动重写」。
+                  在它上面改数字会销毁问题清单的证据价值，所以新开一份。
+                </p>
+                <div class="gate">
+                  <span class="gate__label">验收门</span>
+                  全新 venv 从 <code>pyproject.toml</code> 安装成功且能启动 ·
+                  全量测试不退化 · 每条结论都有可复现命令
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- --------------------------------------------------------- constraints -->
+      <section class="card">
+        <div class="card__head">
+          <h2>贯穿约束（不是阶段，无法被勾掉）</h2>
+        </div>
+        <div class="card__body">
+          <div class="side" data-node="docker" data-status="unverified">
+            <div class="side__head">
+              <h3>容器部署</h3>
+              <span class="node__status status-pill">静态检查通过 · 实测未验证</span>
+            </div>
+            <p>
+              <strong>已做</strong>：新建 <code>scripts/check_deploy.py</code> 做静态核验，14 项全过，
+              并接入 <code>make deploy-check</code> 与 <code>tests/test_deploy_config.py</code>（11 项）。
+              它抓出并修掉了<strong>两个会导致 <code>compose up</code> 直接失败</strong>的真实缺陷：
+            </p>
+            <ul class="rules" role="list">
+              <li>
+                容器内绑定 <code>127.0.0.1</code> 却声明了 <code>ports:</code> —— 端口映射指向容器
+                eth0，而服务只监听容器自身 loopback，宿主机永远连不上。已改为容器内
+                <code>0.0.0.0</code>，隔离仍由宿主机侧 <code>127.0.0.1:6185</code> 保证。
+              </li>
+              <li>
+                <code>./secrets/master.key</code> 挂载源不存在，且该文件被 <code>.gitignore</code>
+                排除（<code>*.key</code>）—— 全新 clone 后 Docker 会在此路径创建一个空<strong>目录</strong>，
+                应用读目录当密钥文件失败，然后<strong>静默退化为明文存储插件密钥</strong>，
+                而容器仍报告 healthy。已改为默认注释掉并写明启用步骤。
+              </li>
+            </ul>
+            <p class="side__block">
+              <strong>为什么仍标「未验证」</strong>，以及本机 Docker 为什么装不上（实测记录）：
+              <code>docker</code> 命令不存在 → <code>winget install Docker.DockerDesktop</code>
+              下载与哈希校验成功，但安装程序需 UAC 提权，退出码
+              <code>4294967291</code>（<code>0xFFFFFFFB</code>）→ 当前账户
+              <code>IsAdmin = False</code>；<code>wsl --status</code> 报未安装发行版；
+              CPU <code>VirtualizationFirmwareEnabled = False</code>；系统为 Windows 11 家庭版，
+              不支持 Hyper-V。四条相互独立，非配置可绕过。
+            </p>
+            <div class="gate gate--warn">
+              <span class="gate__label">解除条件</span>
+              云服务器上：配好镜像加速（本机实测 Docker Hub 直连<strong>超时</strong>，
+              <code>docker.m.daocloud.io</code> 走 token 流程可取到 manifest）→
+              构建成功 → <code>id -u</code> 为 10001 → 只读根下 <code>/data</code> 可写 →
+              <code>/api/health</code> 返回 ok → healthcheck 转为 healthy
+            </div>
+            <p class="hint" style="margin-top: 8px">
+              详细步骤与四项判据命令见 <code>deploy/daemon-mirror.md</code>。
+            </p>
+          </div>
+
+          <div class="side" data-node="contract" data-status="done">
+            <div class="side__head">
+              <h3>三条不可让步的规则</h3>
+              <span class="node__status status-pill">已完成</span>
+            </div>
+            <ul class="rules" role="list">
+              <li><strong>文档与代码冲突时改文档并写明理由</strong>，不得默默放宽（既有先例：<code>§6.1</code> 对配置写入的修订）。</li>
+              <li><strong>未接线的能力等于不存在</strong>，每个新能力必须有 wiring 测试，禁止只测注册表。</li>
+              <li><strong>不假装修了</strong>：未实测的标为未验证，比声称通过更可信。</li>
+            </ul>
+          </div>
+
+          <div class="side" data-node="parallel" data-status="done">
+            <div class="side__head">
+              <h3>为什么 2–6 不并行</h3>
+              <span class="node__status status-pill">已完成</span>
+            </div>
+            <p>
+              逻辑上 P2–P6 相互独立，但<strong>P3 与 P4 共用同一张工具注册表</strong>
+              （插件工具与 MCP 工具必须汇入同一处过滤），同时改会互相冲突；
+              P5 要改 <code>stages.py</code> 与 <code>providers/base.py</code>，与 P2 重叠；
+              P6 要扫全站文案，必须最后做。串行是为了让每一步的「已验证」站得住。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------- matrix -->
+      <section class="card">
+        <div class="card__head">
+          <h2>验收矩阵</h2>
+          <span class="hint">判据写死在这里，报告里逐条对照</span>
+        </div>
+        <div class="card__body flush">
+          <table class="data">
+            <caption class="visually-hidden">各阶段验收判据</caption>
+            <thead>
+              <tr>
+                <th scope="col">阶段</th>
+                <th scope="col">关键判据</th>
+                <th scope="col">可复现命令 / 证据</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">1 交付</th>
+                <td>仓库可 clone 可交付</td>
+                <td class="mono">git log · git status · CI 运行记录</td>
+              </tr>
+              <tr>
+                <th scope="row">2 流式</th>
+                <td>分段与首包上界</td>
+                <td class="mono">pytest tests/test_streaming_wiring.py</td>
+              </tr>
+              <tr>
+                <th scope="row">3 市场</th>
+                <td>六类恶意包全拒</td>
+                <td class="mono">pytest tests/test_plugin_installer.py</td>
+              </tr>
+              <tr>
+                <th scope="row">4 MCP</th>
+                <td>统一过滤、越权不可见</td>
+                <td class="mono">pytest tests/test_mcp_wiring.py</td>
+              </tr>
+              <tr>
+                <th scope="row">5 语音</th>
+                <td>降级正确、缺依赖明确报错</td>
+                <td class="mono">pytest tests/test_voice.py</td>
+              </tr>
+              <tr>
+                <th scope="row">6 多语言</th>
+                <td>日志不被翻译</td>
+                <td class="mono">pytest tests/test_i18n.py</td>
+              </tr>
+              <tr>
+                <th scope="row">7 运维</th>
+                <td>readyz 非 200 / 备份恢复一致</td>
+                <td class="mono">scripts/backup.py → restore.py 演练</td>
+              </tr>
+              <tr>
+                <th scope="row">8 报告</th>
+                <td>全新 venv 能装能跑</td>
+                <td class="mono">python -m venv /tmp/v &amp;&amp; pip install -e .</td>
+              </tr>
+              <tr class="row--unverified">
+                <th scope="row">容器</th>
+                <td>静态 14 项通过 · <strong>实测未验证</strong></td>
+                <td class="mono">make deploy-check（已修 2 个阻断）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span>状态取自 progress.json，与看板同源</span>
+        <span>未匹配到数据时保留手工标注，并显式提示</span>
+      </footer>
+    </main>
+
+    <script src="roadmap.js"></script>
+  </body>
+</html>

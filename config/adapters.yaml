@@ -1,0 +1,43 @@
+# QQ 接入配置
+#
+# 每个条目对应 adapters.create(kind, **options) 的一次调用。
+# 留空意味着服务只提供管理 API，不会连接任何协议端——这是有意的默认值：
+# 一个没有被要求连接的机器人不应在启动时反复重连一个不存在的 NapCat，
+# 把真正需要看的日志淹没。
+#
+# 单个适配器构造失败不会阻止服务启动：错误会记在 /api/runtime 的 startup_errors 里，
+# 因为"某个适配器配错了"恰恰是操作者需要打开管理面板的时候。
+#
+# 但本文件本身若是无法解析的 YAML，启动会直接失败——半懂不懂地按错误配置运行，
+# 比不启动更难排查。
+
+adapters: []
+# 示例 A：正向 WebSocket（soapbot 主动拨号 NapCat / Lagrange）
+#
+# adapters:
+#   - kind: onebot11
+#     account_id: "123456789"
+#     mode: forward
+#     ws_url: ws://127.0.0.1:3001
+#     access_token: env:ONEBOT_ACCESS_TOKEN
+#
+# 示例 B：反向 WebSocket（协议端拨号我们，适合 NAT 后部署）
+#   没有 access_token 时启动会直接报错：开放式反向端口等于把整条流水线
+#   暴露给任何网络对端。确实无法配置 token 时，才显式写 allow_unauthenticated_reverse: true，
+#   并自行保证网络隔离。
+#
+# adapters:
+#   - kind: onebot11
+#     account_id: "123456789"
+#     mode: reverse
+#     host: 127.0.0.1
+#     port: 6700
+#     access_token: env:ONEBOT_ACCESS_TOKEN
+#
+# 示例 C：QQ 官方机器人（需 pip install ".[qq-official]" 并在开放平台完成审核）
+#
+# adapters:
+#   - kind: qq_official
+#     account_id: "appid"
+#     app_id: "102000000"
+#     app_secret: env:QQ_BOT_SECRET

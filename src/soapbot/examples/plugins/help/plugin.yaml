@@ -1,0 +1,9 @@
+name: help
+version: 1.0.0
+entry: main:HelpPlugin
+description: 列出当前可用的插件命令
+author: soapbot
+trust: trusted
+min_host_version: 0.1.0
+capabilities:
+  - command

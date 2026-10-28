@@ -1,0 +1,90 @@
+[project]
+name = "soapbot"
+version = "0.1.0"
+description = "QQ group chat AI bot framework: multi-provider, persona cards, context compression, memory recall, vision, Bilibili watching, budget approval"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# Every entry here is imported somewhere under src/soapbot. Four that were listed
+# and never used have been removed — structlog (logging is stdlib + a ring buffer),
+# watchdog (reload is an explicit call), python-multipart (no multipart endpoint)
+# and edge-tts (voice output does not exist). A dependency nobody imports is not
+# free: it widens the audit surface and tells reviewers the project has a feature
+# it does not.
+dependencies = [
+    "fastapi==0.162.0",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "aiosqlite==0.20.0",
+    "httpx==0.28.1",
+    "websockets==14.1",
+    "pyyaml==6.0.2",
+    "pillow==13.0.0",
+    "numpy==2.2.1",
+    "pyjwt==2.15.1",
+    "cryptography==50.0.2",
+    "croniter==6.0.0",
+    "apscheduler==3.11.0",
+]
+
+[project.optional-dependencies]
+qq-official = ["qq-botpy==1.2.1"]
+precision = ["tiktoken==0.8.0"]
+dev = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.1",
+    "respx==0.22.0",
+    "ruff==0.8.6",
+    "mypy==1.14.1",
+    "types-pyyaml==6.0.12.20241230",
+]
+
+[project.scripts]
+soapbot = "soapbot.cli:main"
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# The built management panel lives inside the package. Hatchling selects files with
+# VCS rules by default, and a build output directory is exactly the kind of thing a
+# .gitignore excludes — so without this the wheel would ship an app that serves a
+# "not built" page on a deployment that cannot run npm.
+artifacts = ["src/soapbot/webui/dist/**"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/soapbot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501", "B008", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "no_env_key: run this test with DEEPSEEK_API_KEY deliberately unset",
+]
