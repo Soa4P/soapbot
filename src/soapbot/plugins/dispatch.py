@@ -301,9 +301,25 @@ class PluginToolRegistry:
     regardless of how convincingly the prompt asks.
     """
 
-    def __init__(self, loader: PluginLoader, *, audit: AuditLog | None = None) -> None:
+    def __init__(
+        self,
+        loader: PluginLoader,
+        *,
+        audit: AuditLog | None = None,
+        sources: list[Any] | None = None,
+    ) -> None:
         self.loader = loader
         self.audit = audit or get_audit_log()
+        self._sources: list[Any] = list(sources or [])
+
+    def register_source(self, source: Any) -> None:
+        """Add an external tool source (currently: an MCP server group).
+
+        Deliberately the same registry and the same ``available_for`` filter. A second
+        path for MCP tools would be a second place to remember the role check, and the
+        one that gets forgotten is the one an attacker uses.
+        """
+        self._sources.append(source)
 
     def available_for(self, principal: Principal | None) -> list[dict[str, Any]]:
         """Tool schemas visible to this caller. Filtered, not just gated.
@@ -325,7 +341,47 @@ class PluginToolRegistry:
                     "parameters": meta["parameters"],
                 }
             )
+        for source in self._sources:
+            try:
+                out.extend(source.schemas(principal))
+            except Exception as exc:  # pragma: no cover - a source must not break chat
+                logger.warning("tool source failed to list: %s", exc)
         return out
+
+    async def _invoke_external(
+        self, name: str, arguments: dict[str, Any], *, principal: Principal | None
+    ) -> str:
+        """Route an external tool call, audited like a plugin tool.
+
+        The source decides authorisation — it is the only object that knows each
+        server's ``min_role``. This method's job is that a refusal and a failure both
+        land in the same audit stream as plugin calls, so an operator does not need a
+        second place to look.
+        """
+        for source in self._sources:
+            try:
+                result = await source.call(name, arguments, principal=principal)
+            except Exception as exc:
+                self.audit.record(
+                    kind="plugin",
+                    action=f"tool:{name}",
+                    outcome="deny",
+                    principal=principal,
+                    detail=f"external tool failed: {exc}",
+                )
+                logger.warning("external tool failed name=%s: %s", name, exc)
+                return "错误：外部工具调用失败。"
+            if result is None:
+                continue
+            self.audit.record(
+                kind="plugin",
+                action=f"tool:{name}",
+                outcome="allow",
+                principal=principal,
+                detail="external tool",
+            )
+            return str(result)
+        return "错误：没有这个工具。"
 
     async def invoke(
         self,
@@ -335,6 +391,9 @@ class PluginToolRegistry:
         principal: Principal | None,
         session_key: str = "",
     ) -> str:
+        if name.startswith("mcp__"):
+            return await self._invoke_external(name, arguments, principal=principal)
+
         meta = self.loader.all_tools().get(name)
         if meta is None:
             return "错误：没有这个工具。"

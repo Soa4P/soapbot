@@ -399,6 +399,25 @@ def build_runtime(
 
         tool_registry = PluginToolRegistry(plugin_manager.loader)
 
+    # MCP servers are configured, not discovered: nothing is started unless
+    # config/mcp.yaml names it, and a rejected configuration degrades to "no external
+    # tools" with an error in the log rather than stopping the bot.
+    mcp_manager = None
+    mcp_servers = []
+    try:
+        from soapbot.mcp.config import load_config as load_mcp_config
+
+        mcp_servers = load_mcp_config(settings.config_dir / "mcp.yaml")
+    except Exception as exc:
+        logger.error("mcp configuration rejected, continuing without it: %s", exc)
+
+    if mcp_servers:
+        from soapbot.mcp.client import McpManager
+
+        mcp_manager = McpManager(mcp_servers, role_rank=_mcp_role_rank)
+        if tool_registry is not None:
+            tool_registry.register_source(mcp_manager)
+
     pipeline = build_pipeline(
         personas=persona_store,
         engine=engine,
@@ -435,7 +454,23 @@ def build_runtime(
         providers=provider_router,
         bilibili=bilibili_client,
         traces=traces,
+        mcp=mcp_manager,
     )
+
+
+def _mcp_role_rank(value: str) -> int:
+    """Rank a configured role name; an unknown name ranks lowest.
+
+    Failing closed is the point: a typo in ``min_role`` must grant *less* access than
+    intended, and an exception raised here would instead surface as a confusing tool
+    error on every call.
+    """
+    from soapbot.security.principal import Role
+
+    try:
+        return Role(value).rank
+    except ValueError:
+        return Role.ANONYMOUS.rank
 
 
 async def _record_trace(traces: TraceStore, ctx: object) -> None:

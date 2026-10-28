@@ -1,0 +1,28 @@
+# MCP servers: external tools that join the same tool table as plugins.
+#
+# Nothing here is started until a server is listed below. The file is read at build
+# time; a rejected entry logs an error and the bot starts without external tools
+# rather than refusing to run.
+#
+# command MUST be a list of arguments, never a string. A string would have to be
+# split into argv, and splitting is where quoting turns "read a file" into "run a
+# shell". The process is spawned with execve, never through /bin/sh.
+#
+# min_role decides who may see and call the server's tools: anonymous < member <
+# admin < owner. An unknown role name ranks as anonymous (fails closed).
+#
+# servers:
+#   - name: filesystem
+#     description: read-only file access in /srv/share
+#     command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/srv/share"]
+#     env:
+#       NODE_NO_WARNINGS: "1"
+#     timeout: 20
+#     min_role: admin
+#
+#   - name: time
+#     command: ["/opt/mcp/time-server"]
+#     timeout: 10
+#     min_role: member
+
+servers: []

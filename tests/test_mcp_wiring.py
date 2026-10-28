@@ -1,0 +1,212 @@
+"""MCP: external tools must join the *same* filtered table as plugin tools.
+
+The security-relevant assertion is not "the client speaks the protocol" but "a caller
+who may not use an MCP tool does not see it at all". A second tool path would be a
+second place to remember the role check, and the forgotten one is what gets used.
+
+The server is a real child process speaking newline-delimited JSON-RPC, so the tests
+exercise the transport rather than a mock of it.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from soapbot.mcp.client import McpClient, McpManager, McpServer
+from soapbot.mcp.config import McpConfigError, load_config
+from soapbot.plugins.dispatch import PluginToolRegistry
+from soapbot.plugins.loader import PluginLoader
+from soapbot.security.principal import Role
+
+SERVER = r'''
+import json
+import sys
+
+TOOLS = [
+    {
+        "name": "echo",
+        "description": "echo the arguments back",
+        "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+    }
+]
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    method = message.get("method")
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fake", "version": "1"},
+        }
+    elif method == "tools/list":
+        result = {"tools": TOOLS}
+    elif method == "tools/call":
+        result = {
+            "content": [
+                {"type": "text", "text": "got:" + json.dumps(message["params"]["arguments"])}
+            ]
+        }
+    else:
+        result = {}
+    if "id" in message:
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\n")
+        sys.stdout.flush()
+'''
+
+
+def _script(tmp_path: Path) -> Path:
+    path = tmp_path / "fake_server.py"
+    path.write_text(SERVER, encoding="utf-8")
+    return path
+
+
+def _server(tmp_path: Path, *, min_role: str = "member") -> McpServer:
+    return McpServer(
+        name="fake",
+        command=(sys.executable, str(_script(tmp_path))),
+        timeout=15.0,
+        min_role=min_role,
+    )
+
+
+def _principal(role: Role) -> SimpleNamespace:
+    return SimpleNamespace(role=role)
+
+
+def _rank(value: str) -> int:
+    try:
+        return Role(value).rank
+    except ValueError:
+        return Role.ANONYMOUS.rank
+
+
+# ------------------------------------------------------------------------ client
+
+
+async def test_client_handshakes_lists_and_calls(tmp_path: Path) -> None:
+    client = McpClient(_server(tmp_path))
+    try:
+        tools = await client.list_tools()
+        assert [t.name for t in tools] == ["echo"]
+        # Namespaced so one server cannot shadow another's tool.
+        assert tools[0].qualified_name == "mcp__fake__echo"
+
+        text = await client.call_tool("echo", {"text": "hi"})
+        assert text == 'got:{"text": "hi"}'
+    finally:
+        await client.close()
+
+
+async def test_missing_executable_is_a_clear_error(tmp_path: Path) -> None:
+    client = McpClient(McpServer(name="x", command=("definitely-not-a-binary",), timeout=5))
+    with pytest.raises(Exception, match="not found on PATH"):
+        await client.list_tools()
+
+
+# ------------------------------------------------------------- role filtering
+
+
+async def test_tools_are_hidden_below_min_role(tmp_path: Path) -> None:
+    manager = McpManager([_server(tmp_path, min_role="admin")], role_rank=_rank)
+    try:
+        await manager.ensure_tools()
+        assert manager.schemas(_principal(Role.ADMIN))
+        assert manager.schemas(_principal(Role.MEMBER)) == []
+        assert manager.schemas(None) == []
+        with pytest.raises(Exception, match="not permitted"):
+            await manager.call("mcp__fake__echo", {}, principal=_principal(Role.MEMBER))
+    finally:
+        await manager.close()
+
+
+# ---------------------------------------------------------------- tool registry
+
+
+async def test_registry_lists_mcp_tools_for_allowed_callers(tmp_path: Path) -> None:
+    manager = McpManager([_server(tmp_path)], role_rank=_rank)
+    registry = PluginToolRegistry(PluginLoader(plugins_dir=tmp_path / "plugins"))
+    registry.register_source(manager)
+    try:
+        await manager.ensure_tools()
+        names = [t["name"] for t in registry.available_for(_principal(Role.MEMBER))]
+        assert names == ["mcp__fake__echo"]
+    finally:
+        await manager.close()
+
+
+async def test_registry_routes_an_mcp_call(tmp_path: Path) -> None:
+    manager = McpManager([_server(tmp_path)], role_rank=_rank)
+    registry = PluginToolRegistry(PluginLoader(plugins_dir=tmp_path / "plugins"))
+    registry.register_source(manager)
+    try:
+        await manager.ensure_tools()
+        result = await registry.invoke(
+            "mcp__fake__echo", {"text": "hey"}, principal=_principal(Role.MEMBER)
+        )
+        assert result == 'got:{"text": "hey"}'
+    finally:
+        await manager.close()
+
+
+async def test_registry_hides_mcp_tools_below_min_role(tmp_path: Path) -> None:
+    manager = McpManager([_server(tmp_path, min_role="owner")], role_rank=_rank)
+    registry = PluginToolRegistry(PluginLoader(plugins_dir=tmp_path / "plugins"))
+    registry.register_source(manager)
+    try:
+        await manager.ensure_tools()
+        assert registry.available_for(_principal(Role.ADMIN)) == []
+        # And calling by name anyway is refused, not merely unlisted.
+        result = await registry.invoke(
+            "mcp__fake__echo", {}, principal=_principal(Role.ADMIN)
+        )
+        assert result.startswith("错误")
+    finally:
+        await manager.close()
+
+
+# ---------------------------------------------------------------------- config
+
+
+def test_config_rejects_a_string_command(tmp_path: Path) -> None:
+    """A string command would have to be split, and splitting is where shells appear."""
+    path = tmp_path / "mcp.yaml"
+    path.write_text("servers:\n  - name: x\n    command: 'npx server'\n", encoding="utf-8")
+    with pytest.raises(McpConfigError, match="list of arguments"):
+        load_config(path)
+
+
+def test_config_rejects_duplicate_names(tmp_path: Path) -> None:
+    path = tmp_path / "mcp.yaml"
+    path.write_text(
+        "servers:\n"
+        "  - name: x\n    command: ['a']\n"
+        "  - name: x\n    command: ['b']\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(McpConfigError, match="duplicate"):
+        load_config(path)
+
+
+def test_config_rejects_unknown_role(tmp_path: Path) -> None:
+    path = tmp_path / "mcp.yaml"
+    path.write_text(
+        "servers:\n  - name: x\n    command: ['a']\n    min_role: superuser\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(McpConfigError, match="min_role"):
+        load_config(path)
+
+
+def test_missing_config_means_no_mcp(tmp_path: Path) -> None:
+    assert load_config(tmp_path / "absent.yaml") == []
