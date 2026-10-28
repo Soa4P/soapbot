@@ -135,6 +135,11 @@ def check_no_hardcoded(path: Path) -> list[str]:
 
 
 def main() -> int:
+    # Windows runners default stdout to cp1252; the Chinese labels below would raise
+    # UnicodeEncodeError and fail the job even though every colour pair passed.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     failures: list[str] = []
     print(f"检查 {BASE_CSS.relative_to(ROOT)}")
     failures += check(BASE_CSS, REQUIRED_PAIRS)

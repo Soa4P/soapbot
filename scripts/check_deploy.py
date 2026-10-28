@@ -325,6 +325,13 @@ def verify(mirror: str | None = None) -> Report:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The report is Chinese and Windows runners default to cp1252, so printing it
+    # raised UnicodeEncodeError on CI. The check itself was fine; only the output
+    # path failed, which is the worst kind of red build — it trains people to ignore
+    # this script. Reconfigure instead of ASCII-ifying the report.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="静态检查容器部署配置（不起 Docker）")
     parser.add_argument(
         "--mirror",
