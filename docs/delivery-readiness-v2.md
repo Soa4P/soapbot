@@ -4,7 +4,16 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；`858 passed, 5 skipped`；CI 五任务全绿。
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `858 passed, 5 skipped`。
+CI：`frontend` / `types` / `backend (windows)` 通过；`backend (ubuntu)` 因一个**此前就存在**的
+偶发用例失败（见下），`package` 随之跳过。
+
+> 关于那个偶发用例：`tests/test_wave4_plugins.py::test_hot_reload_picks_up_new_command`
+> 在 Linux 上约三分之一概率失败，报 `WorkerCrashedError: plugin worker echo died (code=1)`。
+> 同一用例在提交 `79f68ee`（早于本轮全部改动）的 CI 中就已失败，之后某一轮又通过，
+> 说明是重启路径的竞态，与本轮新增能力无关。**未修复，未掩盖**：不打算用一个 retry 把它
+> 变成绿色。下一步应当把子进程被脱敏的 stderr 尾部带进崩溃日志，再据此定位——
+> 那需要一轮 CI 观察，本轮预算未做。
 
 ---
 
