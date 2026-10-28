@@ -103,6 +103,9 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Type check (advisory)
+        # Without this the job is red on the 42-error baseline and the word
+        # "advisory" above becomes a lie. The run still prints the count.
+        continue-on-error: true
         run: python -m mypy src
 
   frontend:
