@@ -72,6 +72,12 @@ const routes = [
     component: () => import('@/views/MetricsView.vue'),
     meta: { title: '运行指标', index: '10' },
   },
+  {
+    path: '/market',
+    name: 'market',
+    component: () => import('@/views/MarketView.vue'),
+    meta: { title: '插件市场', index: '11' },
+  },
   // Anything else falls back to the overview rather than showing a dead end in a tool
   // with eight pages and no deep links.
   { path: '/:pathMatch(.*)*', redirect: '/' },

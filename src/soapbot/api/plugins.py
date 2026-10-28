@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,45 @@ def _manager():
     if manager is None:
         raise HTTPException(status_code=503, detail="plugin system is not initialised")
     return manager
+
+
+@router.post("/install")
+async def install_plugin(request: Request, file: UploadFile = File(...)) -> dict:
+    """Upload a plugin package. **This does not approve it.**
+
+    The security model keys on the manifest digest and on an explicit, per-capability
+    grant. If installation also approved the plugin, uploading a file would be the
+    whole attack: declare ``network`` + ``command``, upload, and the bot runs it. So
+    this endpoint stops at "the bytes are on disk and discovered", and the response
+    says ``approved: false`` so a caller cannot mistake one for the other.
+
+    The caller is expected to send the operator to ``POST /{name}/approve`` next; the
+    console does exactly that.
+    """
+    _authorize(request)
+    from soapbot.plugins.installer import MAX_ARCHIVE_BYTES, InstallError, install_from_zip
+
+    # Read one byte past the limit so an oversized upload is rejected by size rather
+    # than silently truncated into a malformed archive.
+    payload = await file.read(MAX_ARCHIVE_BYTES + 1)
+    manager = _manager()
+    loader = manager.loader
+    try:
+        result = install_from_zip(
+            payload,
+            loader.plugins_dir,
+            host_version=loader.host_version,
+        )
+    except InstallError as exc:
+        logger.warning("plugin install rejected name=%s: %s", file.filename, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info(
+        "plugin uploaded name=%s actor=remote sender=%s",
+        result.name,
+        file.filename,
+    )
+    return result.to_dict()
 
 
 @router.get("")

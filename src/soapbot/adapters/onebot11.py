@@ -57,6 +57,9 @@ _CAPABILITIES = frozenset(
         Capability.MUTE,
         Capability.KICK,
         Capability.GROUP_LIST,
+        # OneBot has no rate limit of its own beyond the reported 5 msg/s, and each
+        # send is an ordinary message, so sentence-by-sentence delivery is safe here.
+        Capability.PROGRESSIVE,
     }
 )
 

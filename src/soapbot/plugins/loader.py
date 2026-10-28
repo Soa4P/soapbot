@@ -257,6 +257,22 @@ class PluginLoader:
         return report
 
     def _read_manifest(self, directory: Path) -> PluginManifest:
+        """Read the manifest and require its name to match the directory.
+
+        The name/directory agreement is what makes "which plugin is this" have one
+        answer, but it is checked *here* rather than in :meth:`read_manifest` because
+        the installer parses the manifest before the directory has its final name.
+        """
+        manifest = self.read_manifest(directory)
+        if manifest.name != directory.name:
+            raise ManifestError(
+                f"manifest name {manifest.name!r} does not match directory "
+                f"{directory.name!r}"
+            )
+        return manifest
+
+    def read_manifest(self, directory: Path) -> PluginManifest:
+        """Parse and validate ``plugin.yaml`` in ``directory``, ignoring its name."""
         candidate = None
         for filename in (MANIFEST_FILENAME, MANIFEST_ALT_FILENAME):
             path = directory / filename
@@ -284,15 +300,6 @@ class PluginLoader:
 
         manifest = parse_manifest(decoded, digest=digest)
         check_host_compatibility(manifest, self.host_version)
-
-        # The manifest's declared name must match the directory, otherwise the
-        # directory name (used for storage namespacing elsewhere) and the manifest
-        # disagree, and "which plugin is this" has two answers.
-        if manifest.name != directory.name:
-            raise ManifestError(
-                f"manifest name {manifest.name!r} does not match directory "
-                f"{directory.name!r}"
-            )
         return manifest
 
     # ---------------------------------------------------------------- loading

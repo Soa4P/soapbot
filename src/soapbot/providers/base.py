@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -120,6 +121,19 @@ class BaseProvider(ABC):
     @abstractmethod
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """Non-streaming completion."""
+
+    async def stream(self, request: ChatRequest) -> AsyncIterator[str]:
+        """Yield the answer as it is produced. Default: one chunk, from ``chat``.
+
+        Deliberately *not* abstract. A provider that cannot stream should still work,
+        and the fallback belongs in the contract: as a merely-missing method it
+        surfaced as ``AttributeError`` at call time, which the caller could not tell
+        apart from a genuine provider failure, so it failed over to another provider
+        that lacked the same method. Declaring ``STREAM`` and not implementing it is
+        no longer expressible.
+        """
+        resp = await self.chat(request)
+        yield resp.content
 
     async def vision(self, request: ChatRequest) -> ChatResponse:
         """Image understanding. Defaults to chat (multimodal endpoints accept parts)."""
