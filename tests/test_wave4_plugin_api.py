@@ -157,3 +157,63 @@ def test_plugin_audit_endpoint_is_scoped(client: TestClient) -> None:
     events = client.get("/api/plugins/echo/errors").json()["events"]
     assert events
     assert all(e.get("plugin") == "echo" for e in events)
+
+# ------------------------------------------------------------------- upload
+
+_MANIFEST = """\
+name: uploaded
+version: 1.0.0
+description: uploaded in a test
+entry: main:Plugin
+trust: community
+capabilities:
+  - command
+"""
+
+
+def _package(extra: dict[str, str] | None = None) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("uploaded/plugin.yaml", _MANIFEST)
+        zf.writestr("uploaded/main.py", "class Plugin:\n    pass\n")
+        for name, body in (extra or {}).items():
+            zf.writestr(name, body)
+    return buf.getvalue()
+
+
+def test_upload_installs_but_does_not_approve(client: TestClient) -> None:
+    """If upload approved, uploading a file would be the whole attack."""
+    response = client.post(
+        "/api/plugins/install",
+        files={"file": ("uploaded.zip", _package(), "application/zip")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "uploaded"
+    assert body["approved"] is False
+
+    listed = {p["name"]: p for p in client.get("/api/plugins").json()["installed"]}
+    assert "uploaded" in listed
+    assert listed["uploaded"]["approved"] is False
+    assert listed["uploaded"]["loaded"] is False
+    assert set(listed["uploaded"]["pending"]) == {"command"}
+
+
+def test_upload_rejects_traversal_with_a_readable_reason(client: TestClient) -> None:
+    response = client.post(
+        "/api/plugins/install",
+        files={"file": ("evil.zip", _package({"../evil.py": "x"}), "application/zip")},
+    )
+    assert response.status_code == 400
+    assert "traversal" in response.json()["detail"] or "escapes" in response.json()["detail"]
+
+
+def test_upload_rejects_a_non_zip(client: TestClient) -> None:
+    response = client.post(
+        "/api/plugins/install",
+        files={"file": ("notes.txt", b"not a zip", "text/plain")},
+    )
+    assert response.status_code == 400

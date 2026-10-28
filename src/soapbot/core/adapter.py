@@ -48,6 +48,14 @@ class Capability(StrEnum):
     MUTE = "mute"
     KICK = "kick"
     GROUP_LIST = "group_list"
+    PROGRESSIVE = "progressive"
+    """Can receive a reply as several messages, one per sentence.
+
+    Declared separately from TEXT because it is a delivery-shape promise, not a
+    content promise: the official QQ API has a narrow passive-reply window where a
+    second unsolicited message is rejected, so an adapter must opt in rather than
+    have the pipeline assume that sending twice is fine.
+    """
 
 
 @dataclass(slots=True)

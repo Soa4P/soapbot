@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 from soapbot.ai.compressor import ContextCompressor
-from soapbot.ai.engine import AIEngine, AIRequest
+from soapbot.ai.engine import AIEngine, AIRequest, AIResult
 from soapbot.ai.persona import PersonaStore
+from soapbot.ai.streaming import SentenceAggregator
+from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
+from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import leaked_canary, redact
@@ -67,6 +71,10 @@ class ModelStage(Stage):
         *,
         tools=None,
         max_tool_rounds: int | None = None,
+        streaming: bool = False,
+        chunk_chars: int = 80,
+        first_packet_deadline: float = 1.2,
+        send_interval: float = 0.35,
     ) -> None:
         self.engine = engine
         self.compressor = compressor
@@ -75,6 +83,13 @@ class ModelStage(Stage):
         self.max_tool_rounds = (
             self.MAX_TOOL_ROUNDS if max_tool_rounds is None else max_tool_rounds
         )
+        self.streaming = streaming
+        """Opt-in. Progressive delivery changes the *shape* of what a group receives
+        — several messages instead of one — so it is a deployment decision, not an
+        implementation detail an operator should discover by counting messages."""
+        self.chunk_chars = chunk_chars
+        self.first_packet_deadline = first_packet_deadline
+        self.send_interval = send_interval
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         # A command already produced the reply; do not spend a model call on it.
@@ -121,8 +136,21 @@ class ModelStage(Stage):
                 tools=available_tools if rounds < self.max_tool_rounds else [],
                 tool_note="\n\n".join(notes),
             )
+            # Stream only in a round where no tool can be requested. Tools are already
+            # withdrawn on the final round (see above), so this is exactly the round
+            # whose output cannot turn out to be a tool call after half of it has
+            # already been delivered to the group.
+            use_stream = (
+                self.streaming
+                and (not available_tools or rounds >= self.max_tool_rounds)
+                and ctx.adapter.supports(Capability.PROGRESSIVE)
+            )
             try:
-                result = await self.engine.respond(req)
+                result = (
+                    await self._stream_reply(ctx, req)
+                    if use_stream
+                    else await self.engine.respond(req)
+                )
             except Exception as exc:
                 logger.error("model stage failed trace=%s: %s", ctx.event.trace_id, exc)
                 ctx.extras["model_error"] = str(exc)
@@ -162,6 +190,92 @@ class ModelStage(Stage):
             "completion_tokens": result.completion_tokens,
         }
         return StageResult()
+
+    async def _stream_reply(self, ctx: PipelineContext, req: AIRequest) -> AIResult:
+        """Answer progressively: send each sentence as the model finishes it.
+
+        Two failure policies are encoded here and both matter. If the provider dies
+        *before* anything was delivered, the exception propagates so the ordinary
+        failover path runs. If it dies *after* a sentence is in the group, the partial
+        answer is kept and the interruption is recorded — a second complete answer
+        on top of a fragment reads as two replies, one of them truncated.
+        """
+        call = await self.engine.prepare_stream(req)
+        aggregator = SentenceAggregator(
+            max_chars=self.chunk_chars,
+            first_packet_deadline=self.first_packet_deadline,
+        )
+        sender = ProgressiveSender(
+            ctx.adapter,
+            lambda text, first: _build_outgoing(
+                ctx, [MessageSegment.text(text)], reply=first
+            ),
+            min_interval=self.send_interval,
+        )
+
+        started = time.perf_counter()
+        first_token_ms: float | None = None
+        stream_error = ""
+
+        stream = self.engine.stream(call)
+        try:
+            async for piece in stream:
+                if first_token_ms is None:
+                    first_token_ms = round((time.perf_counter() - started) * 1000, 2)
+                for sentence in aggregator.feed(piece, time.perf_counter()):
+                    if not await sender.send(sentence):
+                        break
+                if not sender.ok or sender.truncated:
+                    break
+        except Exception as exc:  # provider died mid-answer
+            stream_error = str(exc)
+            logger.warning(
+                "stream interrupted trace=%s after=%d sentences: %s",
+                ctx.event.trace_id,
+                len(sender.sent),
+                exc,
+            )
+            if not sender.sent:
+                # Nothing was delivered, so there is nothing to reconcile: fall back
+                # to the ordinary call instead of failing a turn the user could have
+                # had for the price of a second request.
+                return await self.engine.respond(req)
+        finally:
+            await stream.aclose()
+
+        if sender.ok and not stream_error:
+            for sentence in aggregator.flush():
+                if not await sender.send(sentence):
+                    break
+
+        delivered = "".join(sender.sent)
+        stats = sender.stats()
+        if stream_error:
+            # Surface the provider fault through the same field the reply stage
+            # reports, so an operator reading one trace sees why the answer stopped.
+            stats["error"] = stream_error
+        ctx.extras["stream"] = {
+            **stats,
+            "first_token_ms": first_token_ms,
+            "total_ms": round((time.perf_counter() - started) * 1000, 2),
+            "interrupted": bool(stream_error),
+        }
+        ctx.extras["progressive_sent"] = bool(sender.sent)
+
+        if not delivered:
+            # Nothing reached the group, so nothing has to be reconciled: take the
+            # ordinary path and let the user get a single normal reply.
+            logger.info("stream produced nothing trace=%s, falling back", ctx.event.trace_id)
+            return await self.engine.respond(req)
+
+        return AIResult(
+            text=delivered,
+            persona_id=call.persona_id,
+            provider=call.provider,
+            prompt_tokens=call.prompt_tokens,
+            compression=call.compression,
+            image_descriptions=call.image_descriptions,
+        )
 
     async def _run_tools(self, ctx: PipelineContext, calls: list[dict], *, principal) -> str:
         """Execute the model's tool calls and render their results as a note.

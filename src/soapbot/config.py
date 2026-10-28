@@ -87,6 +87,29 @@ class Settings(BaseSettings):
     and any configured adapter for no benefit.
     """
 
+    # ---- streaming ----
+    stream_reply: bool = False
+    """Deliver a reply sentence by sentence while the model is still producing it.
+
+    Off by default. Turning it on changes what a group receives from one message to
+    several, which is a visible behaviour change — an operator should choose it, not
+    discover it. It also requires the adapter to declare ``PROGRESSIVE``; an adapter
+    that cannot send twice degrades to the single-message path on its own.
+    """
+
+    stream_chunk_chars: int = 80
+    """Character budget before a sentence is cut at the nearest comma/space."""
+
+    stream_first_packet_deadline: float = 1.2
+    """Seconds to wait for the first sentence before sending what has accumulated.
+
+    Without it a slow model makes time-to-first-message equal to total latency, which
+    removes the only reason to stream at all.
+    """
+
+    stream_send_interval: float = 0.35
+    """Minimum seconds between two progressive messages to the same group."""
+
     scheduler_tick_seconds: float = 30.0
     """How often due plugin cron jobs and expired budget reservations are swept.
 

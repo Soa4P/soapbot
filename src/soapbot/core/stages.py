@@ -281,6 +281,16 @@ class ReplyStage(Stage):
         if not ctx.model_reply:
             return StageResult(halt=True, reason="empty_reply")
 
+        # Already delivered sentence by sentence during the model call. Sending the
+        # whole text again would repeat the answer to the group, so this stage's job
+        # is reduced to reporting the outcome the stream already knows.
+        if ctx.extras.get("progressive_sent"):
+            stats = ctx.extras.get("stream") or {}
+            ctx.extras["send_ok"] = not stats.get("error")
+            ctx.extras["send_error"] = stats.get("error", "")
+            ctx.extras["reply_chunks"] = list(stats.get("sent") or [])
+            return StageResult()
+
         segments = [MessageSegment.text(ctx.model_reply)]
         out = ctx.outbound or _build_outgoing(ctx, segments)
         out.segments = segments
@@ -288,6 +298,9 @@ class ReplyStage(Stage):
         receipt = await ctx.adapter.send(out)
         ctx.extras["send_ok"] = receipt.ok
         ctx.extras["send_error"] = receipt.error
+        # Same key as the progressive path, so the trace reader does not have to
+        # branch on "was this streamed?" to find where the chunks went.
+        ctx.extras["reply_chunks"] = []
         if not receipt.ok:
             logger.warning(
                 "reply send failed adapter=%s target=%s err=%s",
@@ -298,7 +311,15 @@ class ReplyStage(Stage):
         return StageResult()
 
 
-def _build_outgoing(ctx: PipelineContext, segments: list[MessageSegment]):
+def _build_outgoing(
+    ctx: PipelineContext, segments: list[MessageSegment], *, reply: bool = True
+):
+    """Build the outgoing message.
+
+    ``reply`` exists for progressive delivery: only the first sentence quotes the
+    triggering message. Quoting every one of them turns a three-sentence answer into
+    three quote blocks, which reads as three separate replies from the bot.
+    """
     from soapbot.core.message import OutgoingMessage
 
     event = ctx.event
@@ -307,5 +328,7 @@ def _build_outgoing(ctx: PipelineContext, segments: list[MessageSegment]):
         segments=segments,
         group_id=event.group_id,
         user_id=event.sender.user_id,
-        reply_to=event.message_id if ctx.adapter.supports(Capability.REPLY) else "",
+        reply_to=(
+            event.message_id if reply and ctx.adapter.supports(Capability.REPLY) else ""
+        ),
     )

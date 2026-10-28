@@ -147,6 +147,17 @@ class MessageTrace:
     stages: list[StageTrace] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
 
+    chunks: list[str] = field(default_factory=list)
+    """Sentences actually delivered, in order.
+
+    Empty when the reply went out as a single message. Kept as its own field rather
+    than inside ``extras`` because ``extras`` is filtered to scalars (it is copied to
+    bound memory for every trace) and a list would silently disappear from it.
+    """
+
+    stream: dict[str, Any] = field(default_factory=dict)
+    """Progressive-delivery timings: first token, first send, interruption."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
@@ -157,6 +168,8 @@ class MessageTrace:
             "halt_reason": self.halt_reason,
             "stages": [s.to_dict() for s in self.stages],
             "slowest": self.slowest(),
+            "chunks": list(self.chunks),
+            "stream": dict(self.stream),
         }
 
     def slowest(self) -> dict[str, Any] | None:
@@ -297,6 +310,23 @@ class TraceStore:
         trace.extras = {
             k: v for k, v in extras.items() if isinstance(v, str | int | float | bool)
         }
+        trace.chunks = [str(c) for c in (extras.get("reply_chunks") or [])]
+        stream = extras.get("stream")
+        if isinstance(stream, dict):
+            # Whitelisted, not copied: this dict comes from model output and would be
+            # stored verbatim for the life of the ring buffer otherwise.
+            trace.stream = {
+                key: stream.get(key)
+                for key in (
+                    "count",
+                    "chars",
+                    "first_token_ms",
+                    "first_send_ms",
+                    "total_ms",
+                    "interrupted",
+                    "truncated",
+                )
+            }
         self._traces.append(trace)
         self._maybe_sample()
 

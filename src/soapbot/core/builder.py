@@ -181,7 +181,16 @@ def build_pipeline(
 
     # --- generation ---
     if engine is not None:
-        pipeline.add(ModelStage(engine, tools=tools))
+        pipeline.add(
+            ModelStage(
+                engine,
+                tools=tools,
+                streaming=settings.stream_reply,
+                chunk_chars=settings.stream_chunk_chars,
+                first_packet_deadline=settings.stream_first_packet_deadline,
+                send_interval=settings.stream_send_interval,
+            )
+        )
         pipeline.add(SafetyStage())
 
     # --- delivery and post-processing ---

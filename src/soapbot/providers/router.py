@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,24 @@ from soapbot.providers.base import (
 logger = logging.getLogger(__name__)
 
 _FACTORIES = {}
+
+
+async def _chat_once(provider: BaseProvider, request: ChatRequest) -> AsyncIterator[str]:
+    resp = await provider.chat(request)
+    yield resp.content
+
+
+def _stream_of(provider: BaseProvider, request: ChatRequest) -> AsyncIterator[str]:
+    """Return a piece iterator for this provider.
+
+    A provider that does not subclass :class:`BaseProvider` — a plugin-supplied one,
+    or a test double — has no inherited ``stream``. Applying the fallback here keeps
+    the failover loop from confusing an ``AttributeError`` with a provider outage.
+    """
+    stream_fn = getattr(provider, "stream", None)
+    if callable(stream_fn):
+        return stream_fn(request)
+    return _chat_once(provider, request)
 
 
 def register_provider_kind(kind: str, factory) -> None:
@@ -169,6 +188,80 @@ class ProviderRouter:
                 logger.warning("provider=%s failed slot=%s: %s", provider.id, slot, exc)
 
         raise ProviderError("all providers failed: " + " | ".join(errors))
+
+    def _stream_candidates(self) -> list[BaseProvider]:
+        """Streaming providers first, then chat-only ones as a last resort.
+
+        A provider whose ``stream`` is the inherited default still *works* — it
+        yields the whole answer once — so it is a better fallback than "no reply at
+        all". Ordering by priority within each group keeps the operator's intent.
+        """
+        now = time.time()
+        usable = [
+            p
+            for p in self._ordered()
+            if (p.supports(CapabilitySlot.STREAM) or p.supports(CapabilitySlot.CHAT))
+            and not (self._stats.get(p.id) and self._stats[p.id].disabled_until > now)
+        ]
+        usable.sort(key=lambda p: (not p.supports(CapabilitySlot.STREAM), p.config.priority))
+        return usable
+
+    async def stream(
+        self,
+        request: ChatRequest,
+        *,
+        slot: CapabilitySlot = CapabilitySlot.STREAM,
+        on_pick: Callable[[str], None] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield pieces from the first provider that produces one.
+
+        Failover stops at the first token. Once part of an answer has reached a group,
+        switching providers would splice two completions together — visible to every
+        reader, and worse than finishing a mediocre one. A provider that fails
+        *before* its first yield is still replaced, which is the case that matters in
+        practice: bad key, dead host, 429 on connect.
+        """
+        candidates = self._stream_candidates()
+        if not candidates:
+            raise ProviderError(f"no provider available for slot={slot}")
+
+        errors: list[str] = []
+        for provider in candidates:
+            stat = self._stats[provider.id]
+            t0 = time.perf_counter()
+            produced = False
+            try:
+                async for piece in _stream_of(provider, request):
+                    if not produced:
+                        produced = True
+                        stat.calls += 1
+                        stat.last_latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+                        stat.consecutive_failures = 0
+                        stat.last_error = ""
+                        if on_pick is not None:
+                            on_pick(provider.id)
+                        logger.info(
+                            "provider=%s stream first-token latency=%.0fms",
+                            provider.id,
+                            stat.last_latency_ms,
+                        )
+                    yield piece
+                if not produced:
+                    raise ProviderError("stream produced no content")
+                return
+            except Exception as exc:
+                stat.calls += 1 if not produced else 0
+                stat.failures += 1
+                stat.consecutive_failures += 1
+                stat.last_error = str(exc)
+                errors.append(f"{provider.id}: {exc}")
+                if produced:
+                    # Half an answer is already in the group. A second provider would
+                    # continue someone else's sentence; surfacing the break is honest.
+                    raise
+                logger.warning("provider=%s stream failed: %s", provider.id, exc)
+
+        raise ProviderError("all stream providers failed: " + " | ".join(errors))
 
     async def embed(self, texts: list[str]) -> list[float] | list[list[float]]:
         available = self._available(CapabilitySlot.EMBED)

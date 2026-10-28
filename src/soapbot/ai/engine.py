@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,6 +86,26 @@ class AIResult:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class StreamingCall:
+    """A prepared request plus the metadata a streamed answer must still report.
+
+    The generator cannot return a value, so the caller needs somewhere to read the
+    persona id, compression ratio and image descriptions once the stream is done.
+    Pairing them with the request up front is duller than a mutable side channel and
+    considerably easier to follow.
+    """
+
+    request: ChatRequest
+    slot: CapabilitySlot
+    persona_id: str = ""
+    compression: dict[str, Any] = field(default_factory=dict)
+    image_descriptions: list[str] = field(default_factory=list)
+    prompt_tokens: int = 0
+    provider: str = ""
+    """Filled in by the router when the first token arrives; empty if nothing did."""
+
+
 _VISION_PROMPT = (
     "请用中文客观描述这张图片的内容：主体、场景、文字（如有）、以及任何值得注意的细节。"
     "如果是多帧网格，请说明各帧之间的变化。只描述你确实看到的内容。"
@@ -115,6 +135,64 @@ class AIEngine:
 
     # ------------------------------------------------------------------ public
     async def respond(self, req: AIRequest) -> AIResult:
+        persona, chat_req, slot, descs, compressed = await self._prepare(req)
+        resp: ChatResponse = await self.router.chat(chat_req, slot=slot)
+
+        return AIResult(
+            text=resp.content,
+            persona_id=persona.id if persona else "",
+            provider=resp.provider,
+            prompt_tokens=resp.prompt_tokens or compressed.compressed_tokens,
+            completion_tokens=resp.completion_tokens,
+            compression={
+                "original_tokens": compressed.original_tokens,
+                "compressed_tokens": compressed.compressed_tokens,
+                "ratio": compressed.ratio,
+                "strategies": compressed.strategy,
+                "folded_turns": compressed.folded_turns,
+            },
+            image_descriptions=descs,
+            tool_calls=resp.tool_calls,
+        )
+
+    async def prepare_stream(self, req: AIRequest) -> StreamingCall:
+        """Build the request once, so the streamed path reports the same metadata."""
+        persona, chat_req, slot, descs, compressed = await self._prepare(req)
+        return StreamingCall(
+            request=chat_req,
+            # Images are still in the messages; the *slot* must be STREAM because the
+            # question being asked here is "who can produce tokens", not "who can see".
+            slot=CapabilitySlot.STREAM,
+            persona_id=persona.id if persona else "",
+            compression={
+                "original_tokens": compressed.original_tokens,
+                "compressed_tokens": compressed.compressed_tokens,
+                "ratio": compressed.ratio,
+                "strategies": compressed.strategy,
+                "folded_turns": compressed.folded_turns,
+            },
+            image_descriptions=descs,
+            prompt_tokens=compressed.compressed_tokens,
+        )
+
+    async def stream(self, call: StreamingCall) -> AsyncIterator[str]:
+        """Yield pieces of the answer as the provider produces them."""
+
+        def _picked(provider_id: str) -> None:
+            call.provider = provider_id
+
+        async for piece in self.router.stream(call.request, slot=call.slot, on_pick=_picked):
+            yield piece
+
+    async def _prepare(
+        self, req: AIRequest
+    ) -> tuple[Persona | None, ChatRequest, CapabilitySlot, list[str], Any]:
+        """Assemble the request. Shared by the blocking and streaming paths.
+
+        Kept in one place on purpose: two copies of persona/profile/vision assembly
+        drift, and the drift shows up as "streaming answers differently", which is
+        the hardest kind of difference to notice.
+        """
         persona = req.persona or self.personas.resolve()[0]
         system = self._system_prompt(persona, req)
 
@@ -144,24 +222,7 @@ class AIEngine:
             chat_req.messages[-1] = ChatMessage(role="user", content=req.user_text or "[图片]")
             slot = CapabilitySlot.CHAT
 
-        resp: ChatResponse = await self.router.chat(chat_req, slot=slot)
-
-        return AIResult(
-            text=resp.content,
-            persona_id=persona.id if persona else "",
-            provider=resp.provider,
-            prompt_tokens=resp.prompt_tokens or compressed.compressed_tokens,
-            completion_tokens=resp.completion_tokens,
-            compression={
-                "original_tokens": compressed.original_tokens,
-                "compressed_tokens": compressed.compressed_tokens,
-                "ratio": compressed.ratio,
-                "strategies": compressed.strategy,
-                "folded_turns": compressed.folded_turns,
-            },
-            image_descriptions=descs,
-            tool_calls=resp.tool_calls,
-        )
+        return persona, chat_req, slot, descs, compressed
 
     # ------------------------------------------------------------------ helpers
     def _system_prompt(self, persona: Persona | None, req: AIRequest) -> str:
