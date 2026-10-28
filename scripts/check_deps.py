@@ -39,6 +39,13 @@ def _versions(specs: list[str]) -> dict[str, str]:
 
 
 def main() -> int:
+    # The summary line below is Chinese. On a Windows runner stdout is cp1252, and
+    # printing it raised UnicodeEncodeError — the check passed and the *message*
+    # failed the job, which teaches people to ignore the check. Reconfigure rather
+    # than transliterate: the report is the product here.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     declared = pyproject["project"]["dependencies"]
 

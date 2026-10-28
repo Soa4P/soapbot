@@ -24,6 +24,8 @@ Findings (severity from the review):
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import FrozenInstanceError
@@ -36,7 +38,6 @@ from soapbot.plugins.context import PluginContext
 from soapbot.plugins.isolation import (
     HOST_AUTHORITY,
     IsolatedRunner,
-    IsolationError,
     NullLedger,
     PluginCrashedError,
     PluginTimeoutError,
@@ -281,21 +282,77 @@ async def test_i4_os_exit_does_not_kill_host() -> None:
     assert True
 
 
-async def test_i4_sigkill_of_parent_fails_without_harm() -> None:
-    """A plugin that tries to kill the host process must fail harmlessly.
+# Runs the host inside a disposable process, because the plugin under test kills its
+# own parent. Doing this inline is what this test used to do, and it killed pytest
+# itself on Linux (exit 137) — visible in CI, invisible on Windows where `signal` has
+# no SIGKILL and the child raised instead. A security test that only passes on the
+# platform where the attack cannot be expressed is not a security test.
+_HOST_DRIVER = r'''
+import asyncio
+import tempfile
+from pathlib import Path
 
-    '' is used as the signal-free probe: the child raises (no permission / not
-    supported) and reports the error type. The point is that the *host* survives.
-    """
-    with pytest.raises((PluginCrashedError, IsolationError)):
-        await _run(
-            "import os, signal\n"
-            "class Plugin:\n"
-            "    def handler(self, caller, args):\n"
-            "        os.kill(os.getppid(), signal.SIGKILL)\n"
-            "        return 'sent'\n"
+from soapbot.plugins.isolation import IsolatedRunner
+
+PLUGIN = (
+    "import os, signal\n"
+    "class Plugin:\n"
+    "    def handler(self, caller, args):\n"
+    "        os.kill(os.getppid(), signal.SIGKILL)\n"
+    "        return 'sent'\n"
+)
+
+
+async def main() -> None:
+    plugin_dir = Path(tempfile.mkdtemp())
+    (plugin_dir / "main.py").write_text(PLUGIN, encoding="utf-8")
+    runner = IsolatedRunner(timeout=3.0, memory_bytes=256 * 1024 * 1024)
+    try:
+        await runner.run_entry(
+            plugin_dir=plugin_dir,
+            attr="Plugin",
+            handler="handler",
+            payload={"caller": {"user_id": "1"}, "args": ["x"]},
         )
-    assert True
+    except BaseException as exc:  # noqa: BLE001 - the type is the observation
+        print("handled:" + type(exc).__name__, flush=True)
+        return
+    print("returned", flush=True)
+
+
+asyncio.run(main())
+'''
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows has no signal.SIGKILL, so the attack cannot be expressed",
+)
+def test_i4_same_uid_child_can_sigkill_its_parent() -> None:
+    """Characterises the *residual* risk: signalling is outside the process boundary.
+
+    ``IsolatedRunner`` starts the child in its own session, which makes it safe to
+    ``killpg`` a plugin and its grandchildren. Session membership does not remove the
+    ability of a same-uid process to call ``kill(getppid())``, so a hostile plugin
+    still takes the bot process down with it. That is why the deployment guidance
+    requires a separate uid or a container: no userspace trick closes it.
+
+    The host under test is a throwaway child, so this assertion cannot damage the
+    runner. Expected outcome: the driver dies from SIGKILL (return code -9) before it
+    can report a handled exception.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", _HOST_DRIVER],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert proc.returncode == -9, (
+        "expected the plugin to SIGKILL its host process; got "
+        f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr[-800:]!r}"
+    )
+    # The supervisor must not also hand back a result: the child never replied.
+    assert "returned" not in proc.stdout
 
 
 async def test_i4_infinite_loop_times_out() -> None:
