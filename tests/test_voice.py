@@ -66,6 +66,53 @@ def test_a_public_address_is_allowed() -> None:
     assert check_audio_url("https://8.8.8.8/a.amr") == "https://8.8.8.8/a.amr"
 
 
+async def test_resolution_does_not_block_the_event_loop(monkeypatch) -> None:
+    """A slow DNS answer must not freeze every other conversation.
+
+    Asserted behaviourally rather than by reading the source: a ticker runs alongside
+    the check, and the resolver is slowed to 0.25 s. Through ``loop.getaddrinfo`` the
+    resolution happens on a thread and the ticker keeps ticking; a synchronous
+    ``socket.getaddrinfo`` would starve it and this would count ~0 ticks.
+    """
+    import asyncio
+    import socket
+    import time
+
+    from soapbot.voice.stt import async_check_audio_url
+
+    real = socket.getaddrinfo
+
+    def slow(*args, **kwargs):
+        time.sleep(0.25)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow)
+
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        for _ in range(5):
+            await asyncio.sleep(0.04)
+            ticks += 1
+
+    # Counting ticks *during* the check is the part that discriminates. Counting them
+    # afterwards proves nothing: the loop is free again once a blocking call returns,
+    # so an unbounded "did it tick?" assertion passes either way — which is what the
+    # first version of this test did.
+    during = 0
+
+    async def checked() -> None:
+        nonlocal during
+        before = ticks
+        await async_check_audio_url("https://8.8.8.8/x.amr")
+        during = ticks - before
+
+    await asyncio.gather(checked(), ticker())
+
+    assert during >= 3, f"the loop was blocked during resolution (ticks={during})"
+
+
 def test_an_allowlisted_internal_host_is_allowed() -> None:
     """NapCat serves record files from its own HTTP port on localhost.
 
