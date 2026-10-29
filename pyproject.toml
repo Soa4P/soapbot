@@ -6,12 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 
-# Every entry here is imported somewhere under src/soapbot. Four that were listed
+# Every entry here is imported somewhere under src/soapbot. Three that were listed
 # and never used have been removed — structlog (logging is stdlib + a ring buffer),
-# watchdog (reload is an explicit call), python-multipart (no multipart endpoint)
-# and edge-tts (voice output does not exist). A dependency nobody imports is not
-# free: it widens the audit surface and tells reviewers the project has a feature
-# it does not.
+# watchdog (reload is an explicit call) and python-multipart (no multipart endpoint;
+# the plugin upload takes a raw body instead). A dependency nobody imports is not
+# free: it widens the audit surface and tells reviewers the project has a feature it
+# does not.
+#
+# edge-tts used to be in that list because voice output did not exist. It does now,
+# so it is back — as the optional extra below, not here. Speech is a vendor network
+# client that most installs will never call, and putting it in the default set would
+# make 'pip install and run' heavier for everyone to serve one feature.
 dependencies = [
     "fastapi==0.162.0",
     "uvicorn[standard]==0.34.0",
@@ -33,6 +38,9 @@ dependencies = [
 [project.optional-dependencies]
 qq-official = ["qq-botpy==1.2.1"]
 precision = ["tiktoken==0.8.0"]
+# Text-to-speech for reply-as-voice. Inbound transcription needs no extra: it goes
+# through the provider's ``transcribe`` slot, like every other model call.
+voice = ["edge-tts==7.0.2"]
 dev = [
     "pytest==9.0.3",
     "pytest-asyncio==1.4.1",

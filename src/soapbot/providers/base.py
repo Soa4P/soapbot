@@ -1,6 +1,6 @@
 """Provider contract.
 
-Four capability slots: ``chat`` / ``stream`` / ``vision`` / ``embed``.
+Five capability slots: ``chat`` / ``stream`` / ``vision`` / ``embed`` / ``transcribe``.
 A provider declares which slots it actually implements; the router picks a
 provider that satisfies the request rather than assuming every provider can do
 everything (Ollama cannot embed images, many relay endpoints cannot stream).
@@ -27,6 +27,7 @@ class CapabilitySlot(StrEnum):
     STREAM = "stream"
     VISION = "vision"
     EMBED = "embed"
+    TRANSCRIBE = "transcribe"
 
 
 @dataclass(slots=True)
@@ -141,6 +142,19 @@ class BaseProvider(ABC):
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         raise ProviderError(f"{self.kind} does not implement embed")
+
+    async def transcribe(
+        self, audio: bytes, *, mime: str = "audio/silk", language: str = ""
+    ) -> str:
+        """Speech to text. Default: refuse, explicitly.
+
+        ``stream`` could get an honest default because a non-streaming call still
+        produces the same answer. There is no such fallback here: a chat call cannot
+        turn audio into words. A placeholder would put invented words into the
+        conversation, attributed to a user who never typed them — worse than admitting
+        the gap. The caller degrades to ``[语音]``, which is visible to everyone.
+        """
+        raise ProviderError(f"{self.kind} does not implement transcribe")
 
     def describe(self) -> dict[str, Any]:
         return {

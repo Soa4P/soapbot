@@ -375,6 +375,7 @@ soapbot/
 ```bash
 pip install -e ".[qq-official]"   # qq-botpy：仅 QQ 官方适配器需要
 pip install -e ".[precision]"     # tiktoken：更精确的 token 计数
+pip install -e ".[voice]"         # edge-tts：回复转语音（入站转写不需要它）
 pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 ```
 

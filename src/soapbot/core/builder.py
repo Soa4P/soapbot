@@ -105,6 +105,7 @@ def build_pipeline(
     budget=None,
     bilibili=None,
     tools=None,
+    router=None,
 ) -> Pipeline:
     """Build the pipeline. Stage order is load-bearing.
 
@@ -179,6 +180,28 @@ def build_pipeline(
     if kb is not None:
         pipeline.add(KnowledgeStage(kb))
 
+    # --- voice: both directions are opt-in and both degrade to text -------------
+    voice_router = router or getattr(engine, "router", None)
+    transcriber = None
+    if settings.voice_enabled and voice_router is not None:
+        from soapbot.voice.stt import ProviderTranscriber
+
+        transcriber = ProviderTranscriber(
+            voice_router,
+            max_bytes=settings.voice_max_bytes,
+            language=settings.voice_language,
+        )
+
+    tts = None
+    if settings.voice_tts_enabled:
+        from soapbot.voice.tts import EdgeTts
+
+        # Constructed eagerly, and deliberately not probed here: whether edge-tts is
+        # importable is discovered on the first synthesis, where the fallback to text
+        # already lives. Importing it at start-up would turn a missing optional
+        # dependency into a failed boot.
+        tts = EdgeTts(settings.voice_tts_voice)
+
     # --- generation ---
     if engine is not None:
         pipeline.add(
@@ -189,12 +212,13 @@ def build_pipeline(
                 chunk_chars=settings.stream_chunk_chars,
                 first_packet_deadline=settings.stream_first_packet_deadline,
                 send_interval=settings.stream_send_interval,
+                transcriber=transcriber,
             )
         )
         pipeline.add(SafetyStage())
 
     # --- delivery and post-processing ---
-    pipeline.add(ReplyStage())
+    pipeline.add(ReplyStage(tts=tts))
     if memory is not None:
         pipeline.add(PersistReplyStage(memory))
         if extractor is not None:
@@ -430,6 +454,7 @@ def build_runtime(
         audit=audit_log,
         plugin_manager=plugin_manager,
         budget=budget_commands,
+        router=router,
         bilibili=bilibili_commands,
         tools=tool_registry,
     )
