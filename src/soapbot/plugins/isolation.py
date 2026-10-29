@@ -58,6 +58,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: Address-space ceiling for a plugin process, in bytes.
+#:
+#: 256 MiB was too small and killed healthy plugins. ``RLIMIT_AS`` counts **virtual**
+#: address space, and a bare CPython reserves a few hundred MiB of it (arenas, mmap'd
+#: libraries, guard pages) before any plugin code runs — so the first thread creation
+#: could fail with "can't start new thread" and the worker would exit 1 having said
+#: nothing. The limit still contains a runaway allocation; it just stops hugging the
+#: interpreter. Defined once here so the three call sites cannot drift apart again.
+DEFAULT_PLUGIN_MEMORY_BYTES = 512 * 1024 * 1024
+
 #: Windows process-creation flag for a new process group. Read defensively because
 #: the constant only exists on Windows.
 _CREATE_NEW_PROCESS_GROUP = getattr(__import__("subprocess"), "CREATE_NEW_PROCESS_GROUP", 0)
@@ -295,7 +305,9 @@ def _apply_limits():
         import resource
         # Address space: a memory-bomb plugin dies alone instead of taking the bot
         # down with it (the OOM killer picks the largest process, not the guilty one).
-        cap = int(os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", 256 * 1024 * 1024))
+        cap = int(
+            os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", DEFAULT_PLUGIN_MEMORY_BYTES)
+        )
         resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
         # No core dumps: a dump of this process can contain host memory inherited
         # before exec, which would turn a crash into a disclosure.
@@ -381,7 +393,7 @@ class IsolatedRunner:
         self,
         *,
         timeout: float = DEFAULT_TIMEOUT,
-        memory_bytes: int = 256 * 1024 * 1024,
+        memory_bytes: int = DEFAULT_PLUGIN_MEMORY_BYTES,
     ) -> None:
         self.timeout = timeout
         self.memory_bytes = memory_bytes

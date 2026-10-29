@@ -171,10 +171,19 @@ return self._proc is not None and self._proc.returncode is None
 ### 3.3 资源限制（POSIX）
 
 ```python
-resource.setrlimit(RLIMIT_AS,   256MB)   # 内存
+resource.setrlimit(RLIMIT_AS,   512MB)   # 地址空间上限（注意是虚拟地址，见下）
 resource.setrlimit(RLIMIT_CORE, 0)       # 禁 core dump（防密钥写入磁盘）
-resource.setrlimit(RLIMIT_NPROC, 64)     # 防 fork 炸弹
 ```
+
+`RLIMIT_NPROC` 已被**移除**，它原本被当作防 fork 炸弹的手段，实际上是有害的：它按
+**真实 uid 全系统**计数，且把**线程**也算进去。共用账号上（CI runner 即是）这份配额在
+worker 启动前就被别人花掉一部分，于是子进程第一次 `run_in_executor` 创建读帧线程时就抛
+`RuntimeError: can't start new thread`，进程以退出码 1 静默死亡；而且它限制的是整个 uid，
+会连带压住兄弟进程，并不构成隔离。
+
+`RLIMIT_AS` 从 256MB 提到 512MB 也是同一类错误：它计的是**虚拟**地址空间，而裸 CPython
+在跑任何插件代码前就已保留数百 MB（arena、mmap 的库、guard page），256MB 之下连一个
+8MB 的线程栈都放不下。真正的 fork 炸弹防护是 `killpg`，见下。
 
 超时用 `killpg` 杀**整个进程组**。此前只杀直接子进程，插件 spawn 的 20 个 helper 会存活并继续吃 CPU——"被隔离"的插件仍在烧机器。
 
@@ -284,8 +293,8 @@ async def test_plugin_runs_in_a_separate_process_from_the_production_builder(tmp
 |---|---|---|---|
 | 死循环 | 永不返回 | 超时 → `killpg` | `TimeoutError after 3.0s` |
 | `os._exit()` | 进程猝死 | 只杀死 worker，宿主存活 | 宿主 pid 不变 |
-| fork 炸弹 / 遗留 helper | CPU 被吃满 | `RLIMIT_NPROC` + 杀进程组 | 组内全灭 |
-| 内存炸弹 | OOM | `RLIMIT_AS = 256MB` | 分配失败即崩，宿主不受影响 |
+| fork 炸弹 / 遗留 helper | CPU 被吃满 | 杀进程组（`killpg`） | 组内全灭 |
+| 内存炸弹 | OOM | `RLIMIT_AS = 512MB` | 分配失败即崩，宿主不受影响 |
 | 反复崩溃 | 重启风暴 | 熔断，停止重启 | `circuit open` |
 | 协议垃圾 | 解析错乱 | 帧长上限 + EOF 判定 | 杀进程 |
 | 越权读记忆 | 跨群泄露 | 父进程授权 + 无 `scope` 字段 | `PermissionError` |

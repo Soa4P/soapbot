@@ -55,6 +55,7 @@ from typing import Any
 import yaml
 
 from soapbot.plugins.context import PluginContext
+from soapbot.plugins.isolation import DEFAULT_PLUGIN_MEMORY_BYTES
 from soapbot.plugins.manifest import (
     MANIFEST_ALT_FILENAME,
     MANIFEST_FILENAME,
@@ -176,7 +177,7 @@ class PluginLoader:
         kb=None,
         supervisor=None,
         worker_timeout: float = 8.0,
-        worker_memory_bytes: int = 256 * 1024 * 1024,
+        worker_memory_bytes: int = DEFAULT_PLUGIN_MEMORY_BYTES,
         approvals=None,
     ) -> None:
         self.plugins_dir = Path(plugins_dir)
