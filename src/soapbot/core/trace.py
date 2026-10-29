@@ -39,6 +39,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from soapbot.i18n import t
+
 logger = logging.getLogger(__name__)
 
 #: How many traces to keep. 500 covers several minutes in a busy group and costs
@@ -84,42 +86,33 @@ STAGE_ORDER: tuple[str, ...] = (
 #: Taken from ``docs/architecture.md``. Kept as data rather than prose so the sandbox
 #: reorder view can point at the specific rule a hypothetical order would break —
 #: "this is unsafe" without saying which invariant is just a warning label.
-ORDER_CONSTRAINTS: tuple[tuple[str, str, str], ...] = (
-    ("guard", "whitelist", "鉴权必须早于准入判定，否则黑名单可以绕过身份检查"),
-    ("wake", "strip_wake", "先判是否被叫到，再剥离唤醒词；反了会把「小助手你好」剥成「你好」"),
-    ("strip_wake", "sanitize", "清洗要作用在剥离后的正文上，否则唤醒词里的零宽字符逃过检查"),
-    ("sanitize", "injection_screen", "先归一化再检测注入；反了可以用零宽字符绕过关键词"),
-    ("injection_screen", "command", "注入检测必须早于命令执行"),
-    ("authorization", "command", "命令执行前必须已确定调用者权限"),
-    ("command", "persist", "命令类消息不落库，否则会污染上下文"),
-    ("persist", "model", "模型看到的历史必须已包含当前这条"),
-    ("safety", "reply", "安全检查必须早于发送，否则拦不住已经发出去的回复"),
+ORDER_CONSTRAINTS: tuple[tuple[str, str], ...] = (
+    ("guard", "whitelist"),
+    ("wake", "strip_wake"),
+    ("strip_wake", "sanitize"),
+    ("sanitize", "injection_screen"),
+    ("injection_screen", "command"),
+    ("authorization", "command"),
+    ("command", "persist"),
+    ("persist", "model"),
+    ("safety", "reply"),
 )
 
-#: Stage labels for the graph. Names alone are too terse to explain to someone
-#: reading the panel during an incident.
-STAGE_LABELS: dict[str, str] = {
-    "dedup": "去重",
-    "guard": "入口守卫",
-    "whitelist": "准入名单",
-    "wake": "唤醒判定",
-    "strip_wake": "剥离唤醒词",
-    "sanitize": "归一化清洗",
-    "injection_screen": "注入检测",
-    "authorization": "权限判定",
-    "command": "内置命令",
-    "plugin_command": "插件命令",
-    "plugin_message_hooks": "插件钩子",
-    "persist": "写入历史",
-    "persona": "人格注入",
-    "recall": "记忆召回",
-    "knowledge": "知识检索",
-    "model": "模型调用",
-    "safety": "安全检查",
-    "reply": "发送回复",
-    "persist_reply": "记录回复",
-    "memory_write": "记忆抽取",
-}
+
+def stage_label(name: str, locale: str | None = None) -> str:
+    """Human name for a stage, translated on the way out.
+
+    The labels and the reasons below used to be Chinese constants in this module. They
+    are now catalogue entries because they are read by an operator in the panel, which
+    is a translated surface — leaving them here meant the English panel showed a graph
+    whose reasons were in Chinese, which is the half-translated state this page spent
+    effort escaping.
+    """
+    return t(f"pipeline.stage.{name}", locale)
+
+
+def constraint_reason(before: str, after: str, locale: str | None = None) -> str:
+    return t(f"pipeline.constraint.{before}.{after}", locale)
 
 
 @dataclass(slots=True)
@@ -426,23 +419,28 @@ def _stage_order(name: str) -> int:
         return len(STAGE_ORDER)
 
 
-def build_topology() -> dict[str, Any]:
-    """The graph the panel draws: stages in order, plus the constraints between them."""
+def build_topology(locale: str | None = None) -> dict[str, Any]:
+    """The graph the panel draws: stages in order, plus the constraints between them.
+
+    ``locale`` is passed rather than read from a global: one process serves several
+    panels, and a module-level "current language" would make the answer depend on which
+    request arrived last.
+    """
     return {
         "stages": [
-            {"name": name, "label": STAGE_LABELS.get(name, name), "order": index}
+            {"name": name, "label": stage_label(name, locale), "order": index}
             for index, name in enumerate(STAGE_ORDER)
         ],
         "constraints": [
-            {"before": before, "after": after, "why": why}
-            for before, after, why in ORDER_CONSTRAINTS
+            {"before": before, "after": after, "why": constraint_reason(before, after, locale)}
+            for before, after in ORDER_CONSTRAINTS
         ],
         "reorderable": False,
-        "note": "顺序即安全语义，面板不提供修改；沙箱排序只用于教学演示",
+        "note": t("pipeline.note", locale),
     }
 
 
-def violated_constraints(order: list[str]) -> list[dict[str, str]]:
+def violated_constraints(order: list[str], locale: str | None = None) -> list[dict[str, str]]:
     """Which documented constraints a hypothetical order breaks.
 
     Powers the sandbox view: an operator can drag stages around and see the specific
@@ -451,9 +449,15 @@ def violated_constraints(order: list[str]) -> list[dict[str, str]]:
     """
     position = {name: index for index, name in enumerate(order)}
     broken: list[dict[str, str]] = []
-    for before, after, why in ORDER_CONSTRAINTS:
+    for before, after in ORDER_CONSTRAINTS:
         if before not in position or after not in position:
             continue
         if position[before] > position[after]:
-            broken.append({"before": before, "after": after, "why": why})
+            broken.append(
+                {
+                    "before": before,
+                    "after": after,
+                    "why": constraint_reason(before, after, locale),
+                }
+            )
     return broken

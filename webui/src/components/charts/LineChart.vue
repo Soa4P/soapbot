@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
+import { t } from '@/i18n'
+
 /**
  * Multi-series line chart with axes, drawn as inline SVG.
  *
@@ -160,7 +162,7 @@ const readout = computed(() => {
         :viewBox="`0 0 ${W} ${H}`"
         class="chart__svg"
         role="img"
-        :aria-label="`${title}。${series.map((s) => s.label).join('、')}。数据点在下方表格中可读。`"
+        :aria-label="t('chart.ariaLabel', { title, series: series.map((s) => s.label).join(t('common.listSep')) })"
         @mousemove="onMove"
         @mouseleave="hover = null"
       >
@@ -240,13 +242,13 @@ const readout = computed(() => {
       needs a precise number can open it instead of estimating from pixels.
     -->
     <details class="chart__data">
-      <summary>以表格查看数值</summary>
+      <summary>{{ t('chart.viewAsTable') }}</summary>
       <div class="scroll" style="max-height: 240px">
         <table class="data">
-          <caption class="visually-hidden">{{ title }} 数据</caption>
+          <caption class="visually-hidden">{{ t('chart.dataCaption', { title }) }}</caption>
           <thead>
             <tr>
-              <th scope="col">时间</th>
+              <th scope="col">{{ t('common.time') }}</th>
               <th v-for="s in series" :key="s.key" scope="col">{{ s.label }}</th>
             </tr>
           </thead>

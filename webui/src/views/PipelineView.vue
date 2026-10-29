@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { api, type MessageTrace, type PipelineTopology, type TraceSummary } from '@/api/client'
 import StageGraph from '@/components/StageGraph.vue'
+import { t } from '@/i18n'
 import { clock } from '@/lib/format'
 
 /**
@@ -100,24 +101,24 @@ onBeforeUnmount(() => {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>链路追踪</h2>
-      <span class="tag">{{ traces.length }} 条</span>
+      <h2>{{ t('pipeline.title') }}</h2>
+      <span class="tag">{{ t('common.rows', { n: traces.length }) }}</span>
       <span v-if="summary" class="tag">
-        保留 {{ summary.traces_kept }} 条 · 重启即清空
+        {{ t('pipeline.kept', { n: summary.traces_kept }) }}
       </span>
       <span class="strip__spacer" />
       <button class="btn ghost" type="button" :disabled="loading" @click="loadTraces()">
-        {{ loading ? '读取中…' : '刷新' }}
+        {{ loading ? t('pipeline.reading') : t('common.refresh') }}
       </button>
       <button class="btn" :class="live ? 'lamp' : 'ghost'" type="button" @click="toggleLive">
-        {{ live ? '停止跟随' : '每 4 秒跟随' }}
+        {{ live ? t('pipeline.stopFollow') : t('pipeline.follow') }}
       </button>
     </div>
 
     <div class="panel__body split">
       <div class="split__list">
         <p v-if="!traces.length" class="empty">
-          缓冲区为空。消息处理后会出现在这里——若是刚启动，先发一条消息试试。
+          {{ t('pipeline.empty') }}
         </p>
 
         <ul v-else class="msglist">
@@ -138,7 +139,7 @@ onBeforeUnmount(() => {
                 />
               </span>
               <span class="msgrow__ms mono">{{ fmtMs(trace.total_ms) }}</span>
-              <span v-if="trace.halted" class="tag bad">中止</span>
+              <span v-if="trace.halted" class="tag bad">{{ t('pipeline.stopped') }}</span>
             </button>
           </li>
         </ul>
@@ -149,19 +150,21 @@ onBeforeUnmount(() => {
           <div class="detail__head">
             <div>
               <div class="eyebrow">trace {{ selected.trace_id.slice(0, 12) }}</div>
-              <h3 class="detail__title mono">{{ selected.session_key || '（无会话键）' }}</h3>
+              <h3 class="detail__title mono">{{ selected.session_key || t('pipeline.noSession') }}</h3>
             </div>
             <div class="row">
               <span class="pill" :class="selected.halted ? 'bad' : 'ok'">
-                <i class="dot" />{{ selected.halted ? '已中止' : '已完成' }}
+                <i class="dot" />{{ selected.halted ? t('pipeline.stopped') : t('pipeline.completed') }}
               </span>
               <span class="tag">{{ fmtMs(selected.total_ms) }}</span>
             </div>
           </div>
 
+          <!-- One sentence with the stage name as a placeholder, rather than two
+               fragments around a <code> token. Monospace was doing less work here than
+               the sentence being translatable as a unit. -->
           <p v-if="selected.halted" class="warn-banner" style="margin: 8px 0 0">
-            在 <code class="mono">{{ haltedLabel || '未知环节' }}</code> 中止：该环节的
-            <code class="mono">StageResult.halt</code> 为真，后续环节没有执行。
+            {{ t('pipeline.halted', { stage: haltedLabel || t('pipeline.unknownStage') }) }}
           </p>
 
           <div v-if="topology" style="margin-top: 10px">
@@ -174,24 +177,24 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <p v-else class="empty">从左侧选一条消息查看逐环节耗时。</p>
+        <p v-else class="empty">{{ t('pipeline.pickOne') }}</p>
       </div>
     </div>
   </section>
 
   <section v-if="topology" class="panel">
     <div class="panel__head">
-      <h2>环节约束</h2>
-      <span class="tag">{{ topology.constraints.length }} 条</span>
+      <h2>{{ t('pipeline.constraints') }}</h2>
+      <span class="tag">{{ t('common.rows', { n: topology.constraints.length }) }}</span>
     </div>
     <div class="panel__body flush">
       <table class="data">
-        <caption class="visually-hidden">流水线环节之间的顺序约束</caption>
+        <caption class="visually-hidden">{{ t('pipeline.constraintsCaption') }}</caption>
         <thead>
           <tr>
-            <th scope="col">必须在前</th>
-            <th scope="col">必须在后</th>
-            <th scope="col">原因</th>
+            <th scope="col">{{ t('pipeline.before') }}</th>
+            <th scope="col">{{ t('pipeline.after') }}</th>
+            <th scope="col">{{ t('pipeline.why') }}</th>
           </tr>
         </thead>
         <tbody>

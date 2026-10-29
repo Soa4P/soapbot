@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 import { datetime, fromNow, num, uptime, untilFuture } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -13,12 +14,31 @@ const runtime = useAsync(() => api.runtime())
 // but some tools are missing" visible in one place.
 const mcp = useAsync(() => api.mcp())
 const mcpBusy = ref(false)
-const mcpNote = ref('')
+
+/**
+ * The outcome of the last reconnect, stored as *data*, not as a finished sentence.
+ *
+ * Holding the rendered string meant a panel left open across a language switch kept
+ * showing the old language until the button was pressed again — a small, very
+ * confusing inconsistency. Storing the numbers and translating at render time costs
+ * one computed and removes the whole class.
+ */
+type McpNote = { kind: 'ok'; tools: number } | { kind: 'partial'; broken: number } | { kind: 'error'; text: string }
+const mcpNote = ref<McpNote | null>(null)
+
 const mcpServers = computed<any[]>(() => mcp.data.value?.servers ?? [])
+
+const mcpNoteText = computed(() => {
+  const note = mcpNote.value
+  if (!note) return ''
+  if (note.kind === 'ok') return t('runtime.mcpReconnected', { n: note.tools })
+  if (note.kind === 'partial') return t('runtime.mcpReconnectedPartial', { n: note.broken })
+  return note.text
+})
 
 async function reconnectMcp() {
   mcpBusy.value = true
-  mcpNote.value = ''
+  mcpNote.value = null
   try {
     const result = await api.refreshMcp()
     const broken = (result.servers ?? []).filter((s: any) => s.error)
@@ -26,11 +46,11 @@ async function reconnectMcp() {
     // unsure whether the button did anything, which is the same failure the endpoint
     // was added to fix.
     mcpNote.value = broken.length
-      ? `已重连，${broken.length} 个服务器仍失败`
-      : `已重连，共 ${result.tools ?? 0} 个工具`
+      ? { kind: 'partial', broken: broken.length }
+      : { kind: 'ok', tools: result.tools ?? 0 }
     await mcp.reload()
   } catch (err) {
-    mcpNote.value = err instanceof Error ? err.message : String(err)
+    mcpNote.value = { kind: 'error', text: err instanceof Error ? err.message : String(err) }
   } finally {
     mcpBusy.value = false
   }
@@ -55,10 +75,10 @@ const startedFor = computed(() => {
 })
 
 const counters = computed(() => [
-  { label: '进程 uptime', value: startedFor.value },
-  { label: '调度 tick', value: num(scheduler.value.ticks) },
-  { label: 'tick 间隔', value: `${scheduler.value.tick_seconds ?? 0}s` },
-  { label: '时区', value: scheduler.value.timezone ?? '—' },
+  { label: t('runtime.processUptime'), value: startedFor.value },
+  { label: t('runtime.schedulerTicks'), value: num(scheduler.value.ticks) },
+  { label: t('runtime.tickInterval'), value: `${scheduler.value.tick_seconds ?? 0}s` },
+  { label: t('runtime.timezone'), value: scheduler.value.timezone ?? '—' },
 ])
 </script>
 
@@ -75,44 +95,47 @@ const counters = computed(() => [
   <div class="grid cols-2">
     <section class="panel">
       <div class="panel__head">
-        <h2>调度器</h2>
+        <h2>{{ t('runtime.scheduler') }}</h2>
         <span class="pill" :class="scheduler.running ? 'ok' : 'bad'">
           <i class="dot" />{{ scheduler.running ? 'TICKING' : 'STOPPED' }}
         </span>
       </div>
       <div class="panel__body flush">
-        <table v-if="jobs.length" class="data"><caption class="visually-hidden">调度器</caption>
+        <table v-if="jobs.length" class="data"><caption class="visually-hidden">{{ t('runtime.scheduler') }}</caption>
           <thead>
             <tr>
               <th scope="col">ID</th>
-              <th scope="col">用途</th>
-              <th scope="col">下次运行</th>
+              <th scope="col">{{ t('runtime.purpose') }}</th>
+              <th scope="col">{{ t('runtime.nextRun') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="job in jobs" :key="job.id">
               <td class="key">{{ job.id }}</td>
               <td>{{ job.name }}</td>
-              <td>{{ job.next_run_at ? `${datetime(job.next_run_at)}（${untilFuture(job.next_run_at)}）` : '—' }}</td>
+              <!-- A middot, not full-width parentheses: the full-width form is Chinese
+                   typography and looks wrong around Latin digits in the English panel. -->
+              <td v-if="job.next_run_at">{{ datetime(job.next_run_at) }} · {{ untilFuture(job.next_run_at) }}</td>
+              <td v-else class="faint">—</td>
             </tr>
           </tbody>
         </table>
-        <div v-else class="empty">调度器未运行：插件定时任务与额度过期清扫都不会执行。</div>
+        <div v-else class="empty">{{ t('runtime.schedulerStopped') }}</div>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel__head">
-        <h2>插件定时任务</h2>
+        <h2>{{ t('runtime.cronJobs') }}</h2>
         <span class="tag">{{ cronJobs.length }}</span>
       </div>
       <div class="panel__body flush">
-        <table v-if="cronJobs.length" class="data"><caption class="visually-hidden">插件定时任务</caption>
+        <table v-if="cronJobs.length" class="data"><caption class="visually-hidden">{{ t('runtime.cronJobs') }}</caption>
           <thead>
             <tr>
-              <th scope="col">插件</th>
-              <th scope="col">任务</th>
-              <th scope="col">下次</th>
+              <th scope="col">{{ t('common.plugin') }}</th>
+              <th scope="col">{{ t('common.task') }}</th>
+              <th scope="col">{{ t('common.next') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -124,7 +147,7 @@ const counters = computed(() => [
           </tbody>
         </table>
         <div v-else class="empty">
-          没有已注册的定时任务。任务在插件加载后才会出现，且首次出现只排期、不立即执行。
+          {{ t('runtime.noCron') }}
         </div>
       </div>
     </section>
@@ -132,19 +155,19 @@ const counters = computed(() => [
 
   <section class="panel">
     <div class="panel__head">
-      <h2>适配器健康</h2>
+      <h2>{{ t('runtime.adapterHealth') }}</h2>
       <span class="tag">{{ adapterRows.length }}</span>
     </div>
     <div class="panel__body flush">
-      <table v-if="adapterRows.length" class="data"><caption class="visually-hidden">适配器健康</caption>
+      <table v-if="adapterRows.length" class="data"><caption class="visually-hidden">{{ t('runtime.adapterHealth') }}</caption>
         <thead>
           <tr>
-            <th scope="col">名称</th>
-            <th scope="col">状态</th>
-            <th scope="col">连接时间</th>
-            <th scope="col" class="num">重连</th>
-            <th scope="col">能力</th>
-            <th scope="col">最近错误</th>
+            <th scope="col">{{ t('common.name') }}</th>
+            <th scope="col">{{ t('common.status') }}</th>
+            <th scope="col">{{ t('runtime.connectedAt') }}</th>
+            <th scope="col" class="num">{{ t('runtime.reconnects') }}</th>
+            <th scope="col">{{ t('common.capability') }}</th>
+            <th scope="col">{{ t('overview.lastError') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -152,43 +175,45 @@ const counters = computed(() => [
             <td class="key">{{ row.display_name || row.name }}</td>
             <td>
               <span class="pill" :class="row.online ? 'ok' : 'bad'">
-                <i class="dot" />{{ row.online ? '在线' : '离线' }}
+                <i class="dot" />{{ row.online ? t('overview.online') : t('overview.offline') }}
               </span>
             </td>
-            <td>{{ row.connected_at ? `${datetime(row.connected_at)}（${fromNow(row.connected_at)}）` : '—' }}</td>
+            <td v-if="row.connected_at">{{ datetime(row.connected_at) }} · {{ fromNow(row.connected_at) }}</td>
+            <td v-else class="faint">—</td>
             <td class="num">{{ row.reconnect_attempts }}</td>
             <td>
-              <span class="tag">{{ (row.capabilities ?? []).length }} 项</span>
+              <span class="tag">{{ t('runtime.capabilityCount', { n: (row.capabilities ?? []).length }) }}</span>
             </td>
             <td>{{ row.last_error || '—' }}</td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">未注册任何适配器。</div>
+      <div v-else class="empty">{{ t('runtime.noAdapters') }}</div>
     </div>
   </section>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>外部工具（MCP）</h2>
-      <span class="tag">{{ mcpServers.length }} 个服务器</span>
+      <h2>{{ t('runtime.mcpTitle') }}</h2>
+      <span class="tag">{{ t('runtime.mcpServers', { n: mcpServers.length }) }}</span>
       <button class="btn" :disabled="mcpBusy || !mcp.data.value?.configured" @click="reconnectMcp">
-        {{ mcpBusy ? '重连中…' : '重连' }}
+        {{ mcpBusy ? t('runtime.reconnecting') : t('runtime.reconnect') }}
       </button>
     </div>
     <div class="panel__body flush">
-      <p v-if="mcp.data.value && !mcp.data.value.configured" class="empty">
-        未配置 MCP。在 <span class="mono">config/mcp.yaml</span> 里声明服务器后重启，或点「重连」重新枚举工具。
-      </p>
+      <div v-if="mcp.data.value && !mcp.data.value.configured" class="empty">
+        {{ t('runtime.mcpUnconfigured') }}
+        <div class="mono" style="margin-top: 6px">config/mcp.yaml</div>
+      </div>
       <table v-else-if="mcpServers.length" class="data">
-        <caption class="visually-hidden">MCP 服务器</caption>
+        <caption class="visually-hidden">{{ t('runtime.mcpServersCaption') }}</caption>
         <thead>
           <tr>
-            <th scope="col">名称</th>
-            <th scope="col">状态</th>
-            <th scope="col" class="num">工具数</th>
-            <th scope="col">最低角色</th>
-            <th scope="col">错误</th>
+            <th scope="col">{{ t('common.name') }}</th>
+            <th scope="col">{{ t('common.status') }}</th>
+            <th scope="col" class="num">{{ t('runtime.toolsCount') }}</th>
+            <th scope="col">{{ t('runtime.minRole') }}</th>
+            <th scope="col">{{ t('common.error') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -198,7 +223,7 @@ const counters = computed(() => [
               <!-- "0 tools" and "server crashed" are the same empty row otherwise, and
                    they call for opposite fixes: configure more tools vs fix the binary. -->
               <span class="pill" :class="row.error ? 'bad' : 'ok'">
-                <i class="dot" />{{ row.error ? '失败' : '正常' }}
+                <i class="dot" />{{ row.error ? t('common.failed') : t('common.ok') }}
               </span>
             </td>
             <td class="num">{{ row.tools }}</td>
@@ -207,45 +232,48 @@ const counters = computed(() => [
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">未配置任何 MCP 服务器。</div>
-      <p v-if="mcpNote" class="hint">{{ mcpNote }}</p>
+      <div v-else class="empty">{{ t('runtime.noMcpServers') }}</div>
+      <p v-if="mcpNoteText" class="hint" style="padding: 8px 14px">{{ mcpNoteText }}</p>
     </div>
   </section>
 
   <div class="grid cols-2">
     <section class="panel">
       <div class="panel__head">
-        <h2>配置文件</h2>
+        <h2>{{ t('runtime.configFiles') }}</h2>
       </div>
       <div class="panel__body">
-        <table class="data" aria-label="配置文件">
+        <table class="data" :aria-label="t('runtime.configFiles')">
           <tbody>
+            <!-- `white-space: normal` overrides the table's global `nowrap`. An absolute
+                 path has no spaces, so without it the cell cannot wrap and the table
+                 grows past the panel — which is what it did, in both languages. -->
             <tr>
               <th scope="row">Provider</th>
-              <td class="key">{{ config.providers_file || '—' }}</td>
+              <td class="key" style="white-space: normal; word-break: break-all">{{ config.providers_file || '—' }}</td>
             </tr>
             <tr>
               <th scope="row">Adapter</th>
-              <td class="key">{{ config.adapters_file || '—' }}</td>
+              <td class="key" style="white-space: normal; word-break: break-all">{{ config.adapters_file || '—' }}</td>
             </tr>
             <tr>
-              <th scope="row">已加载插件</th>
+              <th scope="row">{{ t('runtime.pluginsLoaded') }}</th>
               <td class="num">{{ config.plugins_loaded ?? 0 }}</td>
             </tr>
           </tbody>
         </table>
         <p class="hint" style="margin: 10px 0 0">
-          配置文件只在启动时读取。修改后需要重启服务。
+          {{ t('runtime.configHint') }}
         </p>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel__head">
-        <h2>累计计数</h2>
+        <h2>{{ t('common.count') }}</h2>
       </div>
       <div class="panel__body">
-        <table class="data" aria-label="累计计数">
+        <table class="data" :aria-label="t('common.count')">
           <tbody>
             <tr>
               <th scope="row">inbound</th>

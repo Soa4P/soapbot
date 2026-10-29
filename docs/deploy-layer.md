@@ -337,3 +337,31 @@ tmpfs: [/tmp]
 - [ ] 插件目录只读挂载
 - [ ] 一个数据目录只跑一个实例
 - [ ] CI 里把 `doctor --strict` 作为部署前门禁
+
+---
+
+## 8. 容器验收清单（尚未执行，需在有 Docker 的机器上跑）
+
+**当前状态：静态审阅通过，未实测。** 本机没有 `docker` 命令（`docker --version` 报
+command not found），`scripts/check_deploy.py` 只能读文件做结构检查——那能证明
+`read_only: true` 这行存在，不能证明容器真的起得来。下面的每一条都需要一台装有 Docker
+的机器，按顺序执行，并把实际输出记下来。
+
+前置：`deploy/daemon-mirror.md` 里的镜像加速必须先配好，否则 `build` 在第一条 `FROM`
+就超时（已实测直连 Docker Hub 不通）。
+
+| # | 命令 | 预期结果 | 失败通常意味着 |
+|---|---|---|---|
+| 1 | `docker compose -f deploy/docker-compose.yml build` | 退出码 0，末尾 `naming to ... soapbot:hardened` | 基础镜像拉不到（看 mirror）；或缺 `gcc` 导致某个轮子要源码编译 |
+| 2 | `docker compose -f deploy/docker-compose.yml up -d` 后 `docker compose ps` | 状态 `Up (healthy)`，约 20–30 秒后转 healthy | `start_period` 太短；或进程确实没监听 6185（`docker compose logs` 会有 traceback） |
+| 3 | `docker compose exec soapbot id` | `uid=10001 gid=10001`，**不是** root | `USER` 没生效，或 compose 的 `user:` 被覆盖 |
+| 4 | `docker compose exec soapbot sh -c 'touch /app/x'` | 报 `Read-only file system` | `read_only: true` 没生效 |
+| 5 | `curl -s localhost:6185/api/health` | `{"status":"ok",...}` | 端口映射方向反了，或容器内绑到了 loopback |
+| 6 | 浏览器打开 `http://<服务器>:6185`，登录后**在第 12 页切一次语言、开一次语音开关** | 提示「已保存」/「待重启生效」，且 `docker compose exec soapbot cat /data/.env` 出现对应行 | 这是唯一能证明 `SOAPBOT_ENV_FILE` 真的指到可写卷的方法。若报权限错误，说明它仍指向 `/app/.env`（只读根） |
+| 7 | `docker compose restart soapbot` 后再看第 12 页 | 刚才的开关变成已生效值 | 写入成功了但读取路径不一致——`.env` 与进程读到的不是同一个文件 |
+| 8 | `docker compose down && docker compose up -d` | 面板数据、`/data/.env` 设置都还在 | 卷没生效，或数据写到了容器层 |
+| 9 | `docker compose exec soapbot sh -c 'cat /proc/1/comm'` | `tini` | `ENTRYPOINT` 被覆盖，插件子进程会成为孤儿 |
+
+第 6 步是这一轮新增的：只读根文件系统与「设置页可写」在静态层面是矛盾的，`check_deploy.py`
+现在会检查 `SOAPBOT_ENV_FILE` 是否落在可写挂载内，但**只有真实的 `curl`/浏览器点击**才能
+证明权限位、挂载点和进程读取路径三者对得上。

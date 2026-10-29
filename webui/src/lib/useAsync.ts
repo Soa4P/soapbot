@@ -33,7 +33,13 @@ export function useAsync<T>(loader: () => Promise<T>) {
   return { data, error, loading, reload }
 }
 
-/** Treat a 503 from an optional subsystem as a state, not a failure. */
+/**
+ * Treat a 503 from an optional subsystem as a state, not a failure.
+ *
+ * Matches the raw detail the backend sends, which is deliberately English: internal
+ * error text is not a translated surface (see the backend catalogue's note). The old
+ * Chinese alternative here was a leftover from before that rule, and matched nothing.
+ */
 export function isUnavailable(err: string): boolean {
-  return err.includes('not initialised') || err.includes('未初始化')
+  return err.includes('not initialised')
 }

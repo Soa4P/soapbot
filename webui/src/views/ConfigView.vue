@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { api, type DiffResult, type ProviderEntry, type ProvidersDocument, type ProvidersPatch } from '@/api/client'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DiffEditor from '@/components/DiffEditor.vue'
+import { t } from '@/i18n'
 import { num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -108,8 +109,7 @@ function removeRow(index: number): void {
   // Deleting a provider is not supported by the patch protocol on purpose: the apply
   // endpoint merges, so a row dropped from the payload would survive. Saying so is
   // better than a button that appears to work and does nothing.
-  flowError.value =
-    '删除 Provider 请直接改文件后重启：写入接口按 id 合并，仅凭表单无法表达「删除」这个意图。'
+  flowError.value = t('config.removeUnsupported')
   drafts.value.splice(index, 1)
 }
 
@@ -127,7 +127,7 @@ function payload(): ProvidersPatch {
 
 async function previewDiff(): Promise<void> {
   if (!hasEdits.value) {
-    flowError.value = '还没有任何改动。'
+    flowError.value = t('config.noEditsYet')
     return
   }
   busy.value = true
@@ -159,7 +159,7 @@ async function applyChanges(): Promise<void> {
       approved_hash: diff.value.new_hash,
     })
     if (!body.written) {
-      flowError.value = `未写入：${body.reason ?? '没有改动'}`
+      flowError.value = t('config.notWritten', { reason: body.reason ?? t('config.noChange') })
       return
     }
     appliedFields.value = body.changed_fields
@@ -185,29 +185,31 @@ async function applyChanges(): Promise<void> {
       <span class="readout__value">{{ num(providerRows.length) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">人格卡</span>
+      <span class="readout__label">{{ t('overview.personas') }}</span>
       <span class="readout__value">{{ num(personaRows.length) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">默认人格</span>
+      <span class="readout__label">{{ t('config.defaultPersona') }}</span>
       <span class="readout__value" style="font-size: 15px">
-        {{ binding.global_default || '未设置' }}
+        {{ binding.global_default || t('config.unset') }}
       </span>
     </div>
   </div>
 
+  <!-- One sentence. The old version split it around a <strong>, which reads fine in
+       Chinese and cannot be reordered in any other language; the banner is already the
+       emphatic element on the page, so nothing is lost. -->
   <div v-if="restartNeeded" class="warn-banner" role="status">
-    已写入 {{ appliedFields.length }} 个字段。改动<strong>需要重启服务</strong>才生效——
-    运行中的进程仍持有旧配置，Provider 冷却状态与流水线也不会热替换。
+    {{ t('config.restartBanner', { n: appliedFields.length }) }}
   </div>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>Provider 链路</h2>
-      <span class="hint">按优先级排序，失败自动切换</span>
+      <h2>{{ t('config.chain') }}</h2>
+      <span class="hint">{{ t('config.chainHint') }}</span>
       <span class="strip__spacer" />
       <button class="btn ghost" type="button" :disabled="busy" @click="loadForEdit">
-        {{ document ? '重新载入' : '载入以编辑' }}
+        {{ document ? t('config.reload') : t('config.loadToEdit') }}
       </button>
     </div>
 
@@ -215,15 +217,15 @@ async function applyChanges(): Promise<void> {
       <!-- read-only view when nothing has been loaded for editing -->
       <template v-if="!document">
         <table v-if="providerRows.length" class="data">
-          <caption class="visually-hidden">Provider 链路</caption>
+          <caption class="visually-hidden">{{ t('config.chain') }}</caption>
           <thead>
             <tr>
               <th scope="col">ID</th>
-              <th scope="col">类型</th>
-              <th scope="col">模型</th>
-              <th scope="col">能力</th>
-              <th scope="col" class="num">优先级</th>
-              <th scope="col">状态</th>
+              <th scope="col">{{ t('common.type') }}</th>
+              <th scope="col">{{ t('common.model') }}</th>
+              <th scope="col">{{ t('common.capability') }}</th>
+              <th scope="col" class="num">{{ t('overview.priority') }}</th>
+              <th scope="col">{{ t('common.status') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -239,40 +241,38 @@ async function applyChanges(): Promise<void> {
               <td class="num">{{ row.priority }}</td>
               <td>
                 <span class="tag" :class="row.enabled ? 'ok' : 'bad'">
-                  {{ row.enabled ? '启用' : '停用' }}
+                  {{ row.enabled ? t('config.enabled') : t('config.disabled') }}
                 </span>
                 <span v-if="statFor(row.id).failures" class="tag bad" style="margin-left: 4px">
-                  失败 {{ statFor(row.id).failures }}
+                  {{ t('config.failures', { n: statFor(row.id).failures }) }}
                 </span>
               </td>
             </tr>
           </tbody>
         </table>
         <div v-else class="empty">
-          没有配置任何 Provider。点「载入以编辑」新增，或直接在
-          <code>config/providers.yaml</code> 中添加后重启。
+          {{ t('config.noProviders') }}
         </div>
       </template>
 
       <!-- editable view -->
       <div v-else class="edit">
         <p class="hint" style="margin: 0 0 8px">
-          字面量密钥在读取时显示为掩码。保持 <code class="mono">{{ mask }}</code>
-          不动表示沿用原值；清空则表示移除该密钥。
+          {{ t('config.secretHint', { mask }) }}
         </p>
 
         <table class="data">
-          <caption class="visually-hidden">编辑 Provider</caption>
+          <caption class="visually-hidden">{{ t('config.editCaption') }}</caption>
           <thead>
             <tr>
               <th scope="col">ID</th>
-              <th scope="col">类型</th>
+              <th scope="col">{{ t('common.type') }}</th>
               <th scope="col">Base URL</th>
-              <th scope="col">模型</th>
+              <th scope="col">{{ t('common.model') }}</th>
               <th scope="col">API Key</th>
-              <th scope="col" class="num">优先级</th>
-              <th scope="col">启用</th>
-              <th scope="col"><span class="visually-hidden">操作</span></th>
+              <th scope="col" class="num">{{ t('overview.priority') }}</th>
+              <th scope="col">{{ t('config.enabled') }}</th>
+              <th scope="col"><span class="visually-hidden">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -291,7 +291,7 @@ async function applyChanges(): Promise<void> {
                   v-model="row.kind"
                   class="field"
                   style="min-width: 120px"
-                  aria-label="类型"
+                  :aria-label="t('common.type')"
                   @input="markEdited(row.id)"
                 />
               </td>
@@ -309,7 +309,7 @@ async function applyChanges(): Promise<void> {
                   v-model="row.model"
                   class="field"
                   style="min-width: 120px"
-                  aria-label="模型"
+                  :aria-label="t('common.model')"
                   @input="markEdited(row.id)"
                 />
               </td>
@@ -332,7 +332,7 @@ async function applyChanges(): Promise<void> {
                   class="field"
                   style="width: 64px; text-align: right"
                   type="number"
-                  aria-label="优先级"
+                  :aria-label="t('overview.priority')"
                   @input="markEdited(row.id)"
                 />
               </td>
@@ -340,23 +340,23 @@ async function applyChanges(): Promise<void> {
                 <input
                   v-model="row.enabled"
                   type="checkbox"
-                  :aria-label="`启用 ${row.id}`"
+                  :aria-label="t('config.enableFor', { id: row.id })"
                   @change="markEdited(row.id)"
                 />
               </td>
               <td>
-                <button class="btn ghost" type="button" @click="removeRow(index)">移除</button>
+                <button class="btn ghost" type="button" @click="removeRow(index)">{{ t('config.remove') }}</button>
               </td>
             </tr>
           </tbody>
         </table>
 
         <div class="row" style="margin-top: 10px">
-          <button class="btn ghost" type="button" @click="addRow">新增 Provider</button>
+          <button class="btn ghost" type="button" @click="addRow">{{ t('config.addProvider') }}</button>
           <span class="strip__spacer" />
-          <span class="hint">{{ hasEdits ? '有未提交的改动' : '无改动' }}</span>
+          <span class="hint">{{ hasEdits ? t('config.dirty') : t('config.clean') }}</span>
           <button class="btn lamp" type="button" :disabled="busy || !hasEdits" @click="previewDiff">
-            {{ busy ? '计算中…' : '查看将要写入的改动' }}
+            {{ busy ? t('config.computing') : t('config.previewDiff') }}
           </button>
         </div>
 
@@ -372,46 +372,47 @@ async function applyChanges(): Promise<void> {
 
   <section v-if="showDiff && diff" class="panel">
     <div class="panel__head">
-      <h2>待写入的改动</h2>
-      <span class="tag">{{ diff.changed_fields.length }} 个字段</span>
+      <h2>{{ t('config.pendingChanges') }}</h2>
+      <span class="tag">{{ t('config.fieldsCount', { n: diff.changed_fields.length }) }}</span>
       <span class="strip__spacer" />
-      <button class="btn ghost" type="button" @click="showDiff = false">取消</button>
+      <button class="btn ghost" type="button" @click="showDiff = false">{{ t('common.cancel') }}</button>
       <button class="btn lamp" type="button" :disabled="busy || diff.empty" @click="requestApply">
-        确认写入
+        {{ t('config.confirmWrite') }}
       </button>
     </div>
     <div class="panel__body">
       <p class="warn-banner" style="margin: 0 0 10px">
-        这一步还<strong>没有</strong>写盘。下面是即将写入
-        <code class="mono">{{ document?.path }}</code> 的实际改动。
+        {{ t('config.diffWarn', { path: document?.path ?? '' }) }}
       </p>
       <DiffEditor :diff="diff.diff" filename="providers.yaml" />
       <div class="hint" style="margin-top: 8px">
-        涉及字段：{{ diff.changed_fields.join('、') || '（无）' }}
+        {{ t('config.changedFields', {
+          names: diff.changed_fields.join(t('common.listSep')) || t('config.noneFields'),
+        }) }}
       </div>
     </div>
   </section>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>人格卡</h2>
-      <span class="hint">点击展开系统提示词预览 · 暂不支持面板内编辑</span>
+      <h2>{{ t('overview.personas') }}</h2>
+      <span class="hint">{{ t('config.personaHint') }}</span>
     </div>
     <div class="panel__body flush">
       <div v-if="!personaRows.length" class="empty">
-        <code>config/personas/</code> 下没有可加载的人格卡。
+        {{ t('config.noPersonas') }}
       </div>
       <div v-else class="scroll">
         <table class="data">
-          <caption class="visually-hidden">人格卡</caption>
+          <caption class="visually-hidden">{{ t('overview.personas') }}</caption>
           <thead>
             <tr>
               <th scope="col">ID</th>
-              <th scope="col">名称</th>
-              <th scope="col">风格</th>
-              <th scope="col">唤醒词</th>
-              <th scope="col" class="num">字数上限</th>
-              <th scope="col" class="num">温度</th>
+              <th scope="col">{{ t('common.name') }}</th>
+              <th scope="col">{{ t('config.style') }}</th>
+              <th scope="col">{{ t('config.wakeWords') }}</th>
+              <th scope="col" class="num">{{ t('config.maxChars') }}</th>
+              <th scope="col" class="num">{{ t('config.temperature') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -419,18 +420,20 @@ async function applyChanges(): Promise<void> {
               <tr style="cursor: pointer" @click="toggle(row.id)">
                 <th scope="row">
                   {{ row.id }}
-                  <span v-if="!row.enabled" class="tag bad" style="margin-left: 6px">停用</span>
+                  <span v-if="!row.enabled" class="tag bad" style="margin-left: 6px">{{ t('config.disabled') }}</span>
                 </th>
                 <td>{{ row.name }}</td>
                 <td>{{ row.style || '—' }}</td>
                 <td>{{ row.wake_words.join(' / ') || '—' }}</td>
-                <td class="num">{{ row.max_reply_chars || '默认' }}</td>
-                <td class="num">{{ row.temperature ?? '默认' }}</td>
+                <td class="num">{{ row.max_reply_chars || t('config.default') }}</td>
+                <td class="num">{{ row.temperature ?? t('config.default') }}</td>
               </tr>
               <tr v-if="expanded === row.id">
                 <td colspan="6" style="background: var(--surface-3)">
                   <div class="hint" style="margin-bottom: 6px">
-                    系统提示词{{ row.system_prompt_truncated ? '（已截断）' : '' }}
+                    {{ row.system_prompt_truncated
+                      ? t('config.systemPromptTruncated')
+                      : t('config.systemPrompt') }}
                   </div>
                   <pre
                     style="
@@ -441,7 +444,7 @@ async function applyChanges(): Promise<void> {
                       max-height: 320px;
                       overflow: auto;
                     "
-                    >{{ row.system_prompt || '（空）' }}</pre
+                    >{{ row.system_prompt || t('config.emptyPrompt') }}</pre
                   >
                 </td>
               </tr>
@@ -454,19 +457,19 @@ async function applyChanges(): Promise<void> {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>人格绑定</h2>
-      <span class="hint">未列出的群/用户使用默认人格</span>
+      <h2>{{ t('config.bindings') }}</h2>
+      <span class="hint">{{ t('config.bindingsHint') }}</span>
     </div>
     <div class="panel__body">
       <div class="grid cols-2">
         <div>
-          <div class="hint" style="margin-bottom: 6px">群绑定</div>
+          <div class="hint" style="margin-bottom: 6px">{{ t('config.groupBindings') }}</div>
           <table v-if="Object.keys(binding.groups ?? {}).length" class="data">
-            <caption class="visually-hidden">群绑定</caption>
+            <caption class="visually-hidden">{{ t('config.groupBindings') }}</caption>
             <thead>
               <tr>
-                <th scope="col">群号</th>
-                <th scope="col">人格</th>
+                <th scope="col">{{ t('config.groupId') }}</th>
+                <th scope="col">{{ t('config.persona') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -476,16 +479,16 @@ async function applyChanges(): Promise<void> {
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty">没有群级别绑定。</div>
+          <div v-else class="empty">{{ t('config.noGroupBindings') }}</div>
         </div>
         <div>
-          <div class="hint" style="margin-bottom: 6px">用户绑定</div>
+          <div class="hint" style="margin-bottom: 6px">{{ t('config.userBindings') }}</div>
           <table v-if="Object.keys(binding.users ?? {}).length" class="data">
-            <caption class="visually-hidden">用户绑定</caption>
+            <caption class="visually-hidden">{{ t('config.userBindings') }}</caption>
             <thead>
               <tr>
-                <th scope="col">用户</th>
-                <th scope="col">人格</th>
+                <th scope="col">{{ t('common.user') }}</th>
+                <th scope="col">{{ t('config.persona') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -495,7 +498,7 @@ async function applyChanges(): Promise<void> {
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty">没有用户级别绑定。</div>
+          <div v-else class="empty">{{ t('config.noUserBindings') }}</div>
         </div>
       </div>
     </div>
@@ -506,9 +509,9 @@ async function applyChanges(): Promise<void> {
 
   <ConfirmDialog
     :open="confirmOpen"
-    title="写入 Provider 配置"
-    :detail="`将修改 ${diff?.changed_fields.length ?? 0} 个字段并写入 providers.yaml。改动需要重启服务才生效。`"
-    confirm-label="写入"
+    :title="t('config.confirmTitle')"
+    :detail="t('config.confirmDetail', { n: diff?.changed_fields.length ?? 0 })"
+    :confirm-label="t('config.write')"
     :busy="busy"
     @confirm="applyChanges"
     @cancel="confirmOpen = false"

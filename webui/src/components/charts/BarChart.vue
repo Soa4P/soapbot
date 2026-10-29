@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { t } from '@/i18n'
+
 /**
  * Horizontal bars, one row per category.
  *
@@ -9,7 +11,7 @@ import { computed } from 'vue'
  * labels, and rotated labels are the single most common reason a chart is unreadable.
  *
  * Each row is a real `<button>`? No: these bars are not actions. They are a list, and
- * they are marked up as one so a screen reader reads "模型调用 812 毫秒" as a sentence
+ * they are marked up as one so a screen reader reads the row as one sentence
  * rather than announcing fifteen buttons.
  */
 interface Item {
@@ -26,7 +28,7 @@ const props = withDefaults(
     /** Shown when every value is zero, so the chart does not look broken. */
     emptyText?: string
   }>(),
-  { unit: '', emptyText: '暂无数据' },
+  { unit: '', emptyText: '' },
 )
 
 const max = computed(() => {
@@ -49,7 +51,7 @@ function toneClass(tone?: string): string {
   <figure class="bars">
     <figcaption class="bars__cap">{{ title }}</figcaption>
 
-    <p v-if="!items.length" class="empty">{{ emptyText }}</p>
+    <p v-if="!items.length" class="empty">{{ emptyText || t('chart.noData') }}</p>
 
     <ul v-else class="bars__list">
       <li v-for="item in items" :key="item.label" class="bar">
@@ -64,13 +66,13 @@ function toneClass(tone?: string): string {
     </ul>
 
     <details v-if="items.length" class="bars__data">
-      <summary>以表格查看数值</summary>
+      <summary>{{ t('chart.viewAsTable') }}</summary>
       <table class="data">
         <caption class="visually-hidden">{{ title }}</caption>
         <thead>
           <tr>
-            <th scope="col">项目</th>
-            <th scope="col">数值</th>
+            <th scope="col">{{ t('chart.item') }}</th>
+            <th scope="col">{{ t('chart.value') }}</th>
           </tr>
         </thead>
         <tbody>

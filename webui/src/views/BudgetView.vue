@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 import { datetime, money, num, untilFuture } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -24,17 +25,25 @@ const totals = computed(() => {
   return { pending, approved }
 })
 
-const statuses = [
-  { value: '', label: '全部' },
-  { value: 'pending', label: '待审批' },
-  { value: 'approved', label: '已批准' },
-  { value: 'denied', label: '已驳回' },
-  { value: 'expired', label: '已过期' },
-  { value: 'cancelled', label: '已取消' },
-]
+/**
+ * Labels are resolved inside a computed, not in a module-level array.
+ *
+ * A plain `const statuses = [{ label: t('...') }]` is evaluated once at import, so the
+ * dropdown would keep the language it happened to load in while the rest of the page
+ * switched. The bug is invisible in a screenshot and obvious to the person who flips
+ * the switch, which is the wrong way round.
+ */
+const statuses = computed(() => [
+  { value: '', label: t('common.all') },
+  { value: 'pending', label: t('budget.status.pending') },
+  { value: 'approved', label: t('budget.status.approved') },
+  { value: 'denied', label: t('budget.status.denied') },
+  { value: 'expired', label: t('budget.status.expired') },
+  { value: 'cancelled', label: t('budget.status.cancelled') },
+])
 
 function statusLabel(value: string): string {
-  return statuses.find((s) => s.value === value)?.label ?? value
+  return statuses.value.find((s) => s.value === value)?.label ?? value
 }
 
 function statusClass(value: string): string {
@@ -46,38 +55,42 @@ function statusClass(value: string): string {
 </script>
 
 <template>
+  <!-- The env var is lifted onto its own line rather than left mid-sentence. It is the
+       one thing the operator has to act on, and a value buried in prose is scrolled
+       past; it also lets the sentence itself stay one translatable unit. -->
   <div v-if="!enabled" class="warn-banner">
-    额度管理未启用。启用后 <span class="mono">/budget</span> 才会出现在命令列表里。
-    设置 <span class="mono">SOAPBOT_ENABLE_BUDGET=true</span>（需要已配置记忆存储）后重启。
+    <strong>{{ t('budget.disabledTitle') }}</strong>
+    <div class="mono" style="margin: 4px 0">SOAPBOT_ENABLE_BUDGET=true</div>
+    {{ t('budget.disabledHint') }}
   </div>
 
   <div class="grid cols-4">
     <div class="readout">
-      <span class="readout__label">本期上限</span>
+      <span class="readout__label">{{ t('budget.cap.period') }}</span>
       <span class="readout__value">{{ money(policy.period_cap_minor, policy.currency) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">单笔上限</span>
+      <span class="readout__label">{{ t('budget.cap.request') }}</span>
       <span class="readout__value">{{ money(policy.per_request_cap_minor, policy.currency) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">待批金额（列表内）</span>
+      <span class="readout__label">{{ t('budget.pendingInList') }}</span>
       <span class="readout__value" style="color: var(--brand)">
         {{ money(totals.pending, policy.currency) }}
       </span>
     </div>
     <div class="readout">
-      <span class="readout__label">已批准（列表内）</span>
+      <span class="readout__label">{{ t('budget.approvedInList') }}</span>
       <span class="readout__value">{{ money(totals.approved, policy.currency) }}</span>
     </div>
   </div>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>消费申请</h2>
+      <h2>{{ t('budget.requests') }}</h2>
       <span class="tag">{{ requests.length }}</span>
       <span class="strip__spacer" />
-      <select v-model="status" class="field" style="width: 150px" aria-label="按状态过滤">
+      <select v-model="status" class="field" style="width: 150px" :aria-label="t('common.filterByStatus')">
         <option v-for="item in statuses" :key="item.value" :value="item.value">
           {{ item.label }}
         </option>
@@ -85,18 +98,18 @@ function statusClass(value: string): string {
     </div>
     <div class="panel__body flush">
       <div class="scroll">
-        <table v-if="requests.length" class="data"><caption class="visually-hidden">消费申请</caption>
+        <table v-if="requests.length" class="data"><caption class="visually-hidden">{{ t('budget.requests') }}</caption>
           <thead>
             <tr>
               <th scope="col" class="num">#</th>
-              <th scope="col" class="num">金额</th>
-              <th scope="col">用途</th>
-              <th scope="col">申请者</th>
-              <th scope="col">会话</th>
-              <th scope="col">状态</th>
-              <th scope="col">创建</th>
-              <th scope="col">处理</th>
-              <th scope="col">备注</th>
+              <th scope="col" class="num">{{ t('budget.amount') }}</th>
+              <th scope="col">{{ t('budget.purpose') }}</th>
+              <th scope="col">{{ t('budget.requester') }}</th>
+              <th scope="col">{{ t('common.session') }}</th>
+              <th scope="col">{{ t('common.status') }}</th>
+              <th scope="col">{{ t('budget.created') }}</th>
+              <th scope="col">{{ t('budget.decided') }}</th>
+              <th scope="col">{{ t('budget.note') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -105,7 +118,7 @@ function statusClass(value: string): string {
               <td class="num" style="color: var(--ink)">
                 {{ money(row.amount_minor, row.currency) }}
               </td>
-              <td class="key" style="max-width: 220px">{{ row.purpose || '（未填）' }}</td>
+              <td class="key" style="max-width: 220px">{{ row.purpose || t('budget.blankPurpose') }}</td>
               <td>{{ row.requester_name || row.requester_id || '—' }}</td>
               <td style="max-width: 200px">{{ row.session_key }}</td>
               <td>
@@ -117,14 +130,14 @@ function statusClass(value: string): string {
                   {{ datetime(row.decided_at) }}
                   <span class="faint">/ {{ row.decided_by || '—' }}</span>
                 </template>
-                <span v-else class="faint">{{ untilFuture(row.expires_at) }}过期</span>
+                <span v-else class="faint">{{ t('budget.expiresIn', { when: untilFuture(row.expires_at) }) }}</span>
               </td>
               <td style="max-width: 220px">{{ row.decision_note || '—' }}</td>
             </tr>
           </tbody>
         </table>
         <div v-else class="empty">
-          {{ enabled ? '没有符合条件的申请。' : '额度管理未启用。' }}
+          {{ enabled ? t('budget.emptyFiltered') : t('budget.emptyDisabled') }}
         </div>
       </div>
     </div>
@@ -132,29 +145,31 @@ function statusClass(value: string): string {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>策略</h2>
+      <h2>{{ t('budget.policy') }}</h2>
     </div>
     <div class="panel__body">
-      <table class="data" aria-label="策略">
+      <table class="data" :aria-label="t('budget.policy')">
         <tbody>
           <tr>
-            <th scope="row">币种</th>
+            <th scope="row">{{ t('budget.currency') }}</th>
             <td class="key">{{ policy.currency || '—' }}</td>
           </tr>
           <tr>
-            <th scope="row">周期</th>
-            <td class="key">{{ policy.period || '—' }} · 本期 {{ policy.period_key || '—' }}</td>
+            <th scope="row">{{ t('budget.period') }}</th>
+            <td class="key">
+              {{ policy.period || '—' }}{{ t('budget.periodCurrent', { key: policy.period_key || '—' }) }}
+            </td>
           </tr>
           <tr>
-            <th scope="row">申请有效期</th>
-            <td class="key">{{ num(policy.request_ttl_seconds) }} 秒</td>
+            <th scope="row">{{ t('budget.ttl') }}</th>
+            <td class="key">{{ t('common.seconds', { n: num(policy.request_ttl_seconds) }) }}</td>
           </tr>
         </tbody>
       </table>
       <p class="hint" style="margin: 12px 0 0">
-        金额一律按最小货币单位（分）记账，避免浮点漂移。批准需要
-        <span class="mono">APPROVE_PAYMENT</span>（仅 owner），且不能批准自己发起的申请。
-        本机器人不执行任何支付动作。
+        {{ t('budget.note.money') }}
+        {{ t('budget.note.approveLead') }}
+        <span class="mono">APPROVE_PAYMENT</span>{{ t('budget.note.approveTail') }}
       </p>
     </div>
   </section>

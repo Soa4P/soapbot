@@ -79,12 +79,21 @@ services:
       - ../config:/app/config:ro
     environment:
       SOAPBOT_DATA_DIR: /data
+      # Page 12 (system settings) writes this file. It has to live on the data volume:
+      # the root filesystem is read-only above, so the default `.env` next to the
+      # working directory would reject every save. Keeping it on the volume also makes
+      # the saved values survive `docker compose up --force-recreate`.
+      SOAPBOT_ENV_FILE: /data/.env
       # 0.0.0.0 inside the container is required, not a weakening: a port mapping
       # targets the container's eth0, so binding the container's own loopback would
       # make `ports:` below connect to nothing. The isolation comes from publishing on
       # the *host* loopback (127.0.0.1:6185), which is the line below `ports:`.
       SOAPBOT_HOST: 0.0.0.0
       SOAPBOT_CONFIG_DIR: /app/config
+      # The language the bot speaks *in a group* (refusals, voice labels). The panel is
+      # not set here: it follows each browser and is switched on page 12, because two
+      # operators reading the same container may want different languages.
+      # SOAPBOT_DEFAULT_LOCALE: zh-CN
       # The master key is delivered as a file path only when one is mounted. Left
       # commented out on purpose: a `- ./secrets/master.key:/run/secrets/master_key:ro`
       # line whose source does not exist does not fail the start — Docker creates an

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 import { datetime, fromNow, num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -39,7 +40,7 @@ const layerRows = computed(() => {
 const documents = computed<any[]>(() => knowledge.data.value?.documents ?? [])
 
 function roleLabel(role: string): string {
-  return role === 'assistant' ? '机器人' : '用户'
+  return role === 'assistant' ? t('memory.roleAssistant') : t('memory.roleUser')
 }
 
 // ---------------------------------------------------------------- knowledge write
@@ -47,18 +48,33 @@ function roleLabel(role: string): string {
 // The panel used to say "上传接口尚未开放". It now exists, so the panel that
 // advertises it has to be able to use it — a UI that describes a capability it
 // cannot reach is indistinguishable from a missing feature.
+//
+// Notices are stored as a key plus parameters rather than as finished text. Held as
+// text, they froze in whatever language was active when the action ran, so a panel
+// left open across a switch showed two languages at once. Server errors stay raw text
+// because they arrive already formatted and are not ours to translate.
+type Msg = { key: string; params?: Record<string, string | number> } | { text: string }
+
+function render(msg: Msg | null): string {
+  if (!msg) return ''
+  return 'key' in msg ? t(msg.key, msg.params) : msg.text
+}
+
 const draftTitle = ref('')
 const draftContent = ref('')
 const draftId = ref('')
 const saving = ref(false)
-const saveError = ref('')
-const saveNotice = ref('')
+const saveError = ref<Msg | null>(null)
+const saveNotice = ref<Msg | null>(null)
+
+const saveErrorText = computed(() => render(saveError.value))
+const saveNoticeText = computed(() => render(saveNotice.value))
 
 async function submitDocument(): Promise<void> {
-  saveError.value = ''
-  saveNotice.value = ''
+  saveError.value = null
+  saveNotice.value = null
   if (!draftTitle.value.trim() || !draftContent.value.trim()) {
-    saveError.value = '标题和正文都不能为空。'
+    saveError.value = { key: 'memory.errRequired' }
     return
   }
   saving.value = true
@@ -69,13 +85,13 @@ async function submitDocument(): Promise<void> {
       doc_id: draftId.value.trim() || undefined,
     })
     saveNotice.value = result.replaced
-      ? `已替换文档 ${result.doc_id}，共 ${result.chunks} 个片段。`
-      : `已创建文档 ${result.doc_id}，共 ${result.chunks} 个片段。`
+      ? { key: 'memory.replaced', params: { id: result.doc_id, n: result.chunks } }
+      : { key: 'memory.created', params: { id: result.doc_id, n: result.chunks } }
     draftContent.value = ''
     draftId.value = result.doc_id
     await knowledge.reload()
   } catch (err) {
-    saveError.value = (err as Error).message
+    saveError.value = { text: (err as Error).message }
   } finally {
     saving.value = false
   }
@@ -85,24 +101,24 @@ function editDocument(doc: any): void {
   draftId.value = doc.doc_id
   draftTitle.value = doc.title || ''
   draftContent.value = ''
-  saveNotice.value = '已载入文档 ID 与标题；粘贴新正文后提交即覆盖原文档。'
-  saveError.value = ''
+  saveNotice.value = { key: 'memory.loadedForEdit' }
+  saveError.value = null
 }
 
 async function removeDocument(doc: any): Promise<void> {
-  if (!window.confirm(`删除文档「${doc.title || doc.doc_id}」及其全部片段？`)) return
-  saveError.value = ''
-  saveNotice.value = ''
+  if (!window.confirm(t('memory.deleteConfirm', { name: doc.title || doc.doc_id }))) return
+  saveError.value = null
+  saveNotice.value = null
   try {
     const result = await api.deleteKnowledge(doc.doc_id)
-    saveNotice.value = `已删除 ${result.chunks_removed} 个片段。`
+    saveNotice.value = { key: 'memory.deleted', params: { n: result.chunks_removed } }
     if (draftId.value === doc.doc_id) {
       draftId.value = ''
       draftTitle.value = ''
     }
     await knowledge.reload()
   } catch (err) {
-    saveError.value = (err as Error).message
+    saveError.value = { text: (err as Error).message }
   }
 }
 
@@ -110,23 +126,23 @@ function resetDraft(): void {
   draftId.value = ''
   draftTitle.value = ''
   draftContent.value = ''
-  saveNotice.value = ''
-  saveError.value = ''
+  saveNotice.value = null
+  saveError.value = null
 }
 </script>
 
 <template>
   <div class="grid cols-3">
     <div class="readout">
-      <span class="readout__label">记忆条目</span>
+      <span class="readout__label">{{ t('memory.entries') }}</span>
       <span class="readout__value">{{ num(stats.data.value?.total) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">会话数</span>
+      <span class="readout__label">{{ t('memory.sessionCount') }}</span>
       <span class="readout__value">{{ num(rows.length) }}</span>
     </div>
     <div class="readout">
-      <span class="readout__label">知识文档</span>
+      <span class="readout__label">{{ t('memory.docCount') }}</span>
       <span class="readout__value">{{ num(documents.length) }}</span>
     </div>
   </div>
@@ -134,17 +150,17 @@ function resetDraft(): void {
   <div class="grid cols-2">
     <section class="panel">
       <div class="panel__head">
-        <h2>会话</h2>
-        <span class="hint">点击查看时间线</span>
+        <h2>{{ t('common.session') }}</h2>
+        <span class="hint">{{ t('memory.clickForTimeline') }}</span>
       </div>
       <div class="panel__body flush">
         <div class="scroll">
-          <table v-if="rows.length" class="data"><caption class="visually-hidden">会话</caption>
+          <table v-if="rows.length" class="data"><caption class="visually-hidden">{{ t('common.session') }}</caption>
             <thead>
               <tr>
-                <th scope="col">会话</th>
-                <th scope="col" class="num">消息</th>
-                <th scope="col">最近</th>
+                <th scope="col">{{ t('common.session') }}</th>
+                <th scope="col" class="num">{{ t('memory.messages') }}</th>
+                <th scope="col">{{ t('memory.recent') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -161,50 +177,50 @@ function resetDraft(): void {
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty">还没有归档的会话。机器人收到消息后才会出现。</div>
+          <div v-else class="empty">{{ t('memory.noSessions') }}</div>
         </div>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel__head">
-        <h2>记忆分层</h2>
+        <h2>{{ t('memory.layers') }}</h2>
       </div>
       <div class="panel__body flush">
-        <table v-if="layerRows.length" class="data"><caption class="visually-hidden">记忆分层</caption>
+        <table v-if="layerRows.length" class="data"><caption class="visually-hidden">{{ t('memory.layers') }}</caption>
           <tbody>
             <tr v-for="layer in layerRows" :key="layer.name">
               <td class="key">{{ layer.name }}</td>
-              <td class="num">{{ layer.count < 0 ? '不可读' : num(layer.count) }}</td>
+              <td class="num">{{ layer.count < 0 ? t('memory.unreadable') : num(layer.count) }}</td>
             </tr>
           </tbody>
         </table>
-        <div v-else class="empty">记忆存储未启用。</div>
+        <div v-else class="empty">{{ t('memory.disabled') }}</div>
       </div>
     </section>
   </div>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>时间线</h2>
+      <h2>{{ t('memory.timeline') }}</h2>
       <span v-if="selected" class="tag lamp">{{ selected }}</span>
       <span class="strip__spacer" />
-      <span v-if="timeline.length" class="hint">{{ timeline.length }} 条</span>
+      <span v-if="timeline.length" class="hint">{{ t('common.rows', { n: timeline.length }) }}</span>
     </div>
     <div class="panel__body flush">
       <div v-if="timelineError" class="panel__body">
         <div class="error-banner">{{ timelineError }}</div>
       </div>
-      <div v-else-if="timelineLoading" class="empty">载入中…</div>
-      <div v-else-if="!selected" class="empty">从左侧选择一个会话。</div>
-      <div v-else-if="!timeline.length" class="empty">该会话没有记录。</div>
+      <div v-else-if="timelineLoading" class="empty">{{ t('common.loading') }}</div>
+      <div v-else-if="!selected" class="empty">{{ t('memory.pickSession') }}</div>
+      <div v-else-if="!timeline.length" class="empty">{{ t('memory.emptySession') }}</div>
       <div v-else class="scroll">
-        <table class="data"><caption class="visually-hidden">时间线</caption>
+        <table class="data"><caption class="visually-hidden">{{ t('memory.timeline') }}</caption>
           <thead>
             <tr>
-              <th scope="col">时间</th>
-              <th scope="col">角色</th>
-              <th scope="col">内容</th>
+              <th scope="col">{{ t('common.time') }}</th>
+              <th scope="col">{{ t('common.role') }}</th>
+              <th scope="col">{{ t('common.content') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -216,8 +232,8 @@ function resetDraft(): void {
                 </span>
               </td>
               <td style="max-width: 620px">
-                {{ truncate(row.content, 200) || '（空）' }}
-                <span v-if="row.image_desc" class="tag" style="margin-left: 6px">图</span>
+                {{ truncate(row.content, 200) || t('memory.emptyContent') }}
+                <span v-if="row.image_desc" class="tag" style="margin-left: 6px">{{ t('memory.imageTag') }}</span>
               </td>
             </tr>
           </tbody>
@@ -228,45 +244,45 @@ function resetDraft(): void {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>知识库文档</h2>
+      <h2>{{ t('memory.knowledgeDocs') }}</h2>
       <span class="tag">{{ documents.length }}</span>
       <span class="strip__spacer" />
-      <button class="btn ghost" @click="resetDraft">新建文档</button>
+      <button class="btn ghost" @click="resetDraft">{{ t('memory.newDoc') }}</button>
     </div>
     <div class="panel__body flush">
-      <table v-if="documents.length" class="data"><caption class="visually-hidden">知识库文档</caption>
+      <table v-if="documents.length" class="data"><caption class="visually-hidden">{{ t('memory.knowledgeDocs') }}</caption>
         <thead>
           <tr>
-            <th scope="col">标题</th>
+            <th scope="col">{{ t('memory.title') }}</th>
             <th scope="col">ID</th>
-            <th scope="col" class="num">分段</th>
+            <th scope="col" class="num">{{ t('memory.chunks') }}</th>
             <th scope="col" />
           </tr>
         </thead>
         <tbody>
           <tr v-for="doc in documents" :key="doc.doc_id">
-            <td class="key">{{ doc.title || '（无标题）' }}</td>
+            <td class="key">{{ doc.title || t('memory.untitled') }}</td>
             <td>{{ doc.doc_id }}</td>
             <td class="num">{{ doc.chunks }}</td>
             <td style="white-space: nowrap">
-              <button class="btn ghost" @click="editDocument(doc)">替换</button>
-              <button class="btn ghost" @click="removeDocument(doc)">删除</button>
+              <button class="btn ghost" @click="editDocument(doc)">{{ t('memory.replace') }}</button>
+              <button class="btn ghost" @click="removeDocument(doc)">{{ t('common.delete') }}</button>
             </td>
           </tr>
         </tbody>
       </table>
       <div v-else class="empty">
-        知识库为空。在下方填写标题与正文即可写入；机器人会在 `/kb` 与对话中检索这些内容。
+        {{ t('memory.emptyKnowledge') }}
       </div>
     </div>
   </section>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>{{ draftId ? '替换文档' : '新增文档' }}</h2>
+      <h2>{{ draftId ? t('memory.replaceDoc') : t('memory.newDocPanel') }}</h2>
       <span v-if="draftId" class="tag lamp">{{ draftId }}</span>
       <span class="strip__spacer" />
-      <span class="hint">正文会按段落切分并建立索引</span>
+      <span class="hint">{{ t('memory.chunkHint') }}</span>
     </div>
     <div class="panel__body">
       <div class="stack">
@@ -275,14 +291,14 @@ function resetDraft(): void {
             v-model="draftTitle"
             class="field"
             style="flex: 1 1 260px"
-            placeholder="标题（例如：退换货政策）"
+            :placeholder="t('memory.titlePlaceholder')"
             maxlength="200"
           />
           <input
             v-model="draftId"
             class="field"
             style="flex: 0 1 220px"
-            placeholder="文档 ID（留空自动生成）"
+            :placeholder="t('memory.idPlaceholder')"
             maxlength="64"
           />
         </div>
@@ -290,15 +306,21 @@ function resetDraft(): void {
           v-model="draftContent"
           class="field"
           rows="8"
-          placeholder="粘贴正文。留空表示只更新标题不会生效——替换文档时必须重新粘贴正文。"
+          :placeholder="t('memory.contentPlaceholder')"
         />
         <div class="row">
           <button class="btn lamp" :disabled="saving" @click="submitDocument">
-            {{ saving ? '写入中…' : draftId ? '覆盖并重建索引' : '写入知识库' }}
+            {{
+              saving
+                ? t('memory.saving')
+                : draftId
+                  ? t('memory.overwrite')
+                  : t('memory.write')
+            }}
           </button>
-          <span v-if="saveNotice" class="hint">{{ saveNotice }}</span>
+          <span v-if="saveNoticeText" class="hint">{{ saveNoticeText }}</span>
         </div>
-        <div v-if="saveError" class="error-banner">{{ saveError }}</div>
+        <div v-if="saveErrorText" class="error-banner">{{ saveErrorText }}</div>
       </div>
     </div>
   </section>

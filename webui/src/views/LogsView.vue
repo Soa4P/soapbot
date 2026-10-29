@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 import { clock } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -33,13 +34,16 @@ watch([level, contains, limit], () => {
 const entries = computed<any[]>(() => logs.data.value?.entries ?? [])
 const total = computed<number>(() => logs.data.value?.total ?? 0)
 
-const levels = [
-  { value: '', label: '全部' },
+// Labels for the filter, not for the rows. The log text itself stays exactly as the
+// logger wrote it — translating it would make the panel disagree with the file that
+// `grep` and the alert rules read.
+const levels = computed(() => [
+  { value: '', label: t('common.all') },
   { value: 'DEBUG', label: 'DEBUG' },
   { value: 'INFO', label: 'INFO' },
   { value: 'WARNING', label: 'WARNING' },
   { value: 'ERROR', label: 'ERROR' },
-]
+])
 
 function levelClass(value: string): string {
   const upper = String(value).toUpperCase()
@@ -60,10 +64,10 @@ function detail(entry: any): string {
 <template>
   <section class="panel">
     <div class="panel__head">
-      <h2>运行日志</h2>
+      <h2>{{ t('logs.title') }}</h2>
       <span class="tag">{{ entries.length }} / {{ total }}</span>
       <span class="strip__spacer" />
-      <select v-model="level" class="field" style="width: 140px">
+      <select v-model="level" class="field" style="width: 140px" :aria-label="t('logs.level')">
         <option v-for="item in levels" :key="item.value" :value="item.value">
           {{ item.label }}
         </option>
@@ -72,28 +76,28 @@ function detail(entry: any): string {
         v-model="contains"
         class="field"
         style="width: 220px"
-        placeholder="包含关键词"
+        :placeholder="t('logs.placeholder')"
         maxlength="200"
       />
       <button class="btn ghost" :disabled="logs.loading.value" @click="logs.reload()">
-        刷新
+        {{ t('common.refresh') }}
       </button>
     </div>
     <div class="panel__body flush">
       <div v-if="logs.error.value" class="panel__body">
         <div class="error-banner">{{ logs.error.value }}</div>
       </div>
-      <div v-else-if="logs.loading.value && !entries.length" class="empty">载入中…</div>
+      <div v-else-if="logs.loading.value && !entries.length" class="empty">{{ t('common.loading') }}</div>
       <div v-else-if="!entries.length" class="empty">
-        环形缓冲区为空。若刚启动服务，第一条日志会在首次请求后出现。
+        {{ t('logs.empty') }}
       </div>
       <div v-else class="scroll" style="max-height: 640px">
-        <table class="data"><caption class="visually-hidden">运行日志</caption>
+        <table class="data"><caption class="visually-hidden">{{ t('logs.title') }}</caption>
           <thead>
             <tr>
-              <th scope="col" style="width: 92px">时间</th>
-              <th scope="col" style="width: 84px">级别</th>
-              <th scope="col">内容</th>
+              <th scope="col" style="width: 92px">{{ t('common.time') }}</th>
+              <th scope="col" style="width: 84px">{{ t('logs.level') }}</th>
+              <th scope="col">{{ t('common.content') }}</th>
             </tr>
           </thead>
           <tbody>

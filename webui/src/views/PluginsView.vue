@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { ApiError, api } from '@/api/client'
+import { t } from '@/i18n'
 import { useAsync } from '@/lib/useAsync'
 
 const listing = useAsync(() => api.plugins())
@@ -16,6 +17,11 @@ const RISKY = new Set(['http', 'memory_read', 'kb_read', 'send', 'storage', 'cro
 
 const installed = computed<any[]>(() => listing.data.value?.installed ?? [])
 const exported = computed<any[]>(() => installed.value.filter((p) => p.api))
+
+/** `trust` is free text from the manifest; only the declared value is meaningful. */
+function trustLabel(value: string): string {
+  return value === 'trusted' ? t('plugins.trusted') : t('plugins.untrusted')
+}
 
 async function act(name: string, action: 'load' | 'unload'): Promise<void> {
   actionError.value = ''
@@ -66,10 +72,8 @@ async function confirmApprove(name: string): Promise<void> {
  * operator believe they had stopped something they had not, and vice versa.
  */
 async function revoke(plugin: any): Promise<void> {
-  const note = plugin.loaded
-    ? '将保留当前运行实例，但下次启动不会再加载。'
-    : '该插件当前未运行，撤销后也不会再自动加载。'
-  if (!window.confirm(`撤销对「${plugin.name}」的批准？\n${note}`)) return
+  const note = plugin.loaded ? t('plugins.revokeNoteRunning') : t('plugins.revokeNoteStopped')
+  if (!window.confirm(`${t('plugins.revokeConfirm', { name: plugin.name })}\n${note}`)) return
   actionError.value = ''
   busy.value = `revoke:${plugin.name}`
   try {
@@ -84,12 +88,7 @@ async function revoke(plugin: any): Promise<void> {
 
 /** Permanently remove a plugin's files. Loaded plugins are unloaded server-side first. */
 async function remove(plugin: any): Promise<void> {
-  if (
-    !window.confirm(
-      `永久删除插件「${plugin.name}」的目录？此操作会同时撤销批准，无法通过界面恢复。`,
-    )
-  )
-    return
+  if (!window.confirm(t('plugins.deleteConfirm', { name: plugin.name }))) return
   actionError.value = ''
   busy.value = `delete:${plugin.name}`
   try {
@@ -105,29 +104,29 @@ async function remove(plugin: any): Promise<void> {
 
 <template>
   <div class="warn-banner">
-    加载插件等于在本进程内执行第三方代码。列表只做发现，不会自动加载任何插件。
+    {{ t('plugins.warning') }}
   </div>
 
   <div v-if="actionError" class="error-banner">{{ actionError }}</div>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>已安装</h2>
+      <h2>{{ t('common.installed') }}</h2>
       <span class="tag">{{ installed.length }}</span>
       <span class="strip__spacer" />
-      <span class="hint">批准是按能力逐项授予的</span>
+      <span class="hint">{{ t('plugins.perCapability') }}</span>
     </div>
     <div class="panel__body flush">
-      <table v-if="installed.length" class="data"><caption class="visually-hidden">已安装</caption>
+      <table v-if="installed.length" class="data"><caption class="visually-hidden">{{ t('common.installed') }}</caption>
         <thead>
           <tr>
-            <th scope="col">插件</th>
-            <th scope="col">版本</th>
-            <th scope="col">信任</th>
-            <th scope="col">声明能力</th>
-            <th scope="col">已授权</th>
-            <th scope="col">状态</th>
-            <th scope="col">操作</th>
+            <th scope="col">{{ t('common.plugin') }}</th>
+            <th scope="col">{{ t('common.version') }}</th>
+            <th scope="col">{{ t('plugins.trust') }}</th>
+            <th scope="col">{{ t('plugins.declared') }}</th>
+            <th scope="col">{{ t('plugins.granted') }}</th>
+            <th scope="col">{{ t('common.status') }}</th>
+            <th scope="col">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -137,7 +136,7 @@ async function remove(plugin: any): Promise<void> {
               <td>{{ plugin.version || '—' }}</td>
               <td>
                 <span class="tag" :class="plugin.trust === 'trusted' ? '' : 'bad'">
-                  {{ plugin.trust || 'untrusted' }}
+                  {{ trustLabel(plugin.trust) }}
                 </span>
               </td>
               <td>
@@ -152,12 +151,14 @@ async function remove(plugin: any): Promise<void> {
                 </span>
               </td>
               <td>
-                <span v-if="plugin.approved" class="tag lamp">{{ plugin.pending.length ? '部分' : '全部' }}</span>
-                <span v-else class="faint">未授权</span>
+                <span v-if="plugin.approved" class="tag lamp">
+                  {{ plugin.pending.length ? t('plugins.partial') : t('plugins.full') }}
+                </span>
+                <span v-else class="faint">{{ t('plugins.notApproved') }}</span>
               </td>
               <td>
                 <span class="pill" :class="plugin.loaded ? 'ok' : ''">
-                  <i class="dot" />{{ plugin.loaded ? '运行中' : '未加载' }}
+                  <i class="dot" />{{ plugin.loaded ? t('plugins.running') : t('plugins.notLoaded') }}
                 </span>
               </td>
               <td>
@@ -166,10 +167,10 @@ async function remove(plugin: any): Promise<void> {
                     v-if="!plugin.loaded"
                     class="btn"
                     :disabled="busy !== '' || !plugin.pending.length"
-                    :title="plugin.pending.length ? '' : '先授权至少一项能力'"
+                    :title="plugin.pending.length ? '' : t('plugins.approveHint')"
                     @click="startApprove(plugin)"
                   >
-                    授权…
+                    {{ t('plugins.approve') }}
                   </button>
                   <button
                     v-if="plugin.approved && !plugin.loaded"
@@ -177,7 +178,7 @@ async function remove(plugin: any): Promise<void> {
                     :disabled="busy !== ''"
                     @click="act(plugin.name, 'load')"
                   >
-                    加载
+                    {{ t('plugins.load') }}
                   </button>
                   <button
                     v-if="plugin.loaded"
@@ -185,24 +186,24 @@ async function remove(plugin: any): Promise<void> {
                     :disabled="busy !== ''"
                     @click="act(plugin.name, 'unload')"
                   >
-                    卸载
+                    {{ t('plugins.unload') }}
                   </button>
                   <button
                     v-if="plugin.approved"
                     class="btn ghost"
                     :disabled="busy !== ''"
-                    title="保留当前实例，但下次启动不再自动加载"
+                    :title="t('plugins.revokeTitle')"
                     @click="revoke(plugin)"
                   >
-                    撤销批准
+                    {{ t('plugins.revoke') }}
                   </button>
                   <button
                     class="btn ghost"
                     :disabled="busy !== ''"
-                    title="删除插件目录，无法通过界面恢复"
+                    :title="t('plugins.deleteTitle')"
                     @click="remove(plugin)"
                   >
-                    删除
+                    {{ t('common.delete') }}
                   </button>
                 </div>
               </td>
@@ -212,7 +213,7 @@ async function remove(plugin: any): Promise<void> {
               <td colspan="7">
                 <div class="stack" style="padding: 4px 0">
                   <div class="eyebrow">
-                    选择要授予 {{ plugin.name }} 的能力（未声明的能力无法授予）
+                    {{ t('plugins.selectCaps', { name: plugin.name }) }}
                   </div>
                   <div class="row">
                     <label
@@ -240,15 +241,19 @@ async function remove(plugin: any): Promise<void> {
                       :disabled="!selected.length || busy !== ''"
                       @click="confirmApprove(plugin.name)"
                     >
-                      确认授权
+                      {{ t('plugins.confirmApprove') }}
                     </button>
-                    <button class="btn ghost" @click="approving = ''">取消</button>
+                    <button class="btn ghost" @click="approving = ''">{{ t('common.cancel') }}</button>
                   </div>
-                  <p class="hint" style="margin: 0">
-                    <span class="mono">http</span> 允许外发请求，
-                    <span class="mono">memory_read / kb_read</span> 可读取会话与文档，
-                    <span class="mono">send</span> 可主动发消息。授权是替换而不是合并。
-                  </p>
+                  <!-- One capability per line, each with a whole sentence. The previous
+                       version interleaved three code tokens into one sentence, which is
+                       exactly the shape that cannot be translated without reordering. -->
+                  <ul class="hint" style="margin: 0; padding-left: 18px">
+                    <li><span class="mono">http</span> — {{ t('plugins.cap.http') }}</li>
+                    <li><span class="mono">memory_read / kb_read</span> — {{ t('plugins.cap.read') }}</li>
+                    <li><span class="mono">send</span> — {{ t('plugins.cap.send') }}</li>
+                  </ul>
+                  <p class="hint" style="margin: 0">{{ t('plugins.grantReplaces') }}</p>
                 </div>
               </td>
             </tr>
@@ -256,25 +261,26 @@ async function remove(plugin: any): Promise<void> {
         </tbody>
       </table>
       <div v-else class="empty">
-        插件目录为空。<span class="mono">data/plugins/&lt;name&gt;/plugin.yaml</span>
+        {{ t('plugins.empty') }}
+        <div class="mono" style="margin-top: 6px">data/plugins/&lt;name&gt;/plugin.yaml</div>
       </div>
     </div>
   </section>
 
   <section v-if="exported.length" class="panel">
     <div class="panel__head">
-      <h2>运行中插件导出</h2>
+      <h2>{{ t('plugins.exported') }}</h2>
       <span class="tag">{{ exported.length }}</span>
     </div>
     <div class="panel__body flush">
-      <table class="data"><caption class="visually-hidden">运行中插件导出</caption>
+      <table class="data"><caption class="visually-hidden">{{ t('plugins.exported') }}</caption>
         <thead>
           <tr>
-            <th scope="col">插件</th>
-            <th scope="col">命令</th>
-            <th scope="col">工具</th>
-            <th scope="col">定时任务</th>
-            <th scope="col" class="num">调用</th>
+            <th scope="col">{{ t('common.plugin') }}</th>
+            <th scope="col">{{ t('plugins.commands') }}</th>
+            <th scope="col">{{ t('common.tools') }}</th>
+            <th scope="col">{{ t('plugins.cronJobs') }}</th>
+            <th scope="col" class="num">{{ t('common.calls') }}</th>
           </tr>
         </thead>
         <tbody>

@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, type MetricsResponse, type TraceSummary } from '@/api/client'
 import BarChart from '@/components/charts/BarChart.vue'
 import LineChart from '@/components/charts/LineChart.vue'
+import { t } from '@/i18n'
 import { clock } from '@/lib/format'
 
 /**
@@ -46,7 +47,7 @@ const latencySeries = computed(() => [
   },
   {
     key: 'max',
-    label: '最长',
+    label: t('metrics.seriesMax'),
     values: (data.value?.samples ?? []).map((s) => s.max_ms),
     tone: 'danger' as const,
   },
@@ -55,13 +56,13 @@ const latencySeries = computed(() => [
 const throughputSeries = computed(() => [
   {
     key: 'handled',
-    label: '已处理',
+    label: t('common.processed'),
     values: (data.value?.samples ?? []).map((s) => s.handled),
     tone: 'ok' as const,
   },
   {
     key: 'halted',
-    label: '被拦截',
+    label: t('common.intercepted'),
     values: (data.value?.samples ?? []).map((s) => s.halted),
     tone: 'muted' as const,
   },
@@ -76,9 +77,9 @@ const counters = computed(() => {
   const c = summary.value?.counters
   if (!c) return []
   return [
-    { label: '已处理', value: c.handled, tone: 'ok' as const },
-    { label: '被拦截', value: c.halted, tone: 'warn' as const },
-    { label: '处理失败', value: c.failed, tone: 'danger' as const },
+    { label: t('common.processed'), value: c.handled, tone: 'ok' as const },
+    { label: t('common.intercepted'), value: c.halted, tone: 'warn' as const },
+    { label: t('metrics.seriesFailed'), value: c.failed, tone: 'danger' as const },
   ]
 })
 
@@ -112,80 +113,83 @@ function fmtCount(value: number): string {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>概览</h2>
+      <h2>{{ t('metrics.overview') }}</h2>
       <span class="strip__spacer" />
-      <button class="btn ghost" type="button" @click="load">刷新</button>
+      <button class="btn ghost" type="button" @click="load">{{ t('common.refresh') }}</button>
     </div>
     <div class="panel__body">
       <div class="grid cols-4">
         <div class="readout">
-          <span class="readout__label">已处理</span>
+          <span class="readout__label">{{ t('common.processed') }}</span>
           <span class="readout__value">{{ summary?.counters.handled ?? 0 }}</span>
         </div>
         <div class="readout">
-          <span class="readout__label">p95 延迟</span>
+          <span class="readout__label">{{ t('metrics.p95') }}</span>
           <span class="readout__value">{{ fmtMs(summary?.p95_ms ?? 0) }}</span>
         </div>
         <div class="readout">
-          <span class="readout__label">最长一次</span>
+          <span class="readout__label">{{ t('metrics.slowest') }}</span>
           <span class="readout__value">{{ fmtMs(summary?.max_ms ?? 0) }}</span>
         </div>
         <div class="readout">
-          <span class="readout__label">缓冲区</span>
+          <span class="readout__label">{{ t('metrics.buffer') }}</span>
           <span class="readout__value">
-            {{ summary?.traces_kept ?? 0 }}<small>条</small>
+            {{ summary?.traces_kept ?? 0 }}<small>{{ t('metrics.bufferUnit') }}</small>
           </span>
         </div>
       </div>
 
+      <!-- Three complete sentences rather than one sentence split around a <strong>.
+           Emphasis survives; the text stays translatable without reordering. -->
       <p class="hint" style="margin: 10px 0 0">
-        采样间隔 5 秒，保留最近 720 个点（约 1 小时）。重启清空——
-        <strong>这里不是历史，是「刚刚发生了什么」</strong>。历史结论请看 04 页审计日志。
+        {{ t('metrics.bufferNote') }}
+        <strong>{{ t('metrics.bufferWarning') }}</strong>
+        {{ t('metrics.bufferPointer') }}
       </p>
     </div>
   </section>
 
   <section class="panel">
-    <div class="panel__head"><h2>延迟分位</h2></div>
+    <div class="panel__head"><h2>{{ t('metrics.latency') }}</h2></div>
     <div class="panel__body">
       <LineChart
         v-if="hasSamples"
-        title="延迟分位（毫秒）"
-        y-label="越接近最长，说明抖动越大"
+        :title="t('metrics.latencyChartTitle')"
+        :y-label="t('metrics.latencyChartHint')"
         :series="latencySeries"
         :labels="labels"
         :format="fmtMs"
       />
       <p v-else class="empty">
-        还需要更多样本。至少两条消息处理完才会出现曲线——5 秒一次采样。
+        {{ t('metrics.latencyEmpty') }}
       </p>
     </div>
   </section>
 
   <div class="grid cols-2">
     <section class="panel">
-      <div class="panel__head"><h2>累计处理</h2></div>
+      <div class="panel__head"><h2>{{ t('metrics.cumulativeHandled') }}</h2></div>
       <div class="panel__body">
         <LineChart
           v-if="hasSamples"
-          title="累计计数"
+          :title="t('common.count')"
           :series="throughputSeries"
           :labels="labels"
           :format="fmtCount"
           :height="180"
         />
-        <p v-else class="empty">暂无样本</p>
+        <p v-else class="empty">{{ t('metrics.noSamples') }}</p>
       </div>
     </section>
 
     <section class="panel">
-      <div class="panel__head"><h2>结果分布</h2></div>
+      <div class="panel__head"><h2>{{ t('metrics.distribution') }}</h2></div>
       <div class="panel__body">
         <BarChart
-          title="自服务启动以来的累计计数"
+          :title="t('metrics.distributionTitle')"
           :items="counters"
-          unit=" 条"
-          empty-text="还没有消息经过流水线"
+          :unit="t('metrics.barUnit')"
+          :empty-text="t('metrics.distributionEmpty')"
         />
       </div>
     </section>

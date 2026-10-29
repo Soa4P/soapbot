@@ -252,10 +252,33 @@ def test_stage_order_matches_build_pipeline() -> None:
 
 
 def test_constraints_reference_known_stages() -> None:
-    for before, after, why in ORDER_CONSTRAINTS:
+    """Every constraint must name real stages and say *why* in whole sentences.
+
+    The reason now comes from the catalogue, so this also proves the key exists in both
+    languages: a missing key would resolve to the key string itself, which is longer
+    than eight characters and would otherwise sail through a length check.
+    """
+    from soapbot.core.trace import constraint_reason
+
+    for before, after in ORDER_CONSTRAINTS:
         assert before in STAGE_ORDER, f"约束引用了未知 Stage {before}"
         assert after in STAGE_ORDER, f"约束引用了未知 Stage {after}"
-        assert len(why) > 8, f"{before}->{after} 的理由太短，等于没说"
+        for locale in ("zh-CN", "en-US"):
+            reason = constraint_reason(before, after, locale)
+            assert reason != f"pipeline.constraint.{before}.{after}", (
+                f"{before}->{after} 在 {locale} 缺少译文"
+            )
+            assert len(reason) > 8, f"{before}->{after} 的理由太短，等于没说"
+
+
+def test_topology_labels_are_translated_not_echoed() -> None:
+    """A missing label key would come back as the key, and the graph would show
+    `pipeline.stage.model` — legible to nobody, and easy to miss in a screenshot."""
+    for locale, expected in (("zh-CN", "模型调用"), ("en-US", "Model call")):
+        stages = {s["name"]: s["label"] for s in build_topology(locale)["stages"]}
+        assert stages["model"] == expected
+        for name, label in stages.items():
+            assert label != f"pipeline.stage.{name}", f"{name} 在 {locale} 缺少标签"
 
 
 def test_correct_order_has_no_violations() -> None:

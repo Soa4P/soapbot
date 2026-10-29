@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 import { compact, num, uptime } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
@@ -17,13 +18,15 @@ const adapters = computed<any[]>(() => {
   return Object.entries(map).map(([name, value]: [string, any]) => ({ name, ...value }))
 })
 
+// Labels are built inside the computed so switching language re-renders them. A
+// module-level array would freeze the labels at import time.
 const flags = computed(() => {
   const config = runtime.data.value?.config ?? {}
   return [
-    { label: '记忆存储', on: Boolean(config.memory_enabled) },
-    { label: '额度审批', on: Boolean(config.budget_enabled) },
-    { label: 'B 站浏览', on: Boolean(bilibili.data.value?.enabled) },
-    { label: '插件隔离', on: Boolean(config.plugin_isolation) },
+    { label: t('overview.memory'), on: Boolean(config.memory_enabled) },
+    { label: t('overview.budget'), on: Boolean(config.budget_enabled) },
+    { label: t('overview.bilibili'), on: Boolean(bilibili.data.value?.enabled) },
+    { label: t('overview.isolation'), on: Boolean(config.plugin_isolation) },
   ]
 })
 
@@ -37,15 +40,15 @@ const haltRate = computed(() => {
 })
 
 const readouts = computed(() => [
-  { label: '上行业务', value: num(metrics.value.inbound) },
-  { label: '已处理', value: num(metrics.value.handled) },
-  { label: '被拦截', value: num(metrics.value.halted), foot: haltRate.value },
-  { label: '失败', value: num(metrics.value.failed) },
+  { label: t('overview.inbound'), value: num(metrics.value.inbound) },
+  { label: t('common.processed'), value: num(metrics.value.handled) },
+  { label: t('common.intercepted'), value: num(metrics.value.halted), foot: haltRate.value },
+  { label: t('common.failed'), value: num(metrics.value.failed) },
 ])
 
 const runningFor = computed(() => {
   const started = Number(metrics.value.started_at ?? 0)
-  if (!started) return '未启动'
+  if (!started) return t('overview.notStarted')
   return uptime(Date.now() / 1000 - started)
 })
 
@@ -60,7 +63,7 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
 
   <section class="panel">
     <div class="panel__head">
-      <h2>运行读数</h2>
+      <h2>{{ t('overview.readouts') }}</h2>
       <span class="eyebrow">up {{ runningFor }}</span>
       <span class="strip__spacer" />
       <span class="pill" :class="runtime.data.value?.running ? 'ok' : 'bad'">
@@ -81,7 +84,7 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
 
   <section v-if="startupErrors.length" class="panel">
     <div class="panel__head">
-      <h2>启动告警</h2>
+      <h2>{{ t('overview.startupWarnings') }}</h2>
       <span class="tag bad">{{ startupErrors.length }}</span>
     </div>
     <div class="panel__body stack">
@@ -89,8 +92,8 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
         {{ item }}
       </div>
       <p class="hint" style="margin: 0">
-        适配器构造失败时服务仍会启动：管理面板正是用来定位这个错误的地方。修改
-        <span class="mono">config/adapters.yaml</span> 后重启生效。
+        {{ t('overview.startupHintLead') }}
+        <span class="mono">config/adapters.yaml</span>{{ t('overview.startupHintTail') }}
       </p>
     </div>
   </section>
@@ -98,17 +101,17 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
   <div class="grid cols-2">
     <section class="panel">
       <div class="panel__head">
-        <h2>协议适配器</h2>
+        <h2>{{ t('overview.adapters') }}</h2>
         <span class="tag">{{ adapters.length }}</span>
       </div>
       <div class="panel__body flush">
-        <table v-if="adapters.length" class="data"><caption class="visually-hidden">协议适配器</caption>
+        <table v-if="adapters.length" class="data"><caption class="visually-hidden">{{ t('overview.adapters') }}</caption>
           <thead>
             <tr>
-              <th scope="col">名称</th>
-              <th scope="col">协议</th>
-              <th scope="col">状态</th>
-              <th scope="col">最近错误</th>
+              <th scope="col">{{ t('common.name') }}</th>
+              <th scope="col">{{ t('overview.protocol') }}</th>
+              <th scope="col">{{ t('common.status') }}</th>
+              <th scope="col">{{ t('overview.lastError') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -117,23 +120,27 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
               <td>{{ adapter.protocol || '—' }}</td>
               <td>
                 <span class="pill" :class="adapter.online ? 'ok' : 'bad'">
-                  <i class="dot" />{{ adapter.online ? '在线' : '离线' }}
+                  <i class="dot" />{{ adapter.online ? t('overview.online') : t('overview.offline') }}
                 </span>
               </td>
               <td>{{ adapter.last_error || '—' }}</td>
             </tr>
           </tbody>
         </table>
+        <!-- The file to edit gets its own line instead of being embedded mid-sentence:
+             it is the only actionable part, and a sentence split around a path breaks
+             as soon as a language orders the clause differently. -->
         <div v-else class="empty">
-          尚未配置适配器。服务只会提供管理 API，不会收到任何 QQ 消息。
-          <br />在 <span class="mono">config/adapters.yaml</span> 中填写协议端地址后重启。
+          {{ t('overview.noAdapters') }}
+          <div class="mono" style="margin: 6px 0">config/adapters.yaml</div>
+          {{ t('overview.fillAdapter') }}
         </div>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel__head">
-        <h2>能力开关</h2>
+        <h2>{{ t('overview.flags') }}</h2>
       </div>
       <div class="panel__body">
         <div class="grid cols-2">
@@ -145,7 +152,7 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
           </div>
         </div>
         <p class="hint" style="margin: 12px 0 0">
-          B 站与额度默认关闭。开启前请确认对应的合规与授权前提。
+          {{ t('overview.flagsHint') }}
         </p>
       </div>
     </section>
@@ -153,20 +160,20 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
 
   <section class="panel">
     <div class="panel__head">
-      <h2>Provider 故障转移链</h2>
+      <h2>{{ t('overview.providers') }}</h2>
       <span class="tag">{{ providerRows.length }}</span>
     </div>
     <div class="panel__body flush">
-      <table v-if="providerRows.length" class="data"><caption class="visually-hidden">Provider 故障转移链</caption>
+      <table v-if="providerRows.length" class="data"><caption class="visually-hidden">{{ t('overview.providers') }}</caption>
         <thead>
           <tr>
-            <th scope="col">优先级</th>
+            <th scope="col">{{ t('overview.priority') }}</th>
             <th scope="col">ID</th>
-            <th scope="col">模型</th>
-            <th scope="col">能力</th>
-            <th scope="col" class="num">调用</th>
-            <th scope="col" class="num">失败</th>
-            <th scope="col">冷却</th>
+            <th scope="col">{{ t('common.model') }}</th>
+            <th scope="col">{{ t('common.capability') }}</th>
+            <th scope="col" class="num">{{ t('common.calls') }}</th>
+            <th scope="col" class="num">{{ t('common.failed') }}</th>
+            <th scope="col">{{ t('overview.cooldown') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -182,22 +189,23 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
             <td class="num">{{ num(providerStats[row.id]?.calls) }}</td>
             <td class="num">{{ num(providerStats[row.id]?.failures) }}</td>
             <td>
-              <span v-if="providerStats[row.id]?.cooling_down" class="tag bad">冷却中</span>
+              <span v-if="providerStats[row.id]?.cooling_down" class="tag bad">{{ t('overview.cooling') }}</span>
               <span v-else class="faint">—</span>
             </td>
           </tr>
         </tbody>
       </table>
       <div v-else class="empty">
-        未配置 Provider，模型阶段被禁用 —— 机器人不会产生任何回复。
-        <br />在 <span class="mono">config/providers.yaml</span> 中配置模型端点。
+        {{ t('overview.noProviders') }}
+        <div class="mono" style="margin: 6px 0">config/providers.yaml</div>
+        {{ t('overview.fillProviders') }}
       </div>
     </div>
   </section>
 
   <section class="panel">
     <div class="panel__head">
-      <h2>人格卡</h2>
+      <h2>{{ t('overview.personas') }}</h2>
       <span class="tag">{{ personas.data.value?.count ?? 0 }}</span>
     </div>
     <div class="panel__body">
@@ -210,21 +218,24 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
           {{ persona.id }}
         </span>
         <span v-if="!personas.data.value?.personas?.length" class="faint">
-          没有人格卡，将使用空系统提示。
+          {{ t('overview.noPersonas') }}
         </span>
       </div>
       <p class="hint" style="margin: 10px 0 0">
-        默认绑定：<span class="mono">{{
-          personas.data.value?.binding?.global_default || '（未设置）'
-        }}</span>
-        · 群绑定 {{ Object.keys(personas.data.value?.binding?.groups ?? {}).length }} 个 ·
-        用户绑定 {{ Object.keys(personas.data.value?.binding?.users ?? {}).length }} 个
+        {{ t('overview.defaultBinding') }}<span class="mono">{{
+          personas.data.value?.binding?.global_default || t('overview.unset')
+        }}</span>{{ t('overview.bindingRest', {
+          groups: Object.keys(personas.data.value?.binding?.groups ?? {}).length,
+          users: Object.keys(personas.data.value?.binding?.users ?? {}).length,
+        }) }}
       </p>
     </div>
   </section>
 
   <p class="hint" style="margin: 0">
-    已处理 {{ compact(metrics.handled) }} 条 · 调度器 tick
-    {{ runtime.data.value?.scheduler?.ticks ?? 0 }} 次
+    {{ t('overview.footer', {
+      handled: compact(metrics.handled),
+      ticks: runtime.data.value?.scheduler?.ticks ?? 0,
+    }) }}
   </p>
 </template>

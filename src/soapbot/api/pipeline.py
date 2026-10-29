@@ -51,15 +51,21 @@ def _traces():
 
 
 @router.get("/topology")
-async def topology(_: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
+async def topology(
+    request: Request,
+    _: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
     """Stages in assembly order, plus the constraints between them.
 
     The order comes from ``core/trace.py::STAGE_ORDER``, which a test pins against
     ``build_pipeline``. Serving it from the runtime object instead would describe one
     instance; serving it from the builder would require importing the builder here and
     risk a cycle.
+
+    Labels and reasons are translated here rather than in the panel: they are prose
+    about this pipeline, and the panel has no business owning a second copy of it.
     """
-    return build_topology()
+    return build_topology(request_locale(request))
 
 
 class ReorderCheckRequest(BaseModel):
@@ -69,6 +75,7 @@ class ReorderCheckRequest(BaseModel):
 @router.post("/reorder-check")
 async def reorder_check(
     payload: ReorderCheckRequest,
+    request: Request,
     _: dict[str, Any] = Depends(require_api_auth),
 ) -> dict[str, Any]:
     """Report which invariants a hypothetical stage order would violate.
@@ -76,13 +83,14 @@ async def reorder_check(
     Stateless and write-free. This is the only "reordering" the panel offers, and it
     answers a question ("why can't I move this?") that a disabled drag handle cannot.
     """
+    locale = request_locale(request)
     unknown = [name for name in payload.order if name not in build_topology_names()]
     if unknown:
         raise HTTPException(
             status_code=422,
-            detail=f"未知的 Stage 名称：{', '.join(sorted(unknown))}",
+            detail=t("api.unknown_stage", locale, names=", ".join(sorted(unknown))),
         )
-    broken = violated_constraints(payload.order)
+    broken = violated_constraints(payload.order, locale)
     return {
         "order": payload.order,
         "violations": broken,

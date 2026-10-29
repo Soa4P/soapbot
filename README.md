@@ -449,6 +449,14 @@ docker compose -f deploy/docker-compose.yml up -d --build
 镜像要点（详见 `docs/deploy-layer.md`）：非 root 用户、`data/` 为卷、`config/` 只读、
 主密钥从文件挂载。部署前跑一次 `doctor --strict`。
 
+容器里 `.env` 被显式指到 `/data/.env`（`SOAPBOT_ENV_FILE`）。根文件系统是只读的，
+默认位置在 `/app`，第 12 页保存设置会直接失败——把它放在数据卷上，保存才能落盘并在重启
+后生效。`scripts/check_deploy.py` 会静态校验这一条。
+
+> **容器未经实测。** 本机无 `docker` 命令，`check_deploy.py` 只能证明配置文件里写了
+> `read_only: true`，不能证明容器起得来。9 条验收命令与预期输出见
+> [`docs/deploy-layer.md` §8](docs/deploy-layer.md)，需要在有 Docker 的机器上执行。
+
 ### 前端
 
 ```bash
@@ -567,7 +575,7 @@ class Plugin:
 | MCP 客户端 | ✅（默认关） | `config/mcp.yaml` 声明式接入，工具作为独立来源注入模型调用，按 server 的 `min_role` 逐个授权；`GET /api/mcp` 报告每个 server 的工具数与错误 |
 | 语音 | ✅（默认关） | 入站转写（多 Provider 故障转移）+ 出站 edge-tts（需 `.[voice]`）。没有厂商凭据时以明确失败降级，不伪造结果 |
 | 流式输出 | ✅（默认关） | `STREAM_REPLY=true` 且适配器声明 `PROGRESSIVE` 才生效——目前只有 OneBot v11 声明。工具调用轮次不流式 |
-| 多语言 | 🟡 部分 | **已接**：机器人发到群里的话（`DEFAULT_LOCALE`，人格卡可逐群覆盖）、API `detail`（按 `Accept-Language`）、面板导航与第 12 页（按浏览器切换并持久化）。**未接**：01–11 页的正文文案仍是硬编码中文——切换语言只改变导航与设置页。日志与堆栈**有意**保持英文：翻译日志会让同一事件变成不同字符串，破坏 grep 与告警 |
+| 多语言 | ✅ | 中文 / English，三条通道：机器人发到群里的话（`DEFAULT_LOCALE`，人格卡可逐群覆盖）、API `detail`（按 `Accept-Language`）、面板全 12 页含外壳与图表（按浏览器切换并持久化）。流水线阶段名与顺序约束由后端按请求语言输出，不在前端维护第二份文案。**日志与堆栈有意保持英文**：同一事件在不同语言下变成不同字符串，会让 `grep` 与告警规则静默失效。`tests/test_webui_i18n.py` 用「模板里不得残留中文」防止半翻译回归 |
 | 插件间互相调用 | ❌ | 设计如此：插件 A 不能借插件 B 提权 |
 
 ---

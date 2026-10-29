@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { t } from '@/i18n'
+
 /**
  * Renders a unified diff, line by line, with the original and new numbers.
  *
@@ -74,14 +76,14 @@ const counts = computed(() => ({
 <template>
   <div class="diff">
     <div class="diff__head">
-      <span class="mono">{{ filename ?? '配置文件' }}</span>
+      <span class="mono">{{ filename ?? t('diff.configFile') }}</span>
       <span class="tag ok">+{{ counts.added }}</span>
       <span class="tag bad">−{{ counts.removed }}</span>
     </div>
 
-    <p v-if="!lines.length" class="empty">没有改动。</p>
+    <p v-if="!lines.length" class="empty">{{ t('config.clean') }}</p>
 
-    <div v-else class="diff__body" role="table" aria-label="待写入的改动">
+    <div v-else class="diff__body" role="table" :aria-label="t('config.pendingChanges')">
       <div v-for="(line, index) in lines" :key="index" class="diff__line" :class="`diff__line--${line.kind}`" role="row">
         <span class="diff__no mono" role="cell">{{ line.oldNo ?? '' }}</span>
         <span class="diff__no mono" role="cell">{{ line.newNo ?? '' }}</span>
@@ -90,7 +92,7 @@ const counts = computed(() => ({
         </span>
         <span class="diff__text mono" role="cell">{{ line.text }}</span>
         <span class="visually-hidden">
-          {{ line.kind === 'add' ? '新增行' : line.kind === 'del' ? '删除行' : '' }}
+          {{ line.kind === 'add' ? t('diff.addedLine') : line.kind === 'del' ? t('diff.removedLine') : '' }}
         </span>
       </div>
     </div>
