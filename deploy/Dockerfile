@@ -42,7 +42,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONIOENCODING=utf-8 \
     # Never write .pyc into a read-only rootfs; the write attempt alone slows startup
     # and fills logs with permission errors that look like a broken deploy.
-    SOAPBOT_DATA_DIR=/data
+    SOAPBOT_DATA_DIR=/data \
+    # The panel's settings page (page 12) writes this file. The default is `.env` in the
+    # working directory, and here the working directory is on a read-only rootfs — so
+    # every save would fail with a permission error while the rest of the panel looked
+    # fine. Pointing it at the data volume makes the write land somewhere that survives
+    # a restart, which is also what makes "restart to apply" true rather than decorative.
+    SOAPBOT_ENV_FILE=/data/.env
 
 # Runtime deps only: tini for correct signal handling (PID 1 must reap zombies, or
 # plugin worker processes accumulate as unreaped children and eventually fail fork).

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+
+import { t } from '@/i18n'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 
 /**
@@ -24,8 +26,8 @@ const props = withDefaults(
     busy?: boolean
   }>(),
   {
-    confirmLabel: '确认',
-    cancelLabel: '取消',
+    confirmLabel: '',
+    cancelLabel: '',
     tone: 'default',
     irreversible: false,
     busy: false,
@@ -33,6 +35,12 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
+
+// Empty default, resolved at render time. A literal default is evaluated once when the
+// component definition is created, so it would keep the language the module happened to
+// load in — the same trap as a module-level label array.
+const cancelText = computed(() => props.cancelLabel || t('common.cancel'))
+const confirmText = computed(() => props.confirmLabel || t('common.confirm'))
 
 const panel = ref<HTMLElement | null>(null)
 const confirmBtn = ref<HTMLElement | null>(null)
@@ -66,12 +74,12 @@ useFocusTrap(panel, isOpen, {
         <div class="dialog__body">
           <p id="cf-detail" style="margin: 0">{{ detail }}</p>
           <p v-if="irreversible" class="warn-banner" style="margin: 0">
-            此操作不可撤销，也没有备份可回退。
+            {{ t('common.irreversible') }}
           </p>
         </div>
         <div class="dialog__foot">
           <button ref="confirmBtn" class="btn ghost" type="button" :disabled="busy" @click="emit('cancel')">
-            {{ cancelLabel }}
+            {{ cancelText }}
           </button>
           <button
             class="btn"
@@ -80,7 +88,7 @@ useFocusTrap(panel, isOpen, {
             :disabled="busy"
             @click="emit('confirm')"
           >
-            {{ busy ? '处理中…' : confirmLabel }}
+            {{ busy ? t('common.working') : confirmText }}
           </button>
         </div>
       </div>

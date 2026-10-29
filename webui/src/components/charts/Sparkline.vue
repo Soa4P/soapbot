@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { t } from '@/i18n'
+
 /**
  * A trend line with no axes, for embedding inside a readout.
  *
@@ -77,10 +79,10 @@ const latest = computed(() => {
       :height="height"
       class="spark__svg"
       role="img"
-      :aria-label="`${label}：最新 ${latest ?? '无数据'}${suffix}`"
+      :aria-label="t('chart.latest', { label, value: latest ?? t('chart.noData'), suffix })"
       preserveAspectRatio="none"
     >
-      <title>{{ label }}：最新 {{ latest ?? '无数据' }}{{ suffix }}</title>
+      <title>{{ t('chart.latest', { label, value: latest ?? t('chart.noData'), suffix }) }}</title>
       <polyline v-if="points" :points="points" fill="none" :stroke="stroke" stroke-width="1.5" />
       <line
         v-else

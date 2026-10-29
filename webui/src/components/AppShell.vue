@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <a class="skip-link" href="#main-content">{{ t('shell.skipToMain') }}</a>
 
   <div class="shell">
     <aside class="rail">
@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
         <span>control surface</span>
       </div>
 
-      <nav class="rail__nav" aria-label="主导航">
+      <nav class="rail__nav" :aria-label="t('shell.mainNav')">
         <RouterLink v-for="item in nav" :key="item.to" :to="item.to" class="rail__link">
           <span class="idx" aria-hidden="true">{{ item.index }}</span>
           <span>{{ t(item.key) }}</span>
@@ -133,26 +133,26 @@ onBeforeUnmount(() => {
 
         <span class="strip__spacer" />
 
-        <button class="btn ghost" type="button" @click="bumpRefresh()">刷新</button>
+        <button class="btn ghost" type="button" @click="bumpRefresh()">{{ t('common.refresh') }}</button>
         <button
           v-if="auth.hasToken"
           class="btn ghost"
           type="button"
           @click="auth.logout()"
         >
-          退出
+          {{ t('shell.logout') }}
         </button>
         <button v-else class="btn lamp" type="button" @click="auth.openDialog()">
-          {{ auth.mode === 'loopback' ? '获取令牌' : '登录' }}
+          {{ auth.mode === 'loopback' ? t('shell.getToken') : t('shell.login') }}
         </button>
       </header>
 
       <div class="page">
         <div v-if="healthError" class="error-banner" role="alert">
-          无法访问 API：{{ healthError }}。服务可能未启动，或端口被占用。
+          {{ t('shell.apiUnreachable', { error: healthError }) }}
         </div>
         <div v-else-if="!auth.authenticated" class="warn-banner" role="status">
-          当前会话未认证。远程访问必须先在右上角登录，否则所有管理接口都会返回 401。
+          {{ t('shell.unauthenticated') }}
         </div>
 
         <RouterView />

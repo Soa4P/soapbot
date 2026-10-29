@@ -1,5 +1,7 @@
 /** Small formatting helpers. Kept in one place so every panel shows a number the same way. */
 
+import { t } from '@/i18n'
+
 export function num(value: unknown): string {
   const n = Number(value ?? 0)
   if (!Number.isFinite(n)) return '—'
@@ -53,26 +55,34 @@ export function clock(epochSeconds: unknown): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
+/**
+ * Relative timestamps are sentences, not numbers, so they follow the language.
+ *
+ * `t()` reads the reactive `locale`, and these run inside render or `computed`, so the
+ * whole page re-renders on a switch without a refresh. Absolute timestamps
+ * (`datetime`) stay in a fixed `YYYY-MM-DD HH:MM` form on purpose: an operator
+ * comparing a log line against a server clock needs one unambiguous format.
+ */
 export function fromNow(epochSeconds: unknown): string {
   const value = Number(epochSeconds ?? 0)
   if (!value) return '—'
   const delta = Math.floor(Date.now() / 1000 - value)
-  if (delta < 5) return '刚刚'
-  if (delta < 60) return `${delta} 秒前`
-  if (delta < 3600) return `${Math.floor(delta / 60)} 分钟前`
-  if (delta < 86400) return `${Math.floor(delta / 3600)} 小时前`
-  return `${Math.floor(delta / 86400)} 天前`
+  if (delta < 5) return t('time.justNow')
+  if (delta < 60) return t('time.secondsAgo', { n: delta })
+  if (delta < 3600) return t('time.minutesAgo', { n: Math.floor(delta / 60) })
+  if (delta < 86400) return t('time.hoursAgo', { n: Math.floor(delta / 3600) })
+  return t('time.daysAgo', { n: Math.floor(delta / 86400) })
 }
 
 export function untilFuture(epochSeconds: unknown): string {
   const value = Number(epochSeconds ?? 0)
   if (!value) return '—'
   const delta = Math.floor(value - Date.now() / 1000)
-  if (delta <= 0) return '已到期'
-  if (delta < 60) return `${delta} 秒后`
-  if (delta < 3600) return `${Math.floor(delta / 60)} 分钟后`
-  if (delta < 86400) return `${Math.floor(delta / 3600)} 小时后`
-  return `${Math.floor(delta / 86400)} 天后`
+  if (delta <= 0) return t('time.expired')
+  if (delta < 60) return t('time.secondsIn', { n: delta })
+  if (delta < 3600) return t('time.minutesIn', { n: Math.floor(delta / 60) })
+  if (delta < 86400) return t('time.hoursIn', { n: Math.floor(delta / 3600) })
+  return t('time.daysIn', { n: Math.floor(delta / 86400) })
 }
 
 /** Ledger amounts are integer minor units; never render them as a raw float. */

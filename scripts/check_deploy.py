@@ -233,6 +233,77 @@ def check_cli_flags(report: Report) -> None:
         )
 
 
+def check_settings_writable(report: Report) -> None:
+    """Page 12 writes the settings file, so a read-only rootfs must relocate it.
+
+    This is the check for a bug that passes every other test: the container starts, the
+    panel loads, and only the save button fails — with a permission error a week later
+    when someone finally changes a setting. The static relationship is easy to state:
+    read-only rootfs implies the env file has to sit on a writable mount.
+    """
+    compose = _strip_comments(_read(COMPOSE))
+    dockerfile = _strip_comments(_read(DOCKERFILE))
+
+    if not re.search(r"^\s+read_only:\s*true", compose, re.MULTILINE):
+        report.add("ok", "settings.rootfs-writable", "根文件系统可写，设置页可写入默认位置")
+        return
+
+    match = re.search(r"SOAPBOT_ENV_FILE:\s*(\S+)", compose) or re.search(
+        r"SOAPBOT_ENV_FILE=(\S+)", dockerfile
+    )
+    if not match:
+        report.add(
+            "block",
+            "settings.env-file-default",
+            "根文件系统只读，但未设置 SOAPBOT_ENV_FILE：第 12 页保存设置会因权限失败",
+        )
+        return
+
+    env_file = match.group(1).strip("\"'")
+    writable = [path for path, readonly in _service_volumes(compose) if not readonly]
+    if any(env_file.startswith(path.rstrip("/") + "/") for path in writable):
+        report.add(
+            "ok",
+            "settings.env-file-volume",
+            f"设置写入 {env_file}，位于可写挂载内",
+            evidence=env_file,
+        )
+    else:
+        report.add(
+            "block",
+            "settings.env-file-outside-volume",
+            f"SOAPBOT_ENV_FILE={env_file} 不在任何可写挂载内，第 12 页保存会失败",
+            evidence=f"writable mounts: {', '.join(writable) or '(none)'}",
+        )
+
+
+def _service_volumes(compose: str) -> list[tuple[str, bool]]:
+    """(container path, read_only) for every mount in the service's ``volumes:`` block.
+
+    Scoped to that block on purpose: `- ALL` under `cap_drop` is also a list item, and a
+    bare `- x:y` pattern would parse it as a mount.
+    """
+    out: list[tuple[str, bool]] = []
+    in_block = False
+    for line in compose.splitlines():
+        if re.match(r"^\s{4}volumes:\s*$", line):
+            in_block = True
+            continue
+        if in_block:
+            item = re.match(r"^\s{6,}-\s+(\S+)\s*$", line)
+            if not item:
+                if line.strip():
+                    break
+                continue
+            spec = item.group(1)
+            parts = spec.split(":")
+            read_only = parts[-1] == "ro"
+            container = parts[1] if len(parts) >= 2 else ""
+            if container:
+                out.append((container, read_only))
+    return out
+
+
 def check_hardening(report: Report) -> None:
     """Each of these closes a specific escape; their absence is not cosmetic."""
     compose = _strip_comments(_read(COMPOSE))
@@ -321,6 +392,7 @@ def verify(mirror: str | None = None) -> Report:
     check_hardening(report)
     check_image_availability(report, mirror)
     check_ports_documented(report)
+    check_settings_writable(report)
     return report
 
 
@@ -343,9 +415,9 @@ def main(argv: list[str] | None = None) -> int:
 
     report = verify(args.mirror)
 
-    SYMBOL = {"ok": "[ok  ]", "warn": "[warn]", "block": "[BLOCK]"}
+    symbol = {"ok": "[ok  ]", "warn": "[warn]", "block": "[BLOCK]"}
     for f in report.findings:
-        print(f"{SYMBOL[f.level]} {f.code:34s} {f.message}")
+        print(f"{symbol[f.level]} {f.code:34s} {f.message}")
         if f.evidence:
             print(f"         证据: {f.evidence}")
 

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
+import { t } from '@/i18n'
+
 import { useFocusTrap } from '@/lib/useFocusTrap'
 import { useAuthStore } from '@/stores/auth'
 
@@ -45,18 +47,17 @@ async function submit(): Promise<void> {
       aria-describedby="login-detail"
     >
       <div class="dialog__head">
-        <div class="eyebrow">bootstrap / 引导</div>
-        <h2 id="login-title">用一次性令牌换取访问令牌</h2>
+        <div class="eyebrow">bootstrap</div>
+        <h2 id="login-title">{{ t('login.title') }}</h2>
       </div>
 
       <div class="dialog__body">
         <p id="login-detail" class="muted" style="margin: 0">
-          令牌在首次启动时写入 <span class="mono">data/init_token.txt</span>；如果设置了
-          <span class="mono">SOAPBOT_INIT_TOKEN</span>，则用该值。
+          {{ t('login.detail') }}
         </p>
 
         <form class="stack" @submit.prevent="submit">
-          <label class="eyebrow" for="login-token">引导令牌</label>
+          <label class="eyebrow" for="login-token">{{ t('login.label') }}</label>
           <input
             id="login-token"
             ref="tokenInput"
@@ -69,16 +70,16 @@ async function submit(): Promise<void> {
           />
           <div class="row">
             <button class="btn lamp" type="submit" :disabled="!token.trim() || auth.busy">
-              {{ auth.busy ? '校验中…' : '登录' }}
+              {{ auth.busy ? t('login.checking') : t('shell.login') }}
             </button>
-            <button class="btn ghost" type="button" @click="auth.closeDialog()">取消</button>
+            <button class="btn ghost" type="button" @click="auth.closeDialog()">{{ t('common.cancel') }}</button>
           </div>
         </form>
 
         <div v-if="auth.error" class="error-banner" role="alert">{{ auth.error }}</div>
 
         <p v-if="!auth.canLogin" class="warn-banner" style="margin: 0">
-          引导令牌已被使用，或服务启动时未生成。重启服务会生成新的令牌。
+          {{ t('login.spent') }}
         </p>
       </div>
     </div>

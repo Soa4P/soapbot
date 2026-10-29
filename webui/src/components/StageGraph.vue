@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
+import { t } from '@/i18n'
+
 /**
  * The pipeline as a vertical chain, with each stage's measured share of one message.
  *
@@ -13,7 +15,8 @@ import { computed, ref } from 'vue'
  *
  * The sandbox (below) exists because the question "why can't I move this?" deserves an
  * answer better than a disabled drag handle: drag a stage and the panel names the
- * specific invariant that breaks — "先归一化再检测注入；反了可以用零宽字符绕过关键词"
+ * specific invariant that breaks — "normalise before screening for injection; reversed,
+ * zero-width characters defeat the keyword match"
  * — then resets. Nothing is sent to the server except a read-only check.
  */
 interface Stage {
@@ -139,12 +142,12 @@ const sandboxStages = computed(() =>
   <div class="graph">
     <div class="graph__head">
       <div>
-        <h2>流水线环节</h2>
+        <h2>{{ t('graph.title') }}</h2>
         <p class="hint" style="margin: 2px 0 0">
-          {{ stages.length }} 个环节，顺序即安全语义，面板不提供修改。
+          {{ t('graph.subtitle', { n: stages.length }) }}
         </p>
       </div>
-      <button class="btn ghost" type="button" @click="openSandbox">沙箱：试试换顺序</button>
+      <button class="btn ghost" type="button" @click="openSandbox">{{ t('graph.sandbox') }}</button>
     </div>
 
     <ol class="chain">
@@ -164,8 +167,8 @@ const sandboxStages = computed(() =>
           <div class="node__title">
             <span class="node__label">{{ stage.label }}</span>
             <code class="node__name mono">{{ stage.name }}</code>
-            <span v-if="stage.name === haltedAt" class="pill bad"><i class="dot" />在此中止</span>
-            <span v-else-if="ms(stage.name) === null && timings.length" class="tag">未执行</span>
+            <span v-if="stage.name === haltedAt" class="pill bad"><i class="dot" />{{ t('graph.haltedHere') }}</span>
+            <span v-else-if="ms(stage.name) === null && timings.length" class="tag">{{ t('graph.notRun') }}</span>
           </div>
 
           <div v-if="ms(stage.name) !== null" class="node__timing">
@@ -179,9 +182,9 @@ const sandboxStages = computed(() =>
     </ol>
 
     <div v-if="totalMs > 0" class="graph__foot">
-      <span class="mono">合计 {{ fmt(totalMs) }}</span>
+      <span class="mono">{{ t('graph.total', { value: fmt(totalMs) }) }}</span>
       <span class="faint">·</span>
-      <span class="mono">最慢：{{ labelOf(slowest) }}</span>
+      <span class="mono">{{ t('graph.slowest', { name: labelOf(slowest) }) }}</span>
     </div>
 
     <!-- Sandbox: modal on purpose. A drag experiment that stays open next to the real
@@ -190,26 +193,25 @@ const sandboxStages = computed(() =>
       <div v-if="sandboxOpen" class="overlay" @click.self="closeSandbox">
         <div class="dialog dialog--wide" role="dialog" aria-modal="true" aria-labelledby="sb-title">
           <div class="dialog__head">
-            <div class="eyebrow">sandbox / 只读演示</div>
-            <h2 id="sb-title">拖拽看看换序会破坏什么</h2>
+            <div class="eyebrow">sandbox</div>
+            <h2 id="sb-title">{{ t('graph.sbTitle') }}</h2>
           </div>
 
           <div class="dialog__body">
             <p class="muted" style="margin: 0">
-              这里的顺序<strong>不会</strong>写回任何地方。真实顺序在
-              <code class="mono">core/builder.py</code> 中装配，因为顺序本身就是安全约束。
+              {{ t('graph.sbNote') }}
             </p>
 
             <div v-if="violations.length" class="error-banner" role="alert">
-              <strong>这个顺序会破坏 {{ violations.length }} 条约束：</strong>
+              <strong>{{ t('graph.sbBroken', { n: violations.length }) }}</strong>
               <ul style="margin: 6px 0 0; padding-left: 18px">
                 <li v-for="v in violations" :key="`${v.before}-${v.after}`">
-                  {{ labelOf(v.before) }} 必须早于 {{ labelOf(v.after) }} —— {{ v.why }}
+                  {{ t('graph.sbViolation', { before: labelOf(v.before), after: labelOf(v.after), why: v.why }) }}
                 </li>
               </ul>
             </div>
             <div v-else class="info-banner" role="status">
-              当前顺序没有破坏已记录的约束。这不代表它是对的——约束表只覆盖了已知的依赖。
+              {{ t('graph.sbClean') }}
             </div>
 
             <ol class="chain chain--compact">
@@ -219,7 +221,7 @@ const sandboxStages = computed(() =>
                 class="node node--draggable"
                 draggable="true"
                 tabindex="0"
-                :aria-label="`${stage.label}，第 ${index + 1} 位，可用方向键上下移动`"
+                :aria-label="t('graph.move', { label: stage.label, index: index + 1 })"
                 @dragstart="onDragStart(stage.name)"
                 @dragover.prevent
                 @drop="onDrop(stage.name)"
@@ -237,9 +239,9 @@ const sandboxStages = computed(() =>
 
           <div class="dialog__foot">
             <button class="btn ghost" type="button" @click="sandboxOrder = stages.map((s) => s.name); violations = []">
-              复位
+              {{ t('graph.reset') }}
             </button>
-            <button class="btn lamp" type="button" @click="closeSandbox">关闭</button>
+            <button class="btn lamp" type="button" @click="closeSandbox">{{ t('graph.close') }}</button>
           </div>
         </div>
       </div>
