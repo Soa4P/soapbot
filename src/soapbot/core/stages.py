@@ -303,11 +303,15 @@ class ReplyStage(Stage):
             try:
                 audio = await self._tts.synthesize(ctx.model_reply)
             except VoiceUnavailableError as exc:
-                # Expected whenever the extra is not installed, or the reply is long.
-                # Logged at info: an operator who enabled voice needs to see *why* a
-                # reply went out as text, and silence would look like a broken setting.
-                logger.info("voice reply skipped: %s", exc)
-                ctx.extras["voice_reply"] = f"text:{exc}"
+                # Two different events share this exception. "Too long" happens on
+                # every long answer and is normal, so it stays at debug; a missing
+                # dependency or a failed synthesis is a configuration or vendor
+                # problem the operator must actually see.
+                if exc.code in {"too_long", "empty"}:
+                    logger.debug("voice reply skipped: %s", exc)
+                else:
+                    logger.info("voice reply skipped: %s", exc)
+                ctx.extras["voice_reply"] = f"text:{exc.code}"
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("voice synthesis failed: %s", type(exc).__name__)
                 ctx.extras["voice_reply"] = f"text:{type(exc).__name__}"

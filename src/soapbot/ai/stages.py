@@ -17,7 +17,13 @@ from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
 from soapbot.security.audit import get_audit_log
-from soapbot.security.injection import leaked_canary, redact
+from soapbot.security.injection import (
+    INJECTION_BLOCK_ON,
+    INJECTION_REFUSAL,
+    leaked_canary,
+    looks_like_injection,
+    redact,
+)
 from soapbot.voice.stt import render_prompt
 
 logger = logging.getLogger(__name__)
@@ -109,8 +115,19 @@ class ModelStage(Stage):
         ).strip()
         images = [s for s in segments if s.type == SegmentType.IMAGE]
 
-        voice_stats = {"total": 0, "ok": 0, "failed": 0, "reasons": []}
+        persona = ctx.extras.get("persona")
+        principal = ctx.extras.get("principal")
+
+        # Transcribed speech is untrusted content that happens to have arrived as
+        # audio: a member can say anything into a microphone. ``InjectionScreenStage``
+        # cannot cover it — that stage runs before this one, and the text does not
+        # exist until here — so the same screen and the same threshold are applied
+        # locally. Skipping it would make "say it out loud" the way around a check
+        # that every typed message has to pass.
+        voice_stats = {"total": 0, "ok": 0, "failed": 0, "blocked": 0, "reasons": []}
+        blocked_transcript = False
         if self.transcriber is not None:
+            transcripts: list[str] = []
             for seg in segments:
                 if seg.type is not SegmentType.RECORD:
                     continue
@@ -118,12 +135,38 @@ class ModelStage(Stage):
                 result = await self.transcriber.transcribe_segment(seg)
                 if result.ok:
                     voice_stats["ok"] += 1
+                    suspicious, labels = looks_like_injection(result.text)
+                    if suspicious:
+                        ctx.extras.setdefault("injection_labels", []).extend(labels)
+                        privileged = bool(getattr(principal, "is_privileged", False))
+                        if not privileged and len(labels) >= INJECTION_BLOCK_ON:
+                            voice_stats["blocked"] += 1
+                            blocked_transcript = True
+                            logger.warning(
+                                "voice transcript quarantined trace=%s labels=%s",
+                                ctx.event.trace_id,
+                                labels[:4],
+                            )
+                            get_audit_log().record(
+                                kind="injection",
+                                action="detect_voice",
+                                outcome="block",
+                                principal=principal,
+                                detail=",".join(labels[:4]),
+                                trace_id=ctx.event.trace_id,
+                                text_len=len(result.text),
+                            )
                 else:
                     voice_stats["failed"] += 1
                     voice_stats["reasons"].append(result.reason)
-                # Prepended, not appended: "what was said" is the user's message, and
-                # any typed text is a continuation of it.
-                user_text = (render_prompt(result) + "\n" + user_text).strip()
+                transcripts.append(render_prompt(result))
+
+            if transcripts:
+                # Joined once, in arrival order. Prepending inside the loop reversed a
+                # message that carried more than one voice note: the second one came
+                # out first.
+                user_text = "\n".join([*transcripts, user_text]).strip()
+
         if voice_stats["total"]:
             # Observable in the trace page. A silent transcription failure is
             # indistinguishable from a user who said nothing.
@@ -135,11 +178,16 @@ class ModelStage(Stage):
                     voice_stats["reasons"],
                 )
 
+        if blocked_transcript:
+            # Same shape as the screen stage: refuse in the reply, do not call the
+            # model, and do not halt — the refusal still has to reach the group.
+            ctx.model_reply = INJECTION_REFUSAL
+            ctx.extras["skip_model"] = True
+            ctx.extras["injection_blocked"] = True
+            return StageResult()
+
         if not user_text and not images:
             return StageResult(halt=True, reason="empty_input")
-
-        persona = ctx.extras.get("persona")
-        principal = ctx.extras.get("principal")
 
         # Filtered, not merely gated: a tool the caller cannot use is not offered
         # at all, so the model cannot try, fail, and reveal its existence.
