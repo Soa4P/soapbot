@@ -1,4 +1,8 @@
-﻿# Python
+﻿# Browser-automation scratch. `playwright-cli` writes snapshots and screenshots here
+# during panel verification; they are session artifacts, not sources.
+.playwright-cli/
+
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/

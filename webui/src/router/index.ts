@@ -76,7 +76,7 @@ const routes = [
     path: '/market',
     name: 'market',
     component: () => import('@/views/MarketView.vue'),
-    meta: { title: '插件市场', index: '11' },
+    meta: { title: '插件包安装', index: '11' },
   },
   // Anything else falls back to the overview rather than showing a dead end in a tool
   // with eight pages and no deep links.

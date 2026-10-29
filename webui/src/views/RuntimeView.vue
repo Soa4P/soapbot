@@ -1,11 +1,40 @@
 ﻿<script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import { datetime, fromNow, num, uptime, untilFuture } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
 const runtime = useAsync(() => api.runtime())
+
+// --- external tools (MCP) ---------------------------------------------------
+// Shown here rather than on its own page: an MCP server that failed to start is a
+// runtime fault, and putting it next to adapter health is what makes "the bot is up
+// but some tools are missing" visible in one place.
+const mcp = useAsync(() => api.mcp())
+const mcpBusy = ref(false)
+const mcpNote = ref('')
+const mcpServers = computed<any[]>(() => mcp.data.value?.servers ?? [])
+
+async function reconnectMcp() {
+  mcpBusy.value = true
+  mcpNote.value = ''
+  try {
+    const result = await api.refreshMcp()
+    const broken = (result.servers ?? []).filter((s: any) => s.error)
+    // Report the outcome explicitly. A silent success would leave the operator
+    // unsure whether the button did anything, which is the same failure the endpoint
+    // was added to fix.
+    mcpNote.value = broken.length
+      ? `已重连，${broken.length} 个服务器仍失败`
+      : `已重连，共 ${result.tools ?? 0} 个工具`
+    await mcp.reload()
+  } catch (err) {
+    mcpNote.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    mcpBusy.value = false
+  }
+}
 
 const scheduler = computed<any>(() => runtime.data.value?.scheduler ?? {})
 const metrics = computed<any>(() => runtime.data.value?.metrics ?? {})
@@ -136,6 +165,50 @@ const counters = computed(() => [
         </tbody>
       </table>
       <div v-else class="empty">未注册任何适配器。</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>外部工具（MCP）</h2>
+      <span class="tag">{{ mcpServers.length }} 个服务器</span>
+      <button class="btn" :disabled="mcpBusy || !mcp.data.value?.configured" @click="reconnectMcp">
+        {{ mcpBusy ? '重连中…' : '重连' }}
+      </button>
+    </div>
+    <div class="panel__body flush">
+      <p v-if="mcp.data.value && !mcp.data.value.configured" class="empty">
+        未配置 MCP。在 <span class="mono">config/mcp.yaml</span> 里声明服务器后重启，或点「重连」重新枚举工具。
+      </p>
+      <table v-else-if="mcpServers.length" class="data">
+        <caption class="visually-hidden">MCP 服务器</caption>
+        <thead>
+          <tr>
+            <th scope="col">名称</th>
+            <th scope="col">状态</th>
+            <th scope="col" class="num">工具数</th>
+            <th scope="col">最低角色</th>
+            <th scope="col">错误</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in mcpServers" :key="row.name">
+            <td class="key">{{ row.name }}</td>
+            <td>
+              <!-- "0 tools" and "server crashed" are the same empty row otherwise, and
+                   they call for opposite fixes: configure more tools vs fix the binary. -->
+              <span class="pill" :class="row.error ? 'bad' : 'ok'">
+                <i class="dot" />{{ row.error ? '失败' : '正常' }}
+              </span>
+            </td>
+            <td class="num">{{ row.tools }}</td>
+            <td><span class="tag">{{ row.min_role }}</span></td>
+            <td>{{ row.error || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty">未配置任何 MCP 服务器。</div>
+      <p v-if="mcpNote" class="hint">{{ mcpNote }}</p>
     </div>
   </section>
 

@@ -92,7 +92,7 @@ function openPlugins(): void {
   <div v-if="uploadError" class="error-banner">{{ uploadError }}</div>
 
   <section class="strip">
-    <span class="strip__title">插件市场</span>
+    <span class="strip__title">插件包安装</span>
     <span class="strip__spacer" />
     <span class="hint">批准记录以清单摘要为准，改清单必须重新批准</span>
   </section>
