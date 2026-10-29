@@ -31,7 +31,7 @@ const nav = [
   { to: '/logs', label: '运行日志', index: '08' },
   { to: '/pipeline', label: '流水线追踪', index: '09' },
   { to: '/metrics', label: '运行指标', index: '10' },
-  { to: '/market', label: '插件市场', index: '11' },
+  { to: '/market', label: '插件包安装', index: '11' },
 ]
 
 const title = computed(() => (route.meta.title as string | undefined) ?? '控制台')

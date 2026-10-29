@@ -136,6 +136,11 @@ export const api = {
   deletePlugin: (name: string) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
+  // External tool sources. `refreshMcp` is a write, not a read: it spawns the
+  // configured server processes again and re-decides which tools the model may see.
+  mcp: () => request<any>('/api/mcp'),
+  refreshMcp: () => request<any>('/api/mcp/refresh', { method: 'POST' }),
+
   audit: (limit = 100, kind = '') =>
     request<any>(`/api/security/audit?limit=${limit}&kind=${encodeURIComponent(kind)}`),
   denials: (limit = 100) => request<any>(`/api/security/denials?limit=${limit}`),
