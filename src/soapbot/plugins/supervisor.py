@@ -64,11 +64,13 @@ import json
 import logging
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from soapbot.plugins.isolation import (
+    DEFAULT_PLUGIN_MEMORY_BYTES,
     MAX_FRAME_BYTES,
     IsolationError,
     PluginCrashedError,
@@ -126,7 +128,7 @@ class WorkerConfig:
     plugin_dir: Path
     attr: str = "Plugin"
     timeout: float = 8.0
-    memory_bytes: int = 256 * 1024 * 1024
+    memory_bytes: int = DEFAULT_PLUGIN_MEMORY_BYTES
     #: Extra environment for the child. Host-controlled; the plugin never sees it
     #: being built and cannot add to it.
     extra_env: dict[str, str] = field(default_factory=dict)
@@ -323,17 +325,33 @@ class _RemoteCtx:
 
 
 def _apply_limits():
+    """Contain this worker only. Two limits were actively harmful here.
+
+    ``RLIMIT_NPROC = 64`` is gone. It is counted per **real uid across the whole
+    system**, not per process, and it counts *threads* as well as processes. On a
+    shared account — every CI runner, and any host running several services as one
+    user — the quota is already partly spent before this child starts, so the cap
+    throttles bystanders instead of catching a fork bomb. Worse, the child needs a
+    thread for its own frame reader: the first ``run_in_executor`` call creates one,
+    and once the uid is at its quota that raises ``RuntimeError: can't start new
+    thread`` inside the read loop. Measured shape: the worker reports ready, then dies
+    with exit code 1 about ten milliseconds later on the first invoke, with the
+    traceback only on stderr. That is precisely the intermittent Linux CI failure.
+    Fork containment is ``killpg``'s job (see ``_kill_tree``), and it is already
+    covered by test_spawned_helpers_die_with_the_worker.
+
+    ``RLIMIT_AS`` is raised, not removed, because it counts **virtual** address space
+    and a bare CPython already reserves a few hundred MiB of it: 256 MiB left no room
+    for an 8 MiB thread stack, so a perfectly healthy plugin could be killed by its
+    own memory limit at the first thread creation.
+    """
     try:
         import resource
-        cap = int(os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", 256 * 1024 * 1024))
+        cap = int(
+            os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", DEFAULT_PLUGIN_MEMORY_BYTES)
+        )
         resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        try:
-            # Cap forks so a fork bomb inside the worker fails at fork() instead of
-            # exhausting the host pid table.
-            resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
-        except Exception:
-            pass
     except Exception:
         pass
 
@@ -476,7 +494,18 @@ async def _serve():
 
     loop = asyncio.get_running_loop()
     while True:
-        frame = await loop.run_in_executor(None, _read_frame)
+        # ``run_in_executor`` creates a thread on its first call and that is the one
+        # place in this loop that can fail for environmental reasons (thread or memory
+        # quota). Unprotected, the exception escaped ``_serve``, escaped
+        # ``asyncio.run``, and the process died with code 1 having said nothing on the
+        # protocol channel — the host could only report "died (code=1)". Reporting it
+        # as a frame turns a mystery into a diagnosis.
+        try:
+            frame = await loop.run_in_executor(None, _read_frame)
+        except BaseException as exc:
+            _send({"type": "fatal",
+                   "error": type(exc).__name__ + ": " + str(exc)[:200]})
+            return
         if frame is None:
             return
         kind = frame.get("type")
@@ -588,6 +617,13 @@ class PluginWorker:
         # plugin cannot forge by putting a name in the JSON body.
         self._surface_handler = surface_handler
         self._stderr_sink = stderr_sink or (lambda line: None)
+        #: Last few stderr lines, kept so a crash can explain itself.
+        #:
+        #: Without this, a worker that dies from an uncaught exception is reported as
+        #: "died (code=1)" and nothing else: the traceback went to stderr, and stderr
+        #: was only forwarded to a DEBUG logger. That is how a real Linux-only crash
+        #: survived several CI rounds looking like "flaky".
+        self._stderr_tail: deque[str] = deque(maxlen=40)
         self._proc: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task | None = None
         self.commands: list[str] = []
@@ -685,10 +721,38 @@ class PluginWorker:
                 return
             if not line:
                 return
+            text = line.decode("utf-8", "replace").rstrip("\r\n")
+            # Retained before redaction as well: the sink is what decides what is
+            # safe to *log*, but the tail is only ever shown through the same
+            # redaction at crash time, so keeping the raw line here adds no exposure.
+            self._stderr_tail.append(text[:500])
             # Never log raw stderr: it is plugin-authored and routinely contains
             # paths, tokens or another user's data. The sink redacts.
             with contextlib.suppress(Exception):
-                self._stderr_sink(line.decode("utf-8", "replace")[:500])
+                self._stderr_sink(text[:500])
+
+    async def _await_stderr_settled(self) -> None:
+        """Wait for the stderr drain to reach EOF so a crash can be explained."""
+        task = self._stderr_task
+        if task is not None and not task.done():
+            await asyncio.shield(task)
+
+    def crash_tail(self, limit: int = 8) -> list[str]:
+        """Recent stderr lines, redacted, newest last.
+
+        Redaction is not optional here: stderr is plugin-controlled and this text is
+        surfaced in an exception message, which lands in API responses and CI logs.
+        """
+        from soapbot.security.injection import redact
+
+        out: list[str] = []
+        for line in list(self._stderr_tail)[-limit:]:
+            if not line.strip():
+                continue
+            with contextlib.suppress(Exception):
+                line = redact(line)
+            out.append(line[:300])
+        return out
 
     async def stop(self, *, timeout: float = 5.0) -> None:
         proc = self._proc
@@ -774,8 +838,28 @@ class PluginWorker:
                     await asyncio.wait_for(proc.wait(), timeout=1.0)
                     code = proc.returncode
                 self.last_error = f"crash:{code}"
+                # The stderr drain task is asynchronous and may still be behind the
+                # pipe's EOF, so give it a moment: the traceback explaining a code=1
+                # exit is the single most useful line in the whole failure, and
+                # reporting "died (code=1)" with it omitted is what made a real
+                # Linux-only crash look like flakiness for several CI rounds.
+                # ``CancelledError`` is a BaseException, so suppress(Exception) alone
+                # would let a cancelled drain task propagate out of the crash path and
+                # replace the real diagnosis with a cancellation.
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(self._await_stderr_settled(), timeout=1.0)
+                tail = self.crash_tail()
+                logger.error(
+                    "plugin worker crashed plugin=%s code=%s stderr=%s",
+                    self.config.plugin,
+                    code,
+                    " | ".join(tail) if tail else "(empty)",
+                )
+                detail = f" (code={code})"
+                if tail:
+                    detail += f"; stderr tail: {' | '.join(tail)}"
                 raise WorkerCrashedError(
-                    f"plugin worker {self.config.plugin} died (code={code})"
+                    f"plugin worker {self.config.plugin} died{detail}"
                 )
 
             kind = frame.get("type")
@@ -783,6 +867,22 @@ class PluginWorker:
                 if not frame.get("ok"):
                     raise WorkerCrashedError(f"plugin reported {frame.get('error', 'error')}")
                 return frame.get("value")
+
+            if kind == "fatal":
+                # The child hit something it could not survive and said so before
+                # exiting. Report its words: they are the whole diagnosis, and the
+                # alternative (waiting for EOF) yields only a numeric exit code.
+                self._dead = True
+                self.last_error = f"fatal:{frame.get('error', 'unknown')}"
+                logger.error(
+                    "plugin worker fatal plugin=%s err=%s",
+                    self.config.plugin,
+                    self.last_error,
+                )
+                raise WorkerCrashedError(
+                    f"plugin worker {self.config.plugin} failed: "
+                    f"{frame.get('error', 'unknown')}"
+                )
 
             if kind == "log":
                 logger.debug(

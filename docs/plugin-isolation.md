@@ -101,7 +101,7 @@ c._observed_sessions.add("onebot11:group:999999999")   # 再 send 即可向任�
 **修复**：新增 `src/soapbot/plugins/isolation.py` · `IsolatedRunner`：
 - `asyncio.create_subprocess_exec` + `-I`（忽略 `PYTHON*` 环境与 user site-packages，**子进程无法 `import soapbot`**）
 - 父进程侧 `wait_for` 强制超时，超时即 `kill()`——不依赖子进程配合
-- POSIX 下 `RLIMIT_AS`（默认 256 MiB）与 `RLIMIT_CORE=0`（防核心转储泄露主机内存）
+- POSIX 下 `RLIMIT_AS`（默认 512 MiB，计虚拟地址空间，256 MiB 会低于解释器自身占用）与 `RLIMIT_CORE=0`（防核心转储泄露主机内存）
 - 仅 JSON 可序列化结果可跨界，拒绝活对象图
 - 异常只传**类型**，不传消息（消息常含 token）
 
