@@ -55,3 +55,7 @@ Thumbs.db
 
 # CodeBuddy plan artifacts
 .codebuddy/
+
+# Scratch file used to pass a multi-line commit message on Windows, where PowerShell
+# mangles a quoted message containing straight quotes into a path error.
+.git-commit-msg.tmp
