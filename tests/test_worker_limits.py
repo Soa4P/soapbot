@@ -164,6 +164,41 @@ async def test_a_fatal_frame_is_reported_instead_of_becoming_an_exit_code(
     assert worker.last_error.startswith("fatal:")
 
 
+async def test_child_script_does_not_reference_host_module_names() -> None:
+    """The child runs in a fresh ``-I`` interpreter and cannot import ``soapbot``.
+
+    This guard exists because a real regression got through: ``_apply_limits`` was
+    changed to use ``DEFAULT_PLUGIN_MEMORY_BYTES``, a name that exists only in the
+    parent module. Inside the child it raised ``NameError``, which a bare
+    ``except: pass`` swallowed — so every resource limit silently stopped being
+    applied, and only the Linux job could notice. Checking the source here makes the
+    mistake fail on every platform, immediately.
+    """
+    import ast
+
+    from soapbot.plugins import supervisor as sup_mod
+
+    child = sup_mod._CHILD_WORKER
+    tree = ast.parse(child)  # also proves the embedded script is valid Python
+
+    forbidden = {
+        "DEFAULT_PLUGIN_MEMORY_BYTES",
+        "sanitize_env",
+        "IsolationError",
+        "_kill_tree",
+        "MAX_FRAME_BYTES",
+        "WorkerConfig",
+    }
+    # Names, not substrings: these identifiers are mentioned in the child's comments
+    # (explaining this very bug), so a text search would report a false positive.
+    used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    leaked = sorted(used & forbidden)
+    assert not leaked, (
+        "the child script must not reference names from the host module; they do not "
+        f"exist there and any NameError would be swallowed: {leaked}"
+    )
+
+
 async def test_the_reader_thread_failure_is_reproducible() -> None:
     """Pins the *shape* of the old failure so the diagnosis does not get lost.
 
