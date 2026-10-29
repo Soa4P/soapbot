@@ -347,13 +347,24 @@ def _apply_limits():
     """
     try:
         import resource
-        cap = int(
-            os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", DEFAULT_PLUGIN_MEMORY_BYTES)
-        )
+    except ImportError:
+        # Windows: no rlimits at all. The only expected way to get here.
+        return
+
+    # The default MUST stay a literal. This function is part of _CHILD_WORKER, a
+    # standalone script executed by a fresh ``-I`` interpreter that cannot import the
+    # host package — referencing DEFAULT_PLUGIN_MEMORY_BYTES here raised NameError,
+    # which a bare ``except: pass`` swallowed, so *every* limit silently stopped being
+    # applied. Caught by test_child_has_room_for_its_own_memory.
+    try:
+        cap = int(os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES") or 512 * 1024 * 1024)
         resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except Exception:
-        pass
+        # Visible rather than silent: this is a containment failure, and the host now
+        # keeps the stderr tail so it can be read back later.
+        import traceback
+        traceback.print_exc(file=sys.stderr)
 
 
 class _StubPlugin:
