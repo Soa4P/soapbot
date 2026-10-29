@@ -133,6 +133,16 @@ class Settings(BaseSettings):
     voice_language: str = "zh"
     """Hint for the transcriber; providers may ignore it."""
 
+    voice_allow_hosts: str = ""
+    """Comma-separated hosts exempt from the public-address rule for audio downloads.
+
+    Needed when the media endpoint is on the bot's own network: NapCat serves record
+    files from its HTTP port, so a same-machine deployment hands over
+    ``http://127.0.0.1:3000/...`` and the strict rule would refuse every voice
+    message. Empty by default — naming a host is the operator's explicit decision to
+    trust one internal address, and it stays visible in ``.env``.
+    """
+
     scheduler_tick_seconds: float = 30.0
     """How often due plugin cron jobs and expired budget reservations are swept.
 

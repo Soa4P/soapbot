@@ -21,7 +21,11 @@ import logging
 
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.security.audit import AuditLog, get_audit_log
-from soapbot.security.injection import looks_like_injection
+from soapbot.security.injection import (
+    INJECTION_BLOCK_ON,
+    INJECTION_REFUSAL,
+    looks_like_injection,
+)
 from soapbot.security.principal import (
     Permission,
     Principal,
@@ -157,7 +161,9 @@ class InjectionScreenStage(Stage):
 
     name = "injection_screen"
 
-    def __init__(self, audit: AuditLog | None = None, *, block_on: int = 2) -> None:
+    def __init__(
+        self, audit: AuditLog | None = None, *, block_on: int = INJECTION_BLOCK_ON
+    ) -> None:
         self.audit = audit or get_audit_log()
         self.block_on = block_on
 
@@ -195,7 +201,7 @@ class InjectionScreenStage(Stage):
         if is_privileged or len(labels) < self.block_on:
             return StageResult()
 
-        ctx.model_reply = "这个话题我没法接，换个说法吧。"
+        ctx.model_reply = INJECTION_REFUSAL
         ctx.extras["skip_model"] = True
         ctx.extras["injection_blocked"] = True
         return StageResult()

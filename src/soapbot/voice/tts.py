@@ -24,7 +24,18 @@ DEFAULT_MAX_CHARS = 200
 
 
 class VoiceUnavailableError(RuntimeError):
-    """Speech synthesis is not configured or not installed. Always degradable."""
+    """Speech synthesis is not configured or not installed. Always degradable.
+
+    ``code`` separates "this reply is not a good fit" from "speech is broken", because
+    the caller logs them differently: a long reply falling back to text is normal and
+    happens constantly, while a failed synthesis is worth a warning. Without the
+    distinction every long answer produced an INFO line, which trains operators to
+    ignore the channel that reports the real failures.
+    """
+
+    def __init__(self, message: str, *, code: str = "failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class TtsEngine(Protocol):
@@ -54,17 +65,20 @@ class EdgeTts:
         """
         cleaned = " ".join(str(text or "").split())
         if not cleaned:
-            raise VoiceUnavailableError("empty text")
+            raise VoiceUnavailableError("empty text", code="empty")
         if len(cleaned) > self.max_chars:
             # Not an error: the caller's fallback is the full text, which is the
             # better answer for a long reply anyway.
-            raise VoiceUnavailableError(f"text too long for voice: {len(cleaned)} chars")
+            raise VoiceUnavailableError(
+                f"text too long for voice: {len(cleaned)} chars", code="too_long"
+            )
 
         try:
             import edge_tts
         except ImportError as exc:
             raise VoiceUnavailableError(
-                "edge-tts is not installed; install the extra: pip install 'soapbot[voice]'"
+                "edge-tts is not installed; install the extra: pip install 'soapbot[voice]'",
+                code="not_installed",
             ) from exc
 
         try:

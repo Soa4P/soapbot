@@ -17,9 +17,11 @@ user who never typed them, which is worse than a gap every participant can see.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -53,52 +55,92 @@ class Transcription:
 
 
 class AudioFetcher(Protocol):
-    async def __call__(self, url: str, *, max_bytes: int) -> tuple[bytes, str]: ...
+    async def __call__(
+        self, url: str, *, max_bytes: int, allow_hosts: Collection[str] = ()
+    ) -> tuple[bytes, str]: ...
 
 
-def _address_is_public(host: str) -> bool:
-    """False for anything that could reach the host's own network.
+def _infos_are_public(infos: list[tuple]) -> bool:
+    """True only when every resolved address is globally routable.
 
     ``is_global`` covers loopback, private, link-local (169.254.169.254), reserved and
-    multicast in one predicate. Names are resolved first: checking the literal string
-    alone would let ``localhost`` or a DNS name pointing inward through.
+    multicast in one predicate. Every address is checked, not just the first: a name
+    that resolves to one public and one private address must be refused.
     """
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+    if not infos:
         return False
     for info in infos:
-        raw = info[4][0]
         try:
-            addr = ipaddress.ip_address(raw)
-        except ValueError:
+            addr = ipaddress.ip_address(info[4][0])
+        except (ValueError, IndexError):
             return False
         if not addr.is_global:
             return False
     return True
 
 
-def check_audio_url(url: str) -> str:
-    """Return the URL if it is fetchable, else raise :class:`VoiceError`.
-
-    Deliberately strict: only http/https, only public addresses.
-    """
+def _split(url: str) -> tuple[str, str]:
     parsed = urlparse(url or "")
     if parsed.scheme not in {"http", "https"}:
         raise VoiceError(f"refusing non-http audio url: {parsed.scheme or '(none)'}")
     host = parsed.hostname or ""
     if not host:
         raise VoiceError("refusing audio url without a host")
-    if not _address_is_public(host):
+    return parsed.scheme, host
+
+
+def check_audio_url(url: str, *, allow_hosts: Collection[str] = ()) -> str:
+    """Sync check, for validation and tests. Resolves DNS on the calling thread.
+
+    ``allow_hosts`` is the escape hatch for a media endpoint that legitimately lives
+    on the bot's own network — NapCat serves record files from its own HTTP port, so a
+    same-machine deployment hands us ``http://127.0.0.1:3000/...``. Without it, the
+    strict rule silently disables voice exactly where it is most likely to be used.
+    It is empty by default: an operator has to name the host, which makes the decision
+    to trust an internal address explicit and auditable.
+    """
+    _, host = _split(url)
+    if host.lower() in {h.lower() for h in allow_hosts}:
+        return url
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        raise VoiceError(f"refusing audio url that does not resolve: {host}") from None
+    if not _infos_are_public(infos):
         # Named, not censored: the operator needs to know an attempt happened, and the
         # member's client already knows the URL it sent.
         raise VoiceError(f"refusing audio url resolving to a non-public address: {host}")
     return url
 
 
-async def http_fetch(url: str, *, max_bytes: int = DEFAULT_MAX_BYTES) -> tuple[bytes, str]:
+async def async_check_audio_url(url: str, *, allow_hosts: Collection[str] = ()) -> str:
+    """Same rule, resolved through the event loop's executor.
+
+    ``check_audio_url`` calls ``socket.getaddrinfo`` directly, which blocks the whole
+    loop while the resolver waits — seconds on a bad name, and every conversation in
+    the process stalls with it. ``loop.getaddrinfo`` hands that work to a thread.
+    """
+    _, host = _split(url)
+    if host.lower() in {h.lower() for h in allow_hosts}:
+        return url
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.getaddrinfo(host, None)
+    except OSError:
+        raise VoiceError(f"refusing audio url that does not resolve: {host}") from None
+    if not _infos_are_public(list(infos)):
+        raise VoiceError(f"refusing audio url resolving to a non-public address: {host}")
+    return url
+
+
+async def http_fetch(
+    url: str,
+    *,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    allow_hosts: Collection[str] = (),
+) -> tuple[bytes, str]:
     """Download with a hard size cap applied while reading, not after."""
-    check_audio_url(url)
+    await async_check_audio_url(url, allow_hosts=allow_hosts)
     async with (
         httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client,
         client.stream("GET", url) as response,
@@ -131,11 +173,13 @@ class ProviderTranscriber:
         fetcher: AudioFetcher = http_fetch,
         max_bytes: int = DEFAULT_MAX_BYTES,
         language: str = "zh",
+        allow_hosts: Collection[str] = (),
     ) -> None:
         self._router = router
         self._fetcher = fetcher
         self._max_bytes = max_bytes
         self._language = language
+        self._allow_hosts = tuple(allow_hosts)
 
     async def transcribe_segment(self, segment: Any) -> Transcription:
         """Never raises: a voice message must not take the pipeline down."""
@@ -145,7 +189,9 @@ class ProviderTranscriber:
             return Transcription("", False, "no_audio_url")
 
         try:
-            audio, mime = await self._fetcher(url, max_bytes=self._max_bytes)
+            audio, mime = await self._fetcher(
+                url, max_bytes=self._max_bytes, allow_hosts=self._allow_hosts
+            )
         except VoiceError as exc:
             logger.warning("voice fetch refused: %s", exc)
             return Transcription("", False, f"fetch:{exc}")

@@ -190,6 +190,11 @@ def build_pipeline(
             voice_router,
             max_bytes=settings.voice_max_bytes,
             language=settings.voice_language,
+            allow_hosts=[
+                h.strip()
+                for h in (settings.voice_allow_hosts or "").split(",")
+                if h.strip()
+            ],
         )
 
     tts = None

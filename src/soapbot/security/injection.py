@@ -120,6 +120,16 @@ def strip_invisible(text: str) -> str:
     return _CONTROL_RE.sub("", text.translate(_INVISIBLE))
 
 
+#: How many independent signals make a message hostile enough to refuse. Shared by
+#: every entry point that inspects untrusted text — typed messages and transcribed
+#: speech — because two paths with two thresholds means the weaker one decides.
+INJECTION_BLOCK_ON = 2
+
+#: The refusal shown when a message is quarantined. One string for the same decision,
+#: so the two paths cannot drift into two different answers to the same attempt.
+INJECTION_REFUSAL = "这个话题我没法接，换个说法吧。"
+
+
 def looks_like_injection(text: str) -> tuple[bool, list[str]]:
     """Return ``(suspicious, matched_labels)``.
 
