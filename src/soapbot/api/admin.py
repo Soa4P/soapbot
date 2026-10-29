@@ -48,15 +48,28 @@ import re
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from soapbot import __version__
 from soapbot.api.auth import require_api_auth
+from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["admin"])
+
+
+def _role_of(auth: dict[str, Any]) -> Role:
+    """Read the caller's role from what ``require_api_auth`` already returned.
+
+    An unknown string degrades to ANONYMOUS rather than raising: a token carrying a
+    role this build does not know must not be treated as "some role, probably fine".
+    """
+    try:
+        return Role(str(auth.get("role") or "anonymous"))
+    except ValueError:
+        return Role.ANONYMOUS
 
 _PROMPT_PREVIEW_CHARS = 4000
 
@@ -128,6 +141,52 @@ async def mcp_status(_: dict = Depends(require_api_auth)) -> dict:
     if manager is None:
         return {"configured": False, "servers": [], "tools": 0}
     return {"configured": True, **manager.status()}
+
+
+@router.post("/mcp/refresh")
+async def refresh_mcp(request: Request, auth: dict = Depends(require_api_auth)) -> dict:
+    """Re-enumerate tools from every configured MCP server.
+
+    The manager's own docstring says a dead server "is retried on the next refresh",
+    and until now nothing could trigger one: ``ensure_tools`` ran once, inside
+    ``runtime.start()``. So a server that was down at boot stayed tool-less until the
+    process restarted — the documented recovery path did not exist. That is the same
+    defect shape as the rest of this round: a capability described in prose with no
+    caller.
+
+    Authorised as a config change (ADMIN), not as a read: it starts subprocesses and
+    re-decides which tools the model may see.
+    """
+    auth_role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
+    if auth_role.rank < minimum.rank:
+        get_audit_log().record(
+            kind="authz",
+            action="mcp_refresh",
+            outcome="deny",
+            role=auth_role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(status_code=403, detail=f"需要 {minimum.value} 及以上角色")
+
+    runtime = _runtime()
+    manager = getattr(runtime, "mcp", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="MCP 未启用")
+
+    await manager.ensure_tools()
+    status = manager.status()
+    # The servers' error strings and tool counts are the whole point of the response:
+    # an operator who just pressed "reconnect" needs to know whether it worked.
+    get_audit_log().record(
+        kind="config",
+        action="mcp_refresh",
+        outcome="allow",
+        role=auth_role.value,
+        detail=f"tools={status.get('tools', 0)}",
+    )
+    logger.info("mcp tool refresh requested tools=%s", status.get("tools", 0))
+    return {"ok": True, **status}
 
 
 @router.get("/adapters")

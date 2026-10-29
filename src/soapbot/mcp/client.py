@@ -78,7 +78,15 @@ class McpClient:
     # ------------------------------------------------------------------ lifecycle
     async def _ensure_started(self) -> None:
         if self._proc is not None and self._proc.returncode is None:
-            return
+            # A ``None`` return code does not prove the child is usable: asyncio only
+            # sets it once the watcher has reaped the process, so a child that died a
+            # moment ago still looks alive here. Writing to it then raises
+            # ``ConnectionResetError`` from the transport — not an ``McpError`` — and
+            # that used to escape every ``except McpError`` up the stack. The pipe is
+            # the honest liveness signal: if stdin is closed, restart.
+            if self._proc.stdin is not None and not self._proc.stdin.is_closing():
+                return
+            self._proc = None
 
         command = self.server.command
         if not command:
@@ -122,6 +130,10 @@ class McpClient:
             self._await_response(self._next_id), timeout=self.server.timeout
         )
         await self._notify("notifications/initialized", {})
+        # Cleared on success, not only set on failure. Without this a server that went
+        # down and came back keeps reporting the old error, so "reconnect" appears to
+        # have done nothing and the operator restarts the whole process for nothing.
+        self.last_error = ""
         logger.info("mcp server up name=%s pid=%s", self.server.name, self._proc.pid)
 
     async def close(self) -> None:
@@ -140,8 +152,16 @@ class McpClient:
         if proc is None or proc.stdin is None:
             raise McpError(f"server {self.server.name} is not running")
         line = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
-        proc.stdin.write(line)
-        await proc.stdin.drain()
+        try:
+            proc.stdin.write(line)
+            await proc.stdin.drain()
+        except (ConnectionResetError, BrokenPipeError, RuntimeError) as exc:
+            # A child that exited between the liveness check and this write. Translated
+            # here so callers see the same error type as every other failure: a refresh
+            # must report "this server is down", not crash the endpoint.
+            self.last_error = "connection lost"
+            self._proc = None
+            raise McpError(f"server {self.server.name} is not running: {exc}") from exc
 
     async def _notify(self, method: str, params: dict[str, Any]) -> None:
         await self._send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -156,12 +176,17 @@ class McpClient:
                 {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
             )
             try:
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     self._await_response(request_id), timeout=self.server.timeout
                 )
             except TimeoutError as exc:
                 self.last_error = f"timeout after {self.server.timeout:.0f}s"
                 raise McpError(f"server {self.server.name}: {method} timed out") from exc
+            # Cleared on success. A timeout followed by a working call is the normal
+            # shape of a recovering server, and the panel must stop reporting the old
+            # error once calls succeed again.
+            self.last_error = ""
+            return result
 
     async def _await_response(self, request_id: int) -> dict[str, Any]:
         proc = self._proc
@@ -232,11 +257,17 @@ class McpManager:
         return bool(self._clients)
 
     async def ensure_tools(self) -> None:
-        """Refresh the tool list. A dead server is retried on the next refresh."""
+        """Refresh the tool list. A dead server is retried on the next refresh.
+
+        Only ``Exception`` is caught, not just ``McpError``: one broken server must not
+        abort the refresh for the others. The failure is recorded as an empty list plus
+        an error string, so the endpoint can report *which* server is down instead of
+        failing the whole request.
+        """
         for name, client in self._clients.items():
             try:
                 self._tools[name] = await client.list_tools()
-            except McpError as exc:
+            except Exception as exc:
                 self._tools[name] = []
                 logger.warning("mcp tool listing failed server=%s: %s", name, exc)
 

@@ -303,12 +303,14 @@ soapbot/
 9. `PersistStage` 归档这条消息（模型调用失败也要留下，否则历史有洞）。
 10. `PersonaStage` 按群 + 用户解析人格卡；`RecallStage` 检索记忆；
     `KnowledgeStage` 检索知识库——两者都以**不可信数据块**注入系统提示。
-11. `ModelStage`：图片按内容哈希查缓存，未命中才调用视觉模型；随后
-    带工具列表请求主模型；若模型要求调用工具，执行后把结果作为不可信数据块回灌，
-    最多两轮。
+11. `ModelStage`：语音段先转写（转写文本**同样过注入筛查**——嘴说出来的不是可信输入），
+    图片按内容哈希查缓存，未命中才调用视觉模型；随后带工具列表请求主模型；
+    若模型要求调用工具，执行后把结果作为不可信数据块回灌，最多两轮。
+    开了 `STREAM_REPLY` 且没有工具待调用时，改为边生成边按句发送。
 12. `SafetyStage`：清理不可见字符、拦截提示词泄漏、检测 canary 复述、
     脱敏疑似凭据、按人格卡截断。
-13. `ReplyStage` 通过适配器 `degrade()` 降级不支持的段落后发送。
+13. `ReplyStage` 通过适配器 `degrade()` 降级不支持的段落后发送；开了
+    `VOICE_TTS_ENABLED` 时先合成为语音，失败或过长则回退为文本。
 14. `PersistReplyStage` 归档回复；`MemoryWriteStage` 异步抽取值得记住的事实。
 
 任何一步都可以 `StageResult(halt=True, reason="...")` 终止——终止原因会进指标和审计，
@@ -346,10 +348,28 @@ soapbot/
 | `ALLOW_UNTRUSTED_PLUGINS` | `false` | 允许 `trust: untrusted` 插件持有敏感能力 |
 | `ENABLE_RUNTIME` | `true` | 关掉则只提供 HTTP API |
 | `ENABLE_BUDGET` / `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
+| `STREAM_REPLY` | `false` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11） |
+| `VOICE_ENABLED` | `false` | 入站语音转写。需要 Provider 声明 `transcribe` 槽位 |
+| `VOICE_TTS_ENABLED` / `VOICE_TTS_VOICE` | `false` / `zh-CN-XiaoxiaoNeural` | 回复转语音。需要 `pip install -e ".[voice]"` |
+| `VOICE_ALLOW_HOSTS` | 空 | 允许下载音频的内网主机，逗号分隔。**同机部署 NapCat 必须配**，见下 |
+| `VOICE_MAX_BYTES` / `VOICE_LANGUAGE` | `8388608` / `zh` | 单条音频上限与转写语言提示 |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | `LOG_JSON=false` 便于人读终端 |
 
 > 列表型变量支持三种写法：`123,456`、`123;456`、`["123","456"]`。
 > 早期版本只接受 JSON，用逗号会以一条不说明正确语法的 `SettingsError` 启动失败。
+
+> **`VOICE_ALLOW_HOSTS` 为什么必须显式配。** 音频 URL 由群成员给出，服务器带着自己的
+> 网络位置去取，所以默认只允许公网地址（防 `169.254.169.254` 这类元数据端点）。但
+> NapCat 从**它自己的 HTTP 端口**提供语音文件，同机部署下 `record.url` 就是
+> `http://127.0.0.1:3000/...`——严格规则会把每一条语音都拒掉，而且是静默降级成
+> `[语音]`。因此内网媒体端点要由运维在 `.env` 里指名：
+>
+> ```bash
+> SOAPBOT_VOICE_ALLOW_HOSTS=127.0.0.1
+> ```
+>
+> 默认留空是刻意的：让「信任一个内网地址」成为一次显式、可审计的决定，而不是藏在
+> 代码里的隐含假设。白名单只豁免地址判定，不豁免协议——`file://` 仍然被拒。
 
 ---
 
@@ -379,9 +399,14 @@ pip install -e ".[voice]"         # edge-tts：回复转语音（入站转写不
 pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 ```
 
-> `structlog`、`watchdog`、`python-multipart`、`edge-tts` 已从依赖中移除：
-> 代码里没有任何引用。依赖清单是审计面的一部分，留着它们会让评审者以为项目具备
-> 实际不存在的功能（结构化日志、热监听、文件上传、语音合成）。
+> `structlog`、`watchdog`、`python-multipart` 已从依赖中移除：代码里没有任何引用。
+> 依赖清单是审计面的一部分，留着它们会让评审者以为项目具备实际不存在的功能
+> （结构化日志、热监听、multipart 上传）。插件上传改收原始请求体，因此不需要
+> `python-multipart`。
+>
+> `edge-tts` 曾因「语音合成不存在」被一并移除。语音现在存在了，所以它回到了
+> **可选** extra 里，而不是默认依赖：它是一个大多数部署永远不会调用的厂商网络
+> 客户端，放进默认集只会让「pip install 就能跑」为单个功能变重。
 
 ---
 
@@ -528,11 +553,11 @@ class Plugin:
 | 群管命令 | ✅ | |
 | 额度审批 | ✅（默认关） | |
 | B 站元数据与观后感 | ✅（默认关） | L3 登录态未实现 |
-| 插件市场 | ❌ | 未实现 |
-| MCP 客户端 | ❌ | 未实现 |
-| 语音 STT/TTS | ❌ | 未实现 |
-| 流式输出 | ❌ | Provider 有 `stream` 槽位与 `chat_stream`，流水线未使用 |
-| i18n | ❌ | 仅中文 |
+| 插件包安装 | ✅ | **上传 zip 即安装，不等于批准**——没有在线商店、没有搜索与评分。装完仍需 `approve` + `load` |
+| MCP 客户端 | ✅（默认关） | `config/mcp.yaml` 声明式接入，工具作为独立来源注入模型调用，按 server 的 `min_role` 逐个授权；`GET /api/mcp` 报告每个 server 的工具数与错误 |
+| 语音 | ✅（默认关） | 入站转写（多 Provider 故障转移）+ 出站 edge-tts（需 `.[voice]`）。没有厂商凭据时以明确失败降级，不伪造结果 |
+| 流式输出 | ✅（默认关） | `STREAM_REPLY=true` 且适配器声明 `PROGRESSIVE` 才生效——目前只有 OneBot v11 声明。工具调用轮次不流式 |
+| i18n | ❌ | 仅中文。界面与对外文案均硬编码 |
 | 插件间互相调用 | ❌ | 设计如此：插件 A 不能借插件 B 提权 |
 
 ---

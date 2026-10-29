@@ -210,3 +210,89 @@ def test_config_rejects_unknown_role(tmp_path: Path) -> None:
 
 def test_missing_config_means_no_mcp(tmp_path: Path) -> None:
     assert load_config(tmp_path / "absent.yaml") == []
+
+
+# ------------------------------------------------------------------- recovery
+
+def _flaky_server(tmp_path: Path, marker: Path) -> McpServer:
+    """A server that fails until ``marker`` exists, then behaves.
+
+    Stands in for "the MCP server was down when the bot booted": the state the refresh
+    endpoint exists to fix.
+    """
+    script = tmp_path / "flaky_server.py"
+    script.write_text(
+        "import json, sys, pathlib\n"
+        f"MARKER = pathlib.Path({str(marker)!r})\n"
+        "if not MARKER.exists():\n"
+        "    sys.stderr.write('not ready\\n')\n"
+        "    sys.exit(3)\n" + SERVER,
+        encoding="utf-8",
+    )
+    return McpServer(
+        name="fake",
+        command=(sys.executable, str(script)),
+        timeout=15.0,
+        min_role="member",
+    )
+
+
+async def test_refresh_recovers_a_server_that_was_down_at_boot(tmp_path: Path) -> None:
+    """The manager claims a dead server is "retried on the next refresh".
+
+    Nothing could trigger a refresh before: ``ensure_tools`` ran once inside
+    ``runtime.start()``, so a server that was down at boot stayed tool-less until the
+    process restarted. This asserts the documented recovery path now exists.
+    """
+    marker = tmp_path / "ready"
+    manager = McpManager([_flaky_server(tmp_path, marker)], role_rank=_rank)
+    try:
+        await manager.ensure_tools()
+        assert manager.status()["tools"] == 0
+        assert manager.status()["servers"][0]["error"], "a dead server must report why"
+
+        marker.touch()
+        await manager.ensure_tools()          # <- the refresh the endpoint calls
+
+        assert manager.status()["tools"] == 1
+        assert manager.schemas(_principal(Role.MEMBER)), "the tool must be visible again"
+    finally:
+        await manager.close()
+
+
+async def test_a_successful_call_clears_the_stale_error(tmp_path: Path) -> None:
+    """Otherwise "reconnect" looks like it did nothing.
+
+    ``last_error`` was only ever assigned on failure, so a server that recovered kept
+    reporting the old message and the operator would restart the process for nothing.
+    """
+    marker = tmp_path / "ready"
+    server = _flaky_server(tmp_path, marker)
+    manager = McpManager([server], role_rank=_rank)
+    try:
+        await manager.ensure_tools()
+        client = manager._clients["fake"]
+        assert client.last_error
+
+        marker.touch()
+        await manager.ensure_tools()
+
+        assert client.last_error == ""
+    finally:
+        await manager.close()
+
+
+async def test_a_later_success_clears_a_recorded_timeout(tmp_path: Path) -> None:
+    """A timeout is sticky otherwise: the next working call leaves the error in place.
+
+    Distinct from the restart case — here the process never died, so ``_ensure_started``
+    returns early and only the request path can clear the message.
+    """
+    client = McpClient(_server(tmp_path))
+    try:
+        await client.list_tools()
+        client.last_error = "timeout after 15s"      # simulate an earlier failure
+        await client.list_tools()                    # same process, still healthy
+        assert client.last_error == ""
+    finally:
+        await client.close()
