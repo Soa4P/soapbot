@@ -110,6 +110,29 @@ class Settings(BaseSettings):
     stream_send_interval: float = 0.35
     """Minimum seconds between two progressive messages to the same group."""
 
+    voice_enabled: bool = False
+    """Transcribe inbound voice messages into the conversation.
+
+    Off by default because transcription costs a provider call per voice note and
+    because it turns audio the bot was not listening to into text it will act on.
+    """
+
+    voice_tts_enabled: bool = False
+    """Deliver replies as voice messages when the adapter can carry them.
+
+    Requires the optional dependency: ``pip install 'soapbot[voice]'``. Missing it is
+    not an error — replies go out as text and the reason is logged.
+    """
+
+    voice_tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    """Vendor voice name. Kept as a string because the set changes per provider."""
+
+    voice_max_bytes: int = 8 * 1024 * 1024
+    """Cap on downloaded audio. Applied while reading, not after."""
+
+    voice_language: str = "zh"
+    """Hint for the transcriber; providers may ignore it."""
+
     scheduler_tick_seconds: float = 30.0
     """How often due plugin cron jobs and expired budget reservations are swept.
 

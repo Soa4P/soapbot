@@ -18,6 +18,7 @@ from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import leaked_canary, redact
+from soapbot.voice.stt import render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +76,16 @@ class ModelStage(Stage):
         chunk_chars: int = 80,
         first_packet_deadline: float = 1.2,
         send_interval: float = 0.35,
+        transcriber=None,
     ) -> None:
         self.engine = engine
         self.compressor = compressor
         self.tools = tools
+        self.transcriber = transcriber
+        """Optional inbound speech transcription. ``None`` keeps voice messages
+        ignored, which is the behaviour before this feature existed — the alternative
+        (answering a voice note with a guess about its contents) is worse than
+        ignoring it, and silently answering nothing looks identical to a bug."""
         """Optional :class:`soapbot.plugins.dispatch.PluginToolRegistry`."""
         self.max_tool_rounds = (
             self.MAX_TOOL_ROUNDS if max_tool_rounds is None else max_tool_rounds
@@ -101,6 +108,32 @@ class ModelStage(Stage):
             s.plain() for s in segments if s.type is SegmentType.TEXT
         ).strip()
         images = [s for s in segments if s.type == SegmentType.IMAGE]
+
+        voice_stats = {"total": 0, "ok": 0, "failed": 0, "reasons": []}
+        if self.transcriber is not None:
+            for seg in segments:
+                if seg.type is not SegmentType.RECORD:
+                    continue
+                voice_stats["total"] += 1
+                result = await self.transcriber.transcribe_segment(seg)
+                if result.ok:
+                    voice_stats["ok"] += 1
+                else:
+                    voice_stats["failed"] += 1
+                    voice_stats["reasons"].append(result.reason)
+                # Prepended, not appended: "what was said" is the user's message, and
+                # any typed text is a continuation of it.
+                user_text = (render_prompt(result) + "\n" + user_text).strip()
+        if voice_stats["total"]:
+            # Observable in the trace page. A silent transcription failure is
+            # indistinguishable from a user who said nothing.
+            ctx.extras["voice"] = voice_stats
+            if voice_stats["failed"]:
+                logger.warning(
+                    "voice transcription failed trace=%s reasons=%s",
+                    ctx.event.trace_id,
+                    voice_stats["reasons"],
+                )
 
         if not user_text and not images:
             return StageResult(halt=True, reason="empty_input")

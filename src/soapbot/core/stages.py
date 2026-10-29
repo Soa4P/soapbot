@@ -16,6 +16,7 @@ from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.security.principal import normalize_id
+from soapbot.voice.tts import VoiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -274,8 +275,11 @@ class ReplyStage(Stage):
 
     name = "reply"
 
-    def __init__(self, store=None) -> None:
+    def __init__(self, store=None, *, tts=None) -> None:
         self._store = store
+        self._tts = tts
+        """Optional speech synthesis. ``None`` means text only, which is the default:
+        a group that did not ask for audio should not receive it."""
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         if not ctx.model_reply:
@@ -292,10 +296,37 @@ class ReplyStage(Stage):
             return StageResult()
 
         segments = [MessageSegment.text(ctx.model_reply)]
+        voiced = False
+        if self._tts is not None and ctx.adapter.supports_segment(SegmentType.RECORD):
+            # Synthesised only when the adapter can actually carry a voice segment.
+            # Asking first avoids paying for audio the channel will drop.
+            try:
+                audio = await self._tts.synthesize(ctx.model_reply)
+            except VoiceUnavailableError as exc:
+                # Expected whenever the extra is not installed, or the reply is long.
+                # Logged at info: an operator who enabled voice needs to see *why* a
+                # reply went out as text, and silence would look like a broken setting.
+                logger.info("voice reply skipped: %s", exc)
+                ctx.extras["voice_reply"] = f"text:{exc}"
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("voice synthesis failed: %s", type(exc).__name__)
+                ctx.extras["voice_reply"] = f"text:{type(exc).__name__}"
+            else:
+                segments = [MessageSegment.record(b64=audio)]
+                voiced = True
+                ctx.extras["voice_reply"] = "voice"
+
         out = ctx.outbound or _build_outgoing(ctx, segments)
         out.segments = segments
 
         receipt = await ctx.adapter.send(out)
+        if voiced and not receipt.ok:
+            # A voice segment that failed means the group got nothing at all, so the
+            # text is sent as a second attempt rather than reported as a failed reply.
+            logger.warning("voice send failed, falling back to text: %s", receipt.error)
+            ctx.extras["voice_reply"] = "text:send_failed"
+            out.segments = [MessageSegment.text(ctx.model_reply)]
+            receipt = await ctx.adapter.send(out)
         ctx.extras["send_ok"] = receipt.ok
         ctx.extras["send_error"] = receipt.error
         # Same key as the progressive path, so the trace reader does not have to

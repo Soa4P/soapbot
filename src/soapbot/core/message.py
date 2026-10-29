@@ -72,6 +72,23 @@ class MessageSegment:
         return MessageSegment(SegmentType.IMAGE, payload)
 
     @staticmethod
+    def record(b64: str = "", *, url: str = "", path: str = "") -> MessageSegment:
+        """A voice message. OneBot takes the audio inline, hence ``b64`` first.
+
+        Sent as base64 rather than a local path on purpose: a path would be read by the
+        *adapter's* machine, which is not necessarily the bot's once the two run in
+        separate containers.
+        """
+        payload: dict[str, Any] = {}
+        if b64:
+            payload["file"] = f"base64://{b64}"
+        if url:
+            payload["url"] = url
+        if path:
+            payload["path"] = path
+        return MessageSegment(SegmentType.RECORD, payload)
+
+    @staticmethod
     def at(qq: str | int) -> MessageSegment:
         return MessageSegment(SegmentType.AT, {"qq": str(qq)})
 

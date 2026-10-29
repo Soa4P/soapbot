@@ -280,5 +280,30 @@ class ProviderRouter:
                 errors.append(f"{provider.id}: {exc}")
         raise ProviderError("all embed providers failed: " + " | ".join(errors))
 
+    async def transcribe(
+        self, audio: bytes, *, mime: str = "audio/silk", language: str = ""
+    ) -> str:
+        """Speech to text, with the same failover shape as ``embed``.
+
+        Only providers that *declared* the slot are tried. Offering the call to a
+        chat-only provider would depend on the default ``transcribe`` raising, which
+        is correct but turns a configuration gap into a per-message error.
+        """
+        available = self._available(CapabilitySlot.TRANSCRIBE)
+        if not available:
+            raise ProviderError("no provider available for transcription")
+        errors: list[str] = []
+        for provider in available:
+            try:
+                text = await provider.transcribe(audio, mime=mime, language=language)
+                self._stats[provider.id].calls += 1
+                return text
+            except Exception as exc:
+                stat = self._stats[provider.id]
+                stat.failures += 1
+                stat.last_error = str(exc)
+                errors.append(f"{provider.id}: {type(exc).__name__}")
+        raise ProviderError("all transcribe providers failed: " + " | ".join(errors))
+
     def has_capability(self, slot: CapabilitySlot) -> bool:
         return bool(self._available(slot))
