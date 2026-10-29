@@ -18,11 +18,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from soapbot.api.auth import require_api_auth
+from soapbot.api.locale import request_locale
 from soapbot.core.trace import build_topology, violated_constraints
+from soapbot.i18n import t
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -113,17 +115,20 @@ async def traces(
 @router.get("/traces/{trace_id}")
 async def trace_detail(
     trace_id: str,
+    request: Request,
     _: dict[str, Any] = Depends(require_api_auth),
 ) -> dict[str, Any]:
     if len(trace_id) > 128:
-        raise HTTPException(status_code=422, detail="trace id 过长")
+        raise HTTPException(status_code=422, detail=t("api.trace_too_long", request_locale(request)))
     store = _traces()
     trace = store.by_trace(trace_id)
     if trace is None:
         # 404 rather than an empty object: a trace that has aged out of the ring is
         # genuinely gone, and the panel should say "已滚出缓冲区" instead of drawing
         # an empty stage list that looks like a message that did nothing.
-        raise HTTPException(status_code=404, detail="trace 不在缓冲区中（可能已被后续消息挤出）")
+        raise HTTPException(
+            status_code=404, detail=t("api.trace_not_found", request_locale(request))
+        )
     return trace.to_dict()
 
 

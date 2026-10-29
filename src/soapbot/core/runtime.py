@@ -16,6 +16,7 @@ import logging
 import time
 from typing import Any
 
+from soapbot.config import settings
 from soapbot.core.adapter import Adapter
 from soapbot.core.bus import EventBus
 from soapbot.core.message import EventType, IncomingMessage
@@ -40,6 +41,7 @@ class BotRuntime:
         bilibili=None,
         traces=None,
         mcp=None,
+        locale: str = "",
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
         self.pipeline = pipeline or Pipeline()
@@ -85,6 +87,14 @@ class BotRuntime:
 
         Held so shutdown can close its connection pool, and so the management API can
         report tier and call statistics without reaching into the command object.
+        """
+
+        self.locale = locale or settings.default_locale
+        """Language for replies this runtime produces.
+
+        Resolved once at assembly and copied onto each ``PipelineContext``. Passed in
+        rather than read from ``settings`` per message so a test can run a runtime in
+        English without mutating global state.
         """
 
         if plugins is not None:
@@ -157,7 +167,7 @@ class BotRuntime:
             return
 
         async with self.locks.get(event.session_key):
-            ctx = PipelineContext(event=event, adapter=adapter)
+            ctx = PipelineContext(event=event, adapter=adapter, locale=self.locale)
             try:
                 await self.pipeline.run(ctx)
             except Exception:

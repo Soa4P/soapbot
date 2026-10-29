@@ -141,6 +141,14 @@ export const api = {
   mcp: () => request<any>('/api/mcp'),
   refreshMcp: () => request<any>('/api/mcp/refresh', { method: 'POST' }),
 
+  /**
+   * System settings. The endpoint accepts only the keys it declares writable and
+   * answers `restart_required`, so the caller must not treat success as "live now".
+   */
+  settings: () => request<any>('/api/settings'),
+  saveSettings: (changes: Record<string, unknown>) =>
+    request<any>('/api/settings', { method: 'POST', body: JSON.stringify({ changes }) }),
+
   audit: (limit = 100, kind = '') =>
     request<any>(`/api/security/audit?limit=${limit}&kind=${encodeURIComponent(kind)}`),
   denials: (limit = 100) => request<any>(`/api/security/denials?limit=${limit}`),

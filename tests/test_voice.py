@@ -414,6 +414,9 @@ def _ctx_with_records(records: list[MessageSegment]):
 
     return SimpleNamespace(
         extras={"clean_segments": records},
+        # ModelStage reads the language to render the transcript label and the refusal
+        # text, so a stand-in context has to carry the field the real one declares.
+        locale="zh-CN",
         event=SimpleNamespace(
             trace_id="t-1",
             session_key="group:1",

@@ -38,9 +38,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from soapbot.api.auth import require_api_auth
+from soapbot.api.locale import request_locale
 from soapbot.config import settings
 from soapbot.core import config_write
 from soapbot.core.config_files import ConfigError
+from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
@@ -229,7 +231,9 @@ async def apply_providers(
     except OSError as exc:
         _audit(actor, "deny", f"write_failed:{exc.__class__.__name__}", result.changed_fields)
         logger.exception("configuration write failed for %s", path)
-        raise HTTPException(status_code=500, detail="写入失败，文件未被修改。") from exc
+        raise HTTPException(
+            status_code=500, detail=t("api.write_failed", request_locale(request))
+        ) from exc
 
     _audit(actor, "allow", "providers_updated", result.changed_fields)
     return {

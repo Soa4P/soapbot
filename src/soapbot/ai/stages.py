@@ -16,10 +16,11 @@ from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
+from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import (
     INJECTION_BLOCK_ON,
-    INJECTION_REFUSAL,
+    injection_refusal,
     leaked_canary,
     looks_like_injection,
     redact,
@@ -47,6 +48,10 @@ class PersonaStage(Stage):
             ctx.persona_prompt = persona.system_prompt
             ctx.extras["persona_source"] = source
             ctx.extras["persona"] = persona
+            # A card that names a language wins over the process default; a card that
+            # says nothing leaves whatever the runtime set in place.
+            if persona.locale:
+                ctx.locale = persona.locale
         else:
             ctx.extras["persona_source"] = "none"
         return StageResult()
@@ -159,7 +164,7 @@ class ModelStage(Stage):
                 else:
                     voice_stats["failed"] += 1
                     voice_stats["reasons"].append(result.reason)
-                transcripts.append(render_prompt(result))
+                transcripts.append(render_prompt(result, ctx.locale))
 
             if transcripts:
                 # Joined once, in arrival order. Prepending inside the loop reversed a
@@ -181,7 +186,7 @@ class ModelStage(Stage):
         if blocked_transcript:
             # Same shape as the screen stage: refuse in the reply, do not call the
             # model, and do not halt — the refusal still has to reach the group.
-            ctx.model_reply = INJECTION_REFUSAL
+            ctx.model_reply = injection_refusal(ctx.locale)
             ctx.extras["skip_model"] = True
             ctx.extras["injection_blocked"] = True
             return StageResult()
@@ -465,7 +470,7 @@ class SafetyStage(Stage):
                 trace_id=ctx.event.trace_id,
             )
             ctx.extras["canary_blocked"] = True
-            ctx.model_reply = "抱歉，刚才的回答有问题，我重新组织一下。"
+            ctx.model_reply = t("llm.apology_retry", ctx.locale)
             ctx.outbound = _build_outgoing(
                 ctx, [MessageSegment.text(ctx.model_reply)]
             )

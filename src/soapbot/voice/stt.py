@@ -28,6 +28,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from soapbot.i18n import t
+
 logger = logging.getLogger(__name__)
 
 #: Voice notes are short; anything larger is a mistake or an attempt to make the bot
@@ -218,12 +220,16 @@ class ProviderTranscriber:
         return Transcription(cleaned, True)
 
 
-def render_prompt(transcription: Transcription) -> str:
+def render_prompt(transcription: Transcription, locale: str = "") -> str:
     """Wrap transcribed speech so the model can tell it from typed text.
 
     The label matters: without it the model treats a spoken sentence as if the user had
     typed it, and will happily answer "as you wrote" about words nobody wrote.
+
+    ``locale`` is optional and defaults to the default language, so existing callers
+    keep working. It is threaded through because this text lands in the prompt *and*
+    the placeholder can surface in the group when transcription fails.
     """
     if transcription.ok and transcription.text:
-        return f"[语音转写] {transcription.text}"
-    return PLACEHOLDER
+        return t("voice.transcript", locale, text=transcription.text)
+    return t("voice.placeholder", locale)

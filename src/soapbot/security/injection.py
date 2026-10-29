@@ -125,9 +125,25 @@ def strip_invisible(text: str) -> str:
 #: speech — because two paths with two thresholds means the weaker one decides.
 INJECTION_BLOCK_ON = 2
 
-#: The refusal shown when a message is quarantined. One string for the same decision,
-#: so the two paths cannot drift into two different answers to the same attempt.
+#: The refusal shown when a message is quarantined, in the default language.
+#:
+#: Kept as a module constant because it is also the *English-neutral* fallback used by
+#: tests and by callers with no locale at hand. Callers that know the message's locale
+#: must go through :func:`injection_refusal` instead — a hard-coded Chinese refusal in
+#: a group that speaks English is the visible half of "the translation is unfinished".
 INJECTION_REFUSAL = "这个话题我没法接，换个说法吧。"
+
+
+def injection_refusal(locale: str = "") -> str:
+    """The refusal text for ``locale``, falling back to the default language.
+
+    A function rather than a constant because the answer depends on who is being
+    refused. Both entry points (typed message, transcribed speech) call this, so they
+    cannot drift into two different answers to the same attempt.
+    """
+    from soapbot.i18n import t
+
+    return t("injection.refusal", locale)
 
 
 def looks_like_injection(text: str) -> tuple[bool, list[str]]:

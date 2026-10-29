@@ -8,6 +8,7 @@ provider API keys live in the encrypted database (see ``soapbot.security.crypto`
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -52,9 +53,15 @@ def _split_list(value: Any) -> Any:
 class Settings(BaseSettings):
     """Process-wide settings."""
 
+    #: ``SOAPBOT_ENV_FILE`` relocates the ``.env`` this process reads. It exists so the
+    #: settings page can write to the *same* file the process will read on next boot:
+    #: a service started by systemd or a container does not have the repository as its
+    #: working directory, so a hard-coded relative ``.env`` would make the panel save
+    #: into a file nobody reads. Resolved once at import, which is the same lifetime as
+    #: the config itself.
     model_config = SettingsConfigDict(
         env_prefix="SOAPBOT_",
-        env_file=".env",
+        env_file=os.environ.get("SOAPBOT_ENV_FILE", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -141,6 +148,16 @@ class Settings(BaseSettings):
     ``http://127.0.0.1:3000/...`` and the strict rule would refuse every voice
     message. Empty by default — naming a host is the operator's explicit decision to
     trust one internal address, and it stays visible in ``.env``.
+    """
+
+    default_locale: str = "zh-CN"
+    """Language for text the bot sends into a chat: refusals, tool notes, voice labels.
+
+    Deliberately *not* also the panel language — the panel picks its own language per
+    browser (see ``webui/src/i18n``), because the person reading the console and the
+    person reading the group are often not the same person. A persona card may
+    override this per group, which is why the value travels on the pipeline context
+    rather than being read from settings at the point of use.
     """
 
     scheduler_tick_seconds: float = 30.0

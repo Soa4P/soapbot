@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import { UNAUTHORIZED_EVENT } from '@/api/client'
 import LoginDialog from '@/components/LoginDialog.vue'
+import { t } from '@/i18n'
 import { bumpRefresh } from '@/lib/refresh'
 import { uptime as fmtUptime } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
@@ -20,38 +21,53 @@ let timer: number | undefined
  * says "the 04 page" and it means something; 07 and 08 were appended rather than
  * inserted for the same reason. Never renumber — add 09, 10, 11.
  */
+/**
+ * Labels are i18n keys, not literals, so switching language re-renders the rail.
+ * The index stays a fixed string: it is an identifier ("the 04 page"), and would stop
+ * being one if it were renumbered per locale.
+ */
 const nav = [
-  { to: '/', label: '总览', index: '01' },
-  { to: '/runtime', label: '运行状态', index: '02' },
-  { to: '/plugins', label: '插件', index: '03' },
-  { to: '/security', label: '安全审计', index: '04' },
-  { to: '/memory', label: '记忆与知识库', index: '05' },
-  { to: '/budget', label: '额度审批', index: '06' },
-  { to: '/config', label: '模型与人格', index: '07' },
-  { to: '/logs', label: '运行日志', index: '08' },
-  { to: '/pipeline', label: '流水线追踪', index: '09' },
-  { to: '/metrics', label: '运行指标', index: '10' },
-  { to: '/market', label: '插件包安装', index: '11' },
+  { to: '/', key: 'nav.01', index: '01' },
+  { to: '/runtime', key: 'nav.02', index: '02' },
+  { to: '/plugins', key: 'nav.03', index: '03' },
+  { to: '/security', key: 'nav.04', index: '04' },
+  { to: '/memory', key: 'nav.05', index: '05' },
+  { to: '/budget', key: 'nav.06', index: '06' },
+  { to: '/config', key: 'nav.07', index: '07' },
+  { to: '/logs', key: 'nav.08', index: '08' },
+  { to: '/pipeline', key: 'nav.09', index: '09' },
+  { to: '/metrics', key: 'nav.10', index: '10' },
+  { to: '/market', key: 'nav.11', index: '11' },
+  { to: '/settings', key: 'nav.12', index: '12' },
 ]
 
-const title = computed(() => (route.meta.title as string | undefined) ?? '控制台')
+/**
+ * Page title comes from the route's own key when it has one, so the heading and the
+ * rail can never disagree. Routes keep a Chinese `title` in `meta` for the document
+ * title fallback (browser tab before the catalogue loads).
+ */
+const title = computed(() => {
+  const key = route.meta.titleKey as string | undefined
+  if (key) return t(key)
+  return (route.meta.title as string | undefined) ?? t('app.console')
+})
 
 const healthPill = computed(() => {
-  if (healthError.value) return { cls: 'bad', text: 'API 不可达' }
-  if (!health.value) return { cls: '', text: '连接中' }
-  return { cls: 'ok', text: 'API 在线' }
+  if (healthError.value) return { cls: 'bad', text: t('app.health.unreachable') }
+  if (!health.value) return { cls: '', text: t('app.health.connecting') }
+  return { cls: 'ok', text: t('app.health.online') }
 })
 
 const authPill = computed(() => {
   switch (auth.mode) {
     case 'token':
-      return { cls: 'lamp', text: `TOKEN · ${auth.status?.subject || 'operator'}` }
+      return { cls: 'lamp', text: `${t('app.auth.token')} · ${auth.status?.subject || 'operator'}` }
     case 'loopback':
-      return { cls: 'warn', text: '本机直连' }
+      return { cls: 'warn', text: t('app.auth.loopback') }
     case 'invalid':
-      return { cls: 'bad', text: '令牌失效' }
+      return { cls: 'bad', text: t('app.auth.invalid') }
     default:
-      return { cls: '', text: '未认证' }
+      return { cls: '', text: t('app.auth.none') }
   }
 })
 
@@ -98,7 +114,7 @@ onBeforeUnmount(() => {
       <nav class="rail__nav" aria-label="主导航">
         <RouterLink v-for="item in nav" :key="item.to" :to="item.to" class="rail__link">
           <span class="idx" aria-hidden="true">{{ item.index }}</span>
-          <span>{{ item.label }}</span>
+          <span>{{ t(item.key) }}</span>
         </RouterLink>
       </nav>
 
