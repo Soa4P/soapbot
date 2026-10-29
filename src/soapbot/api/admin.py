@@ -53,6 +53,8 @@ from pydantic import BaseModel, Field
 
 from soapbot import __version__
 from soapbot.api.auth import require_api_auth
+from soapbot.api.locale import request_locale
+from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
@@ -167,12 +169,16 @@ async def refresh_mcp(request: Request, auth: dict = Depends(require_api_auth)) 
             role=auth_role.value,
             detail=f"from={request.client.host if request.client else '-'}",
         )
-        raise HTTPException(status_code=403, detail=f"需要 {minimum.value} 及以上角色")
+        locale = request_locale(request)
+        raise HTTPException(
+            status_code=403,
+            detail=t("api.role_required", locale, role=minimum.value),
+        )
 
     runtime = _runtime()
     manager = getattr(runtime, "mcp", None)
     if manager is None:
-        raise HTTPException(status_code=503, detail="MCP 未启用")
+        raise HTTPException(status_code=503, detail=t("api.mcp_disabled", request_locale(request)))
 
     await manager.ensure_tools()
     status = manager.status()
@@ -340,7 +346,9 @@ class KnowledgeDocumentIn(BaseModel):
 
 @router.post("/knowledge")
 async def upsert_knowledge(
-    body: KnowledgeDocumentIn, _: dict = Depends(require_api_auth)
+    body: KnowledgeDocumentIn,
+    request: Request,
+    _: dict = Depends(require_api_auth),
 ) -> dict:
     """Create or replace a knowledge document.
 
@@ -354,9 +362,10 @@ async def upsert_knowledge(
     document is embedded in one call, and an unbounded upload is a way to make a
     single HTTP request occupy the embedding provider (and the bill) for minutes.
     """
+    locale = request_locale(request)
     runtime = _runtime()
     if runtime.kb is None:
-        raise HTTPException(status_code=503, detail="知识库未启用")
+        raise HTTPException(status_code=503, detail=t("api.kb_disabled", locale))
 
     import hashlib
 
@@ -364,33 +373,39 @@ async def upsert_knowledge(
         "doc-" + hashlib.sha256(f"{body.title}\n{body.content}".encode()).hexdigest()[:16]
     )
     if not _DOC_ID_RE.match(doc_id):
-        raise HTTPException(status_code=400, detail="doc_id 只能包含字母、数字、下划线和短横线")
+        raise HTTPException(status_code=400, detail=t("api.doc_id_invalid", locale))
 
     result = await runtime.kb.ingest_document(doc_id, body.title.strip(), body.content)
     if result["chunks"] == 0:
-        raise HTTPException(status_code=400, detail="内容为空，未写入任何片段")
+        raise HTTPException(status_code=400, detail=t("api.content_empty", locale))
     return {"ok": True, **result}
 
 
 @router.delete("/knowledge/{doc_id}")
-async def delete_knowledge(doc_id: str, _: dict = Depends(require_api_auth)) -> dict:
+async def delete_knowledge(
+    doc_id: str, request: Request, _: dict = Depends(require_api_auth)
+) -> dict:
+    locale = request_locale(request)
     runtime = _runtime()
     if runtime.kb is None:
-        raise HTTPException(status_code=503, detail="知识库未启用")
+        raise HTTPException(status_code=503, detail=t("api.kb_disabled", locale))
     removed = await runtime.kb.delete_document(doc_id)
     if removed == 0:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail=t("api.doc_not_found", locale))
     return {"ok": True, "doc_id": doc_id, "chunks_removed": removed}
 
 
 @router.get("/knowledge/{doc_id}")
-async def knowledge_detail(doc_id: str, _: dict = Depends(require_api_auth)) -> dict:
+async def knowledge_detail(
+    doc_id: str, request: Request, _: dict = Depends(require_api_auth)
+) -> dict:
+    locale = request_locale(request)
     runtime = _runtime()
     if runtime.kb is None:
-        raise HTTPException(status_code=503, detail="知识库未启用")
+        raise HTTPException(status_code=503, detail=t("api.kb_disabled", locale))
     detail = await runtime.kb.document_detail(doc_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail=t("api.doc_not_found", locale))
     return detail
 
 

@@ -28,6 +28,7 @@ from typing import Any
 
 from soapbot.core.adapter import Adapter
 from soapbot.core.message import IncomingMessage, OutgoingMessage
+from soapbot.i18n import DEFAULT_LOCALE
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,14 @@ class PipelineContext:
 
     persona_id: str = ""
     persona_prompt: str = ""
+    locale: str = DEFAULT_LOCALE
+    """Language for replies this message produces.
+
+    Carried on the context rather than read from settings at each use site: one
+    process serves many groups, and a persona can ask for a different language than
+    the process default. A module-level "current locale" would make the reply depend
+    on whichever message was handled last.
+    """
     session_id: str = ""
     conversation: list[dict[str, Any]] = field(default_factory=list)
     model_reply: str = ""

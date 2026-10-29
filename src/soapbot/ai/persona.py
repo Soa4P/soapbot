@@ -40,6 +40,13 @@ class Persona:
     temperature: float | None = None
     version: int = 1
     enabled: bool = True
+    locale: str = ""
+    """Reply language for this card; empty means "use the process default".
+
+    Per-persona rather than global because one bot usually serves several groups,
+    and a group that speaks English should not have to change the process setting
+    (which would flip every other group too).
+    """
     extra: dict[str, Any] = field(default_factory=dict)
 
     def build_system_prompt(self, context_note: str = "") -> str:
@@ -196,6 +203,7 @@ def _persona_from_dict(meta: dict[str, Any], body: str, stem: str) -> Persona:
         ),
         version=int(meta.get("version", 1) or 1),
         enabled=bool(meta.get("enabled", True)),
+        locale=str(meta.get("locale") or ""),
         extra={k: v for k, v in meta.items() if k not in _KNOWN_KEYS},
     )
 
@@ -209,6 +217,7 @@ _KNOWN_KEYS = {
     "banned_words",
     "wake_words",
     "max_reply_chars",
+    "locale",
     "temperature",
     "version",
     "enabled",

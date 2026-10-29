@@ -59,6 +59,7 @@ from soapbot.api.config_write import router as config_write_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
 from soapbot.api.security import router as security_router
+from soapbot.api.settings import router as settings_router
 from soapbot.config import settings
 from soapbot.logging_setup import setup_logging
 from soapbot.security.tokens import BootstrapToken, TokenService
@@ -423,6 +424,7 @@ def create_app() -> FastAPI:
     app.include_router(bilibili_router)
     app.include_router(config_write_router)
     app.include_router(pipeline_router)
+    app.include_router(settings_router)
 
     _mount_webui(app)
     return app

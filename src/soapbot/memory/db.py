@@ -213,7 +213,12 @@ class Database:
                     logger.debug("pragma skipped (%s): %s", pragma, exc)
             await conn.run_sync(Base.metadata.create_all)
             await self._create_fts(conn)
-        await self._record_version()
+            # Migrations run inside the same transaction as create_all, so a database
+            # that fails halfway through an upgrade is left at its previous version
+            # rather than at a mixture of two schemas.
+            from soapbot.memory.migrations import migrate
+
+            await migrate(conn, target=SCHEMA_VERSION)
         logger.info("database ready: %s", self.url)
 
     async def _create_fts(self, conn) -> None:
@@ -240,16 +245,18 @@ class Database:
                 # but degrade to vector-only search rather than refusing to boot.
                 logger.error("FTS5 unavailable for %s (%s); keyword search disabled", table, exc)
 
-    async def _record_version(self) -> None:
-        import time
+    async def schema_version(self) -> int:
+        """The recorded schema version, for the settings page and health output.
 
-        async with self._session_factory() as session:
-            existing = await session.get(SchemaVersion, 1)
-            if existing is None:
-                session.add(
-                    SchemaVersion(id=1, version=SCHEMA_VERSION, applied_at=time.time())
-                )
-                await session.commit()
+        Read back from the table rather than reported from ``SCHEMA_VERSION``: the
+        interesting number is what the *file* contains, not what this build wants.
+        A mismatch is precisely the state an operator needs to see.
+        """
+        from soapbot.memory.migrations import current_version
+
+        async with self.engine.begin() as conn:
+            found = await current_version(conn)
+        return int(found or 0)
 
     async def session(self) -> AsyncIterator[AsyncSession]:
         async with self._session_factory() as session:

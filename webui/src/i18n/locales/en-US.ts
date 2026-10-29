@@ -1,0 +1,70 @@
+﻿/**
+ * Panel copy, English. Mirrors `zh-CN.ts` key for key; see the note there on why the
+ * server-side bot replies are not part of this catalogue.
+ */
+export default {
+  'app.console': 'Console',
+  'app.refresh': 'Refresh',
+  'app.refreshing': 'Refreshing…',
+  'app.health.online': 'API online',
+  'app.health.unreachable': 'API unreachable',
+  'app.health.connecting': 'Connecting',
+  'app.auth.token': 'TOKEN',
+  'app.auth.loopback': 'Local',
+  'app.auth.invalid': 'Token expired',
+  'app.auth.none': 'Not signed in',
+  'app.footer.schema': 'schema',
+  'app.footer.version': 'version',
+
+  'nav.01': 'Overview',
+  'nav.02': 'Runtime',
+  'nav.03': 'Plugins',
+  'nav.04': 'Security',
+  'nav.05': 'Memory',
+  'nav.06': 'Budget',
+  'nav.07': 'Models & personas',
+  'nav.08': 'Logs',
+  'nav.09': 'Pipeline traces',
+  'nav.10': 'Metrics',
+  'nav.11': 'Plugin install',
+  'nav.12': 'Settings',
+
+  'locale.label': 'Interface language',
+  'locale.zh': '中文',
+  'locale.en': 'English',
+  'locale.hint': 'Affects this browser only, not the language the bot uses in a group',
+
+  'settings.saved': 'Saved',
+  'settings.save': 'Save',
+  'settings.saving': 'Saving…',
+  'settings.pendingRestart': 'Restart to apply',
+
+  'settings.language.title': 'Language',
+  'settings.language.reply': 'Reply language',
+  'settings.language.replyHint': 'The language the bot posts in a group. A persona card can override it per group via its locale field. Written to .env; applies after restart.',
+
+  'settings.voice.title': 'Voice',
+  'settings.voice.inbound': 'Transcribe voice messages into text',
+  'settings.voice.inboundHint': 'Each voice note costs one provider transcription call. On failure the segment becomes [voice] rather than inventing words.',
+  'settings.voice.outbound': 'Send replies as synthesised voice',
+  'settings.voice.missingExtra': 'The speech extra is not installed, so this switch is disabled. Install and restart:',
+  'settings.voice.voice': 'Voice',
+
+  'settings.mcp.title': 'MCP tools',
+  'settings.mcp.name': 'Server',
+  'settings.mcp.state': 'State',
+  'settings.mcp.tools': 'Tools',
+  'settings.mcp.error': 'Error',
+  'settings.mcp.ok': 'OK',
+  'settings.mcp.failed': 'Failed',
+  'settings.mcp.empty': 'No MCP servers configured. Declare them in config/mcp.yaml and restart.',
+
+  'settings.runtime.title': 'Runtime',
+  'settings.runtime.version': 'Version',
+  'settings.runtime.schema': 'Database schema',
+  'settings.runtime.expected': 'this build expects',
+  'settings.runtime.dataDir': 'Data directory',
+  'settings.runtime.envFile': 'Config file',
+  'settings.runtime.restartHint': 'These settings are written to .env and take effect on restart — the panel does not pretend otherwise.',
+  'settings.runtime.startupErrors': 'Warnings recorded at startup:',
+}
