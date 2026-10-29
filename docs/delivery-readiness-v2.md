@@ -4,16 +4,26 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `858 passed, 5 skipped`。
-CI：`frontend` / `types` / `backend (windows)` 通过；`backend (ubuntu)` 因一个**此前就存在**的
-偶发用例失败（见下），`package` 随之跳过。
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `860 passed, 8 skipped`；CI 五任务全绿。
 
-> 关于那个偶发用例：`tests/test_wave4_plugins.py::test_hot_reload_picks_up_new_command`
-> 在 Linux 上约三分之一概率失败，报 `WorkerCrashedError: plugin worker echo died (code=1)`。
-> 同一用例在提交 `79f68ee`（早于本轮全部改动）的 CI 中就已失败，之后某一轮又通过，
-> 说明是重启路径的竞态，与本轮新增能力无关。**未修复，未掩盖**：不打算用一个 retry 把它
-> 变成绿色。下一步应当把子进程被脱敏的 stderr 尾部带进崩溃日志，再据此定位——
-> 那需要一轮 CI 观察，本轮预算未做。
+> 上一版此处写着「ubuntu 因一个偶发用例失败」，并把它归因于重启竞态。**那个判断是错的**，
+> 修正记录留在这一节里，因为「当时为什么看错」比结论本身更有用：
+>
+> 失败现象是 `WorkerCrashedError: plugin worker echo died (code=1)`——新 worker 成功报告
+> 5 个命令，12ms 后死于第一次调用。真因是子进程给自己设的 `RLIMIT_NPROC = 64`：它按
+> **真实 uid 全系统**计数，而且把**线程**也算进去。CI runner 上整个账号共享这份配额，
+> worker 第一次 `run_in_executor` 创建读帧线程时就可能撞上 `can't start new thread`，
+> 异常逃出主循环 → 进程以 1 退出。账号当时有多忙决定了它是「偶发」还是「必现」，这正是
+> 它看起来随机的全部原因；而 `RLIMIT_NPROC` 是 POSIX 专有，Windows 任务永远看不到。
+>
+> 为什么查了这么多轮：子进程的 stderr 只进了 DEBUG 日志，而 Python 在未捕获异常退出时
+> 恰好只把 traceback 写到 stderr——唯一能解释failure的那行被丢了，宿主只剩一个数字。
+> 现在 worker 保留最近 40 行 stderr（脱敏），崩溃消息与 ERROR 日志都带上它；读循环里
+> 的环境性失败也会变成一帧 `fatal` 上报，而不是静默退出。
+>
+> 同样的错误还有第二处：`RLIMIT_AS = 256 MiB` 计的是**虚拟**地址空间，裸 CPython 在跑
+> 任何插件代码前就已占用数百 MB，于是连一个 8MB 线程栈都可能放不下。已提到 512 MiB，
+> 并在 `isolation.py` 里定义为唯一常量，避免loader/supervisor/runner 三处再次漂移。
 
 ---
 
@@ -140,7 +150,7 @@ QQ 没有消息编辑接口，OneBot v11 与官方 API 都不提供，所以「�
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 858 passed, 5 skipped
+python -m pytest -q                 # 860 passed, 8 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度
