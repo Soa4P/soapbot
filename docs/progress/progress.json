@@ -741,7 +741,7 @@
     "pytest": "1025 passed, 10 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
-    "deploy_check": "0 阻断 / 1 告警 / 14 通过",
+    "deploy_check": "静态 0 阻断 / 1 告警 / 14 通过；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
     "deps": "依赖清单一致",
     "clean_venv": "pip install . 成功并实际启动，/api/health 200",
     "docker_runtime": "未验证（本机无 Docker，装不上）"
