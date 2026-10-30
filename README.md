@@ -369,7 +369,8 @@ soapbot/
 |---|---|---|
 | `HOST` / `PORT` | `127.0.0.1` / `6185` | 绑定 `0.0.0.0` 会暴露管理 API，务必同时配置鉴权 |
 | `DATA_DIR` | `./data` | 可写卷 |
-| `CONFIG_DIR` | `./config` | 服务永不改写；容器建议只读挂载 |
+| `CONFIG_DIR` | `<data>/config` | **运行期配置，可写**。面板从这里读写 |
+| `CONFIG_TEMPLATE_DIR` | `./config` | 镜像自带的默认值，**只读**；文件缺失时复制到 `CONFIG_DIR`，已有文件永不覆盖 |
 | `MASTER_KEY` / `MASTER_KEY_FILE` | 空（自动生成到 `data/master.key`） | 容器优先用文件：环境变量对 `docker inspect` 可见 |
 | `OWNER_IDS` / `ADMIN_IDS` / `MEMBER_IDS` | 空 | **唯一**的权限来源，逗号分隔 |
 | `GROUP_ALLOWLIST` / `GROUP_BLACKLIST` | 空 | 群准入。空名单 = 允许所有被拉进的群 |
