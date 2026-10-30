@@ -13,8 +13,19 @@
 #
 # priority 越小越先尝试；某个 Provider 连续失败 3 次会进入冷却期。
 
-providers: []
-# 示例（把下面的 providers: [] 替换掉）：
+providers:
+  # `model` 是端点 /v1/models 实际列出的 id（`deepseek-flash`，名字是 DeepSeek-V4.1-Flash）。
+  # 写 `deepseek-chat` 目前也能通，但那是服务端做的别名，没写进文档——不要依赖它。
+  - id: deepseek
+    kind: openai_compat
+    label: DeepSeek
+    base_url: https://api.deepseek.com/v1
+    api_key: env:DEEPSEEK_API_KEY
+    model: deepseek-flash
+    vision_model: deepseek-flash
+    priority: 10
+
+# 更多示例：
 #
 # providers:
 #   - id: deepseek

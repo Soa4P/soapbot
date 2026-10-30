@@ -158,10 +158,20 @@ async def _start_plugins_only() -> None:
 async def _start_runtime() -> None:
     global _RUNTIME, _SCHEDULER
 
-    from soapbot.core.builder import build_memory_stack, build_runtime
+    from soapbot.core.builder import (
+        build_memory_stack,
+        build_runtime,
+        load_dotenv_if_present,
+    )
     from soapbot.core.config_files import build_router, load_providers
     from soapbot.core.scheduler import RuntimeScheduler
     from soapbot.memory.db import get_database
+
+    # Before any config is parsed: `api_key: env:NAME` reads os.environ, and in a
+    # container the file holding those variables is on the data volume, not next to the
+    # source tree. Loading it later would be loading it after the value was already
+    # needed.
+    load_dotenv_if_present()
 
     provider_configs = load_providers(settings.providers_file)
     router = build_router(provider_configs)
