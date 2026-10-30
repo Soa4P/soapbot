@@ -37,7 +37,7 @@ from typing import NoReturn
 MIN_PYTHON = (3, 12)
 DEFAULT_PORT = 6185
 DEFAULT_HOST = "127.0.0.1"
-UNIT_NAME = "soapbot"
+UNIT_MARKER = "# Managed by soapbot bootstrap.py — this installer rewrites it, nothing else does"
 WINDOWS_TASK = "soapbot-panel"
 
 # Written into .env so nothing downstream re-derives them. Relative paths are the trap:
@@ -233,8 +233,16 @@ def start_background(root: Path, python: Path, log: Path) -> None:
     subprocess.Popen([str(python), "-m", "soapbot.cli", "start"], **popen_kwargs)  # type: ignore[arg-type]
 
 
-def install_service(root: Path, python: Path, env_path: Path, autostart: bool) -> str:
-    """Hand supervision to the platform's own mechanism. Returns a human sentence."""
+def install_service(
+    root: Path, python: Path, env_path: Path, autostart: bool, unit: str
+) -> str:
+    """Hand supervision to the platform's own mechanism. Returns a human sentence.
+
+    Refusing to overwrite an existing unit is not politeness: a real host can already have
+    one under the same obvious name from an earlier deployment, and replacing it silently
+    would point somebody's service at a new directory while their data stayed behind. A
+    unit that does not carry our marker is somebody else's file.
+    """
     say("6/6", "handing the panel to the platform supervisor")
 
     if os.name == "nt":
@@ -250,7 +258,7 @@ def install_service(root: Path, python: Path, env_path: Path, autostart: bool) -
                 "/Create",
                 "/F",
                 "/TN",
-                WINDOWS_TASK,
+                unit,
                 "/SC",
                 "ONLOGON",
                 "/TR",
@@ -261,16 +269,25 @@ def install_service(root: Path, python: Path, env_path: Path, autostart: bool) -
             text=True,
         )
         if created.returncode == 0:
-            subprocess.run(
-                ["schtasks", "/Run", "/TN", WINDOWS_TASK], capture_output=True, text=True
-            )
-            return f"Windows: scheduled task '{WINDOWS_TASK}' runs at logon; started now."
+            subprocess.run(["schtasks", "/Run", "/TN", unit], capture_output=True, text=True)
+            return f"Windows: scheduled task '{unit}' runs at logon; started now."
         detail = (created.stderr or created.stdout or "").strip().splitlines()[-3:]
         return "Windows: could not register the logon task:\n      " + "\n      ".join(detail)
 
     if which("systemctl"):
-        unit = f"/etc/systemd/system/{UNIT_NAME}.service"
-        contents = f"""[Unit]
+        existing = Path(f"/etc/systemd/system/{unit}.service")
+        if (
+            existing.exists()
+            and UNIT_MARKER not in existing.read_text(encoding="utf-8", errors="replace")
+        ):
+            return (
+                f"Linux: {existing} already exists and was not written by this installer, "
+                "so it was left alone. Use --unit <name> for a second instance, or move that "
+                "file aside if it belongs to an old deployment you are replacing."
+            )
+        unit_path = existing
+        contents = f"""{UNIT_MARKER}
+[Unit]
 Description=soapbot panel
 After=network-online.target
 Wants=network-online.target
@@ -288,7 +305,7 @@ RestartSec=5
 WantedBy=multi-user.target
 """
         wrote = subprocess.run(
-            ["tee", unit], input=contents, capture_output=True, text=True
+            ["tee", str(unit_path)], input=contents, capture_output=True, text=True
         )
         enabled = True
         if wrote.returncode != 0:
@@ -296,21 +313,21 @@ WantedBy=multi-user.target
             # logout only with lingering enabled, which is exactly what we then say.
             user_unit = Path.home() / ".config" / "systemd" / "user"
             user_unit.mkdir(parents=True, exist_ok=True)
-            (user_unit / f"{UNIT_NAME}.service").write_text(contents, encoding="utf-8")
+            (user_unit / f"{unit}.service").write_text(contents, encoding="utf-8")
             subprocess.run(
                 ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
             )
             enabled = (
                 subprocess.run(
-                    ["systemctl", "--user", "enable", "--now", UNIT_NAME],
+                    ["systemctl", "--user", "enable", "--now", unit],
                     capture_output=True,
                     text=True,
                 ).returncode
                 == 0
             )
             return (
-                f"Linux: user unit written to {user_unit}/{UNIT_NAME}.service"
-                + ("" if enabled else " — start it with: systemctl --user start soapbot")
+                f"Linux: user unit written to {user_unit}/{unit}.service"
+                + ("" if enabled else f" — start it with: systemctl --user start {unit}")
                 + "\n      Note: a user unit stops when you log out unless lingering is on: "
                 "loginctl enable-linger $USER"
             )
@@ -318,12 +335,12 @@ WantedBy=multi-user.target
             ["systemctl", "daemon-reload"], capture_output=True, text=True
         )
         result = subprocess.run(
-            ["systemctl", "enable", "--now", UNIT_NAME], capture_output=True, text=True
+            ["systemctl", "enable", "--now", unit], capture_output=True, text=True
         )
         if result.returncode != 0:
             detail = (result.stderr or "").strip().splitlines()[-3:]
             return "Linux: unit wrote but would not start:\n      " + "\n      ".join(detail)
-        return f"Linux: systemd unit {UNIT_NAME}.service enabled and running."
+        return f"Linux: systemd unit {unit}.service enabled and running."
 
     return (
         "Linux: no systemd here. Start it with "
@@ -357,6 +374,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-start", action="store_true", help="do not launch it now")
     parser.add_argument("--check", action="store_true", help="audit an install instead")
     parser.add_argument(
+        "--unit",
+        default="soapbot",
+        metavar="NAME",
+        help="service / task name to register (default soapbot; pick another for a second instance)",
+    )
+    parser.add_argument(
         "--extra",
         action="append",
         default=[],
@@ -381,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     supervisor = (
         "Supervisor registration skipped (--no-service)."
         if args.no_service
-        else install_service(root, python, env_path, args.autostart)
+        else install_service(root, python, env_path, args.autostart, args.unit)
     )
 
     if not args.no_start:
