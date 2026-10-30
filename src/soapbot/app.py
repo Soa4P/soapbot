@@ -164,8 +164,14 @@ async def _start_runtime() -> None:
         load_dotenv_if_present,
     )
     from soapbot.core.config_files import build_router, load_providers
+    from soapbot.core.config_seed import seed_config_dir
     from soapbot.core.scheduler import RuntimeScheduler
     from soapbot.memory.db import get_database
+
+    # The runtime config directory starts empty on a fresh volume; the shipped files are
+    # a template. Seeding before parsing is what makes the first start behave exactly
+    # like a configured one -- and what lets the panel save afterwards.
+    seed_config_dir(settings.config_dir, settings.config_template_dir)
 
     # Before any config is parsed: `api_key: env:NAME` reads os.environ, and in a
     # container the file holding those variables is on the data volume, not next to the

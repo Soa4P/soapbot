@@ -76,13 +76,21 @@ class Settings(BaseSettings):
     db_url: str = ""
     """Defaults to sqlite+aiosqlite:///{data_dir}/soapbot.db when empty."""
 
-    config_dir: Path = PROJECT_ROOT / "config"
-    """Where provider/adapter/persona files live.
+    config_dir: Path = DEFAULT_DATA_DIR / "config"
+    """Where the *runtime* provider/adapter/mcp files live. Writable.
 
-    Separate from ``data_dir`` on purpose: ``data/`` is the writable volume, and
-    configuration that the service can rewrite is configuration a compromised plugin
-    can rewrite. Container deployments mount this read-only.
+    The settings page writes here, so it has to be writable. That is why it sits on the
+    data volume rather than in the source tree: a rewritten ``providers.yaml`` in the
+    image would be lost on the next container, and a read-only mount makes the panel's
+    editor decorative — it can render a form and never save it.
+
+    The shipped defaults live in :attr:`config_template_dir` and are copied here once,
+    on first start. Copies, not symlinks: a container rebuild must not silently change
+    the meaning of a file an operator has since edited.
     """
+
+    config_template_dir: Path = PROJECT_ROOT / "config"
+    """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 
     # ---- runtime ----
     enable_runtime: bool = True
