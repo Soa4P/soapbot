@@ -12,6 +12,42 @@
 
 ### 新增
 
+- **09 页流式观察**。`trace.chunks` 与 `trace.stream` 从第一天就写进了环形缓冲，前端
+  一个字段都没读——「有数据」和「看得见」之间隔着一次渲染。现在详情区有三段耗时阶梯
+  （首 token / 首句送达 / 整条回复，共用同一刻度，所以「首句比整条短多少」是几何可见的）、
+  实际发出的分句序列、中断与额度截断角标。
+  **顺手修掉一个谎**：`MessageTrace` 在 TypeScript 里声明了 `extras`，而 `to_dict` 从不
+  序列化它。第一版用 `extras.send_ok` 判断「回发环节是否跑过」，页面永远渲染不出区块——
+  改成读 `stages`，并把这个字段从类型里删掉。
+- **面板内编辑 MCP 服务器**（`/api/config/mcp` 的 read / diff / apply）。
+  以前只能看状态和重连，增删要 SSH 上去改 `config/mcp.yaml`。三个决定值得记：
+  ① **OWNER 权限**，高于 providers 的 ADMIN——新增一台服务器等于开放一条子进程执行通道，
+  并把它的工具交给模型调用，与改一个 base_url 不是一个量级；
+  ② **`env` 只写不读**，接口只回键名，提交时不带 `env` 就保留磁盘原值——`providers.yaml`
+  里那个「把 `***` 存回真实密钥」的坑在这里由结构排除，而不是靠记得检查掩码；
+  ③ **diff 用指纹而不是 `***`**：扁平占位符会让「换了 token」渲染成「没有改动」，操作者
+  会对着一张空 diff 点确认。改用带进程内盐的 `redacted:xxxxxxxx`，变了看得见，值读不出来。
+  写入后热重载（`McpManager.reload` 原地更新，不换对象——工具注册表持有的是这个实例），
+  并逐个 server 报告「N 个工具」或「启动失败·原因」。
+- **上游连通性自检**（`provider.upstream`）与 `doctor --probe`。
+  `providers: []` 以前不产生任何 finding，`doctor` 对着一个答不出任何消息的机器人打印
+  PASS。现在空配置是 `[warn]`（MEDIUM，不拉红门禁——只跑面板的机器是合法部署），
+  坏 YAML 是 `[fail]`，指向本机或明文 http 会单独点名。
+  `--probe` 是可选网络探测，**不发 API Key**：打 `/models`，把 401/403 当作「服务器回答了」。
+- **验证矩阵** `docs/verification-matrix.md`：把「有实现 / 有测试 / 真能用」分开写，
+  结论只有「自动+实测 / 仅自动 / 未验证」三种，并写明容器、真实 STT、真实云端 Provider
+  各自的缺口。
+- **看板契约测试** `tests/test_progress_board.py`。`docs/progress/README.md` 里写了四条
+  规则（状态枚举、blocked 必须写原因、current 指向真实任务、updated_at 决定可信度），
+  此前没有一条被执行——看板因此停在 10-28、`current` 还写着「首次提交待确认 git 身份」。
+  规则文件只有人读就会腐烂，这 8 条断言是让它不腐烂的部分。
+
+- 为了上面这条，两处既有代码被拆开而不是复制：
+  `core/config_write.build_patch` 原来把 providers 的合并与脱敏规则写死，现在注入
+  `apply_fn` / `validate_fn` / `diff_render` / `filename`，默认值保持 providers 行为，既有
+  调用点零改动；`mcp/config.py` 把校验从 `load_config` 拆成 `parse_servers`，让面板校验
+  候选文档与启动解析是**同一份代码**——两份解析器迟早会分叉，分叉的样子就是「面板保存
+  成功、进程起不来」。
 - **配置写入 API**（`POST /api/config/providers/{diff,apply}` + `GET /api/config/providers`）。
   三步而非一个 PUT：读取（密钥脱敏 + `base_hash`）→ diff（用**与启动同一套解析器**
   校验候选文档，**不写盘**）→ apply（校验 `base_hash` 未变、`approved_hash` 与确认内容

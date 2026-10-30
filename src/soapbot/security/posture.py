@@ -42,6 +42,10 @@ import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import yaml
 
 
 class Severity(StrEnum):
@@ -310,6 +314,163 @@ def check_bind_address(host: str | None) -> Finding:
     )
 
 
+def _is_local_endpoint(base_url: str) -> bool:
+    """True when the URL cannot be reached from outside this host."""
+    host = urlsplit(base_url).hostname or ""
+    return (
+        host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+        or host.startswith("127.")
+        or host.endswith(".local")
+    )
+
+
+def check_provider_config(providers_file: Path | None) -> Finding:
+    """Is this process actually wired to a model endpoint — and to a remote one?
+
+    Two questions that previously had no answer anywhere in the report. ``providers: []``
+    produced no finding at all, so ``doctor`` printed a clean sheet for a bot that could
+    not answer a single message; and a config pointed at a local mock looked identical to
+    one pointed at a real vendor. Both are the shape of defect this module exists for: a
+    requirement nobody can check is an aspiration.
+
+    An empty list is WARN, not FAIL, on purpose. A host that runs only the panel is a
+    legitimate deployment, and a red gate on a fresh install teaches people to ignore the
+    gate. High/critical is reserved for "the file is broken", which is always wrong.
+    """
+    check = "provider.upstream"
+    if providers_file is None:
+        return Finding(
+            check=check,
+            status=Status.UNKNOWN,
+            severity=Severity.MEDIUM,
+            detail="providers config path not supplied to the posture check",
+        )
+
+    path = Path(providers_file)
+    if not path.is_file():
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=f"{path.name} 不存在：进程不会连接任何上游模型端点",
+            remediation="添加一个 Provider，否则机器人收到消息也无法生成回复。",
+        )
+
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError) as exc:
+        return Finding(
+            check=check,
+            status=Status.FAIL,
+            severity=Severity.HIGH,
+            detail=f"{path} 无法解析：{exc}",
+            remediation="修好 YAML 语法；启动时同样会因为这个错误拒绝加载。",
+        )
+
+    providers = document.get("providers") or [] if isinstance(document, dict) else []
+    if not isinstance(providers, list) or not providers:
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail="providers 为空：进程不连接任何上游模型端点",
+            remediation="在面板第 07 页或 config/providers.yaml 添加 Provider。",
+        )
+
+    local = [
+        str(item.get("id") or "?")
+        for item in providers
+        if isinstance(item, dict) and _is_local_endpoint(str(item.get("base_url") or ""))
+    ]
+    if local:
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=(
+                f"{len(local)}/{len(providers)} 个 Provider 指向本机端点 "
+                f"（{', '.join(local)}）：这不是真实云端"
+            ),
+            remediation="本地端点只用于开发验证；对外服务前请确认真实上游可达。",
+        )
+
+    insecure = [
+        str(item.get("id") or "?")
+        for item in providers
+        if isinstance(item, dict) and str(item.get("base_url") or "").startswith("http://")
+    ]
+    if insecure:
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=f"{', '.join(insecure)} 使用 http:// 明文传输，且携带 API Key",
+            remediation="改用 https:// —— 密钥会随每个请求发送。",
+        )
+
+    return Finding(
+        check=check,
+        status=Status.PASS,
+        severity=Severity.HIGH,
+        detail=f"已配置 {len(providers)} 个 Provider，均指向远端端点",
+    )
+
+
+async def probe_providers(
+    providers_file: Path | None,
+    *,
+    timeout: float = 5.0,
+) -> list[dict[str, Any]]:
+    """Ask each endpoint whether it answers at all. **Network I/O — opt-in only.**
+
+    Deliberately not part of :func:`run_posture_checks`: that report is used as a deploy
+    gate, and a gate that needs the internet fails for reasons that have nothing to do
+    with the deployment. ``doctor --probe`` exists for the moment someone actually wants
+    to know whether the cloud is reachable.
+
+    The probe never sends the API key. It calls ``/models`` and treats 401/403 as *proof
+    of life* — a server that rejects you is a server that answered, and staying
+    credential-free means a stolen debug log contains no secrets.
+    """
+    if providers_file is None or not Path(providers_file).is_file():
+        return []
+
+    import httpx
+
+    try:
+        document = yaml.safe_load(Path(providers_file).read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError):
+        return []
+    providers = document.get("providers") or [] if isinstance(document, dict) else []
+    if not isinstance(providers, list):
+        return []
+
+    out: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        for item in providers:
+            if not isinstance(item, dict):
+                continue
+            base_url = str(item.get("base_url") or "").rstrip("/")
+            if not base_url:
+                continue
+            entry: dict[str, Any] = {
+                "id": str(item.get("id") or "?"),
+                "base_url": base_url,
+                "local": _is_local_endpoint(base_url),
+                "reachable": False,
+                "status_code": None,
+                "error": "",
+            }
+            try:
+                response = await client.get(f"{base_url}/models")
+                entry["status_code"] = response.status_code
+                entry["reachable"] = response.status_code < 500
+            except Exception as exc:  # every failure is reported, none raised
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+            out.append(entry)
+    return out
+
+
 def check_container() -> Finding:
     """Report whether the process is containerised, because the deployment-layer
     mitigations in the docs (read-only rootfs, network policy, seccomp) only exist
@@ -451,6 +612,7 @@ def run_posture_checks(
     key_path: Path | None = None,
     data_dir: Path | None = None,
     bind_host: str | None = None,
+    providers_file: Path | None = None,
 ) -> PostureReport:
     """Run every check and return the report. Never raises: a failing check is a
     finding, not an exception, so one broken probe cannot hide the other nine."""
@@ -464,6 +626,7 @@ def run_posture_checks(
             detail="plugin manager not supplied to the posture check",
         ),
         check_secrets_in_env,
+        lambda: check_provider_config(providers_file),
         lambda: check_bind_address(bind_host),
         lambda: check_key_file_mode(key_path),
         lambda: check_plugin_dir_writable(plugin_dir),
