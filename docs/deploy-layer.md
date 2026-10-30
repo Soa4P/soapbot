@@ -394,17 +394,32 @@ tmpfs: [/tmp]
 §8.1 是手工跑的，每一步都要现拼 `docker compose exec`。现在固化进部署驱动器：
 
 ```bash
-# 13 项：healthy / 只绑回环 / 非 root / 只读根 / 健康端点 / 容器内回环读设置
+# 14 项：healthy / 只绑回环 / 非 root / 只读根 / 健康端点 / 容器内回环读设置
 #        / /data 可写 / 卷内关键文件 / tini / doctor PASS / 重启策略 / 磁盘 / 内存
+#        / Docker 开机自启
 python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥路径> --verify
 
 # 数据卷快照：打包 → 只留 3 份 → 证明归档能被 tar 列出
 python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥路径> --backup
 ```
 
-实跑结果（2026-10-30，同一台雨云主机）：**13 项全 PASS**，磁盘 17%、可用内存 3231 MB、
-重启策略 `unless-stopped`；备份产出 `soapbot-2026-10-30-121626.tgz`，`tar -tzf` 能列出
-`./soapbot.db`。
+实跑结果（2026-10-30，同一台雨云主机）：**14 项全 PASS**，磁盘 15%、可用内存 3247 MB、
+重启策略 `unless-stopped`、`docker`/`containerd` 均 `enabled`；备份产出
+`soapbot-2026-10-30-121626.tgz`，`tar -tzf` 能列出 `./soapbot.db`。
+
+第 14 项是补上的盲区：`restart: unless-stopped` 只管容器，不管 Docker 自己。若
+`docker.service` 没有 `enabled`，宿主重启后容器不会回来，而重启前这份报告全绿。
+
+备份也不再靠人记得跑，装了每日定时：
+
+```
+/etc/systemd/system/soapbot-backup.service   # oneshot，调用 /opt/soapbot/deploy/backup.sh
+/etc/systemd/system/soapbot-backup.timer     # OnCalendar=*-*-* 03:30, Persistent=true
+```
+
+脚本留在仓库里（`deploy/backup.sh`）而不是散落在 `/usr/local/bin`——它和被测代码同一个
+版本。保留 3 份，末尾 `tar -tzf` 自检；实测产出的两份归档各 2.9 KB，定时器下次触发
+`2026-10-31 03:34 UTC`。
 
 三个坑已经写进脚本，不再靠人记：
 
