@@ -550,6 +550,7 @@ export default {
   'adapters.col.token': '令牌',
   'adapters.col.self': '机器人 QQ',
   'adapters.add': '新增接入',
+  'adapters.empty': '还没有接入端。点「新增接入」开始。',
   'adapters.preview': '预览改动',
   'adapters.write': '写入',
   'adapters.loading': '载入中…',

@@ -533,6 +533,7 @@ export default {
   'adapters.col.token': 'Token',
   'adapters.col.self': 'Bot QQ',
   'adapters.add': 'Add adapter',
+  'adapters.empty': 'No adapter yet. Use "Add adapter" to start.',
   'adapters.preview': 'Preview changes',
   'adapters.write': 'Write',
   'adapters.loading': 'loading…',

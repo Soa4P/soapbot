@@ -122,7 +122,13 @@ onMounted(load)
     <h2>{{ t('adapters.title') }}</h2>
     <p class="muted">{{ t('adapters.hint') }}</p>
 
-    <table v-if="loaded">
+    <p v-if="!loaded" class="muted">
+      {{ busy ? t('adapters.loading') : t('adapters.notLoaded') }}
+    </p>
+
+    <!-- Always rendered once loaded, never gated on there being rows: a hidden table
+         plus an enabled "add" button is how a click can land nowhere and look broken. -->
+    <table>
       <thead>
         <tr>
           <th>{{ t('adapters.col.kind') }}</th>
@@ -134,21 +140,30 @@ onMounted(load)
       </thead>
       <tbody>
         <tr v-for="(draft, index) in drafts" :key="index">
-          <td><input v-model="draft.kind" placeholder="onebot" /></td>
-          <td><input v-model="draft.enabled" type="checkbox" /></td>
-          <td><input v-model="draft.ws_url" placeholder="ws://127.0.0.1:3000" /></td>
-          <td><input v-model="draft.token" /></td>
-          <td><input v-model="draft.self_id" /></td>
+          <td><input v-model="draft.kind" class="adapter-field" placeholder="onebot" /></td>
+          <td>
+            <input v-model="draft.enabled" type="checkbox" class="adapter-check" />
+          </td>
+          <td>
+            <input
+              v-model="draft.ws_url"
+              class="adapter-field"
+              placeholder="ws://127.0.0.1:3000"
+            />
+          </td>
+          <td><input v-model="draft.token" class="adapter-field" /></td>
+          <td><input v-model="draft.self_id" class="adapter-field" /></td>
+        </tr>
+        <tr v-if="loaded && !drafts.length">
+          <td colspan="5" class="muted">{{ t('adapters.empty') }}</td>
         </tr>
       </tbody>
     </table>
 
-    <p v-else class="muted">
-      {{ busy ? t('adapters.loading') : t('adapters.notLoaded') }}
-    </p>
-
     <div class="row">
-      <button class="btn" :disabled="busy" @click="drafts.push(blank())">
+      <!-- Disabled until the document is loaded: before that there is no base_hash to
+           diff against, so a row added here could never be written. -->
+      <button class="btn" :disabled="busy || !loaded" @click="drafts.push(blank())">
         {{ t('adapters.add') }}
       </button>
       <button class="btn lamp" :disabled="busy || !loaded" @click="preview">
@@ -163,3 +178,20 @@ onMounted(load)
     <pre v-if="diff" class="diff">{{ diff }}</pre>
   </section>
 </template>
+
+<style scoped>
+/* Inputs inside a table cell inherit the browser's default width, which made every row
+   ragged: the token column stretched while the checkbox cell collapsed. Fixed widths here
+   rather than in base.css, because this is the only table whose cells are all editable. */
+.adapter-field {
+  width: 100%;
+  min-width: 7rem;
+  box-sizing: border-box;
+}
+.adapter-check {
+  margin: 0;
+}
+td {
+  vertical-align: middle;
+}
+</style>
