@@ -112,7 +112,7 @@ def build_steps(run: Run) -> list[Step]:
             "取代码到目标 commit",
             f"mkdir -p {directory} && cd {directory} && "
             f"(git rev-parse --git-dir >/dev/null 2>&1 || git clone {repo} .) && "
-            f"git fetch --all --quiet && git checkout {commit} && git rev-parse --short HEAD",
+            f"git fetch --all --quiet && git checkout -q -f {commit} && git rev-parse --short HEAD",
             f"打印 {run.commit} 的前 7 位",
             "服务器无外网出口时 git clone 会超时：改为本地打包上传，而不是重试。",
         ),
@@ -294,6 +294,14 @@ PY""",
             "1 GB 的 mem_limit 之外还要给宿主留余量，否则构建镜像时会被 OOM 打断。",
             expect="mem ",
         ),
+        Step(
+            "Docker 开机自启",
+            pre + "systemctl is-enabled docker && systemctl is-enabled containerd",
+            "两行都是 enabled",
+            "compose 的 restart: unless-stopped 只管容器，不管 Docker 本身。"
+            "没 enabled 的话宿主重启后一切静默消失，而这份报告在重启前全是绿的。",
+            expect="enabled\nenabled",
+        ),
     ]
 
 
@@ -404,7 +412,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--key", default=None, help="path passed to ssh -i; never read here")
     parser.add_argument("--dir", dest="directory", default="/opt/soapbot")
     parser.add_argument("--repo", default="https://github.com/Soa4P/soapbot.git")
-    parser.add_argument("--commit", default="02ad519")
+    # A branch, not a SHA. Pinning a commit here means every fresh deploy silently
+    # reinstalls an old revision -- the default outlived the revision it named by five
+    # commits before anyone noticed.
+    parser.add_argument("--commit", default="origin/master")
     parser.add_argument(
         "--verify",
         action="store_true",
