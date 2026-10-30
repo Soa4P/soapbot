@@ -10,7 +10,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from soapbot.config import Settings
 from soapbot.core.config_seed import seed_config_dir
+
+
+def test_a_relative_config_dir_follows_the_data_dir(tmp_path: Path) -> None:
+    """The shipped template says `./config`, which a service resolves against its working
+    directory — i.e. the checkout, i.e. the template. Editing there is undone by the next
+    `git pull`, which is exactly what this redirect exists to prevent."""
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        config_dir=Path("config"),
+        config_template_dir=tmp_path / "config",
+    )
+    assert settings.config_dir == tmp_path / "data" / "config"
+
+
+def test_an_explicit_config_dir_is_left_alone(tmp_path: Path) -> None:
+    """Someone who mounted a config volume meant that path, not a guess about it."""
+    mounted = tmp_path / "mounted-config"
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        config_dir=mounted,
+        config_template_dir=tmp_path / "config",
+    )
+    assert settings.config_dir == mounted
 
 
 def test_copies_missing_files(tmp_path: Path) -> None:
