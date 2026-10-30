@@ -126,6 +126,12 @@ def check_file(path: Path) -> list[str]:
 
 
 def main() -> int:
+    # A Windows console is cp1252 and raises on the first Chinese character. Every
+    # check_*.py here reconfigures instead of ASCII-ifying the report; this one forgot,
+    # and the Windows job failed on its own output rather than on a defect.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     files = sorted(VIEWS.rglob("*.vue"))
     problems: list[str] = []
     for path in files:

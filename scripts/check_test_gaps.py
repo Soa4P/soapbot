@@ -143,6 +143,12 @@ def write_baseline(names: list[str]) -> None:
 
 
 def main(argv: list[str]) -> int:
+    # Same reason as every other check_*.py: cp1252 stdout would raise on the first
+    # Chinese character, and a gate that dies on its own output looks like a defect in
+    # whatever it was checking.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     strict = "--strict" in argv
     orphans = orphan_modules()
     totals = stale_totals()
