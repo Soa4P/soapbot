@@ -96,6 +96,15 @@
 
 ### 修复
 
+- **`SOAPBOT_ENV_FILE` 指定的 `.env` 从来没被读进 `os.environ`**。`load_dotenv_if_present`
+  按 `__file__` 推到源码树根的 `.env`（容器里是只读的 `/app/.env`），而且**这个函数一次都没被
+  调用过**。自定义键（如 `DEEPSEEK_API_KEY`）只存在于数据卷的 `/data/.env`，而 `api_key: env:NAME`
+  是从 `os.environ` 解析的——密钥放在文档说的那个位置，启动会直接报 `references unset
+  environment variable`，看起来像密钥文件坏了。现在按 `SOAPBOT_ENV_FILE` 解析，并在解析
+  provider 之前调用。
+- **`doctor --probe` 的 5 秒超时把能用的 Provider 判成不可达**。容器内实测：DNS 0.03 s、
+  到 `api.deepseek.com` 的 TCP **4.0 s**、TLS 与 401 再 1.3 s。5 秒预算一擦边就是
+  `ConnectTimeout`，会把人送去查防火墙，而真正的原因是路由距离。默认改为 15 秒。
 - **MCP 子进程关闭时打印 `Exception ignored in BaseSubprocessTransport.__del__`**。
   `close()` 只 terminate + wait，没有收掉管道，于是传输对象被回收时 CPython 打一段
   traceback——部署日志里看起来像崩溃，其实是正常关机。
