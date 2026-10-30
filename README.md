@@ -504,7 +504,12 @@ curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/install
 > → `/api/health` 报 ok → 面板 `index.html` 与 JS 资源均 200；`doctor` 以服务账号运行时
 > `privilege.uid` 为 ok（uid 996）。三个真机失败点都是这样被抓到并修掉的：
 > `python3` 存在但没有 `ensurepip`（Debian 把 `python3-venv` 拆出去了）、另一进程占用
-> `dpkg` 锁、以及 unit 缺省 `User=` 导致服务跑成 root。
+> `dpkg` 锁、unit 缺省 `User=` 导致服务跑成 root、以及**配置目录被解析到模板目录**
+> （模板里的 `SOAPBOT_CONFIG_DIR=./config` 是相对路径，systemd 的工作目录就是 checkout，
+> 于是面板改的是随仓库发布的模板，而安装器每次 `git pull` 会把它改回去；`data/config`
+> 甚至根本没被创建）。现在配置目录跟随数据目录，模板那行已改为注释说明原因；真机上验证过：
+> 面板保存落在 `data/config/providers.yaml`（可写卷），随仓库的 `config/providers.yaml` 一行未动，
+> 面板读回来就是刚写的那条。
 >
 > **仍未实测**：Docker 路径（本机无 `docker`）、非 Debian 系发行版、以及在已存数据的旧安装上升级。
 
