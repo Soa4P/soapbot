@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor.add_argument(
         "--host", default=None, help="bind address to check (defaults to settings)"
     )
+    p_doctor.add_argument(
+        "--probe",
+        action="store_true",
+        help="also send one request to each provider base_url (network I/O)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -169,6 +174,7 @@ def _run_doctor(args) -> int:
         key_path=key_path,
         data_dir=settings.data_dir,
         bind_host=args.host or settings.host,
+        providers_file=settings.providers_file,
     )
     if manager is not None and getattr(manager, "supervisor", None) is not None:
         # Nothing was loaded by this probe, so shut the supervisor down cleanly.
@@ -184,6 +190,17 @@ def _run_doctor(args) -> int:
             # which is why ``doctor`` printed a DeprecationWarning on 3.12+.
             asyncio.run(manager.supervisor.stop_all())
 
+    # Opt-in, because this is the only part of the report that needs the network: a
+    # deploy gate that fails when an upstream has a bad afternoon is a gate people
+    # disable. ``--probe`` is for the moment someone actually wants the answer.
+    probes: list[dict] = []
+    if getattr(args, "probe", False):
+        import asyncio as _asyncio
+
+        from soapbot.security.posture import probe_providers
+
+        probes = _asyncio.run(probe_providers(settings.providers_file))
+
     if args.json:
         print(
             json.dumps(
@@ -191,6 +208,7 @@ def _run_doctor(args) -> int:
                     "ok": report.ok,
                     "summary": report.summary(),
                     "findings": [f.to_dict() for f in report.findings],
+                    "probe": probes,
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -217,6 +235,18 @@ def _run_doctor(args) -> int:
         print(f"verdict: {verdict}")
         if not report.ok:
             print("critical/high issues must be fixed before exposing this service.")
+
+        if probes:
+            print()
+            print("upstream probe (no credentials sent):")
+            for item in probes:
+                mark = "[ok]  " if item.get("reachable") else "[FAIL]"
+                where = "local" if item.get("local") else "remote"
+                print(f"{mark} {item.get('id')}  ({where})  {item.get('base_url')}")
+                if item.get("status_code") is not None:
+                    print(f"        HTTP {item['status_code']}")
+                if item.get("error"):
+                    print(f"        {item['error']}")
 
     return 0 if (report.ok or not args.strict) else 2
 

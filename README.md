@@ -90,10 +90,15 @@ curl -X POST http://127.0.0.1:6185/api/auth/login \
 ```
 
 ```bash
-# 5. 部署前自检（会检查绑定地址、主密钥来源、文件权限、插件隔离模式等）
+# 5. 部署前自检（会检查绑定地址、主密钥来源、文件权限、插件隔离模式、上游端点配置等）
 python -m soapbot.cli doctor
 python -m soapbot.cli doctor --strict   # 高危项非零退出，可用于部署门禁
+python -m soapbot.cli doctor --probe    # 额外发一次请求问每个 base_url 活不活（需要网络）
 ```
+
+> `providers: []` 会显示成 `[warn] provider.upstream` 而不是一片安静：一个连不上任何模型
+> 端点的进程，`doctor` 以前会打印 PASS。`--probe` **故意不带 API Key**——它把 401/403 当作
+> 「服务器回答了」，这样调试日志里不会出现凭据。
 
 > 面板产物已随包发布，`git clone` 后**不需要** `npm build` 就能打开控制台。
 
@@ -573,8 +578,9 @@ class Plugin:
 | B 站元数据与观后感 | ✅（默认关） | L3 登录态未实现 |
 | 插件包安装 | ✅ | **上传 zip 即安装，不等于批准**——没有在线商店、没有搜索与评分。装完仍需 `approve` + `load` |
 | MCP 客户端 | ✅（默认关） | `config/mcp.yaml` 声明式接入，工具作为独立来源注入模型调用，按 server 的 `min_role` 逐个授权；`GET /api/mcp` 报告每个 server 的工具数与错误 |
+| MCP 面板编辑 | ✅ | 07 页可直接增删改：读取 → diff → 确认 → 写入，写入后热重载并逐 server 报告「N 个工具」或「启动失败·原因」。**仅 owner**——新增一台服务器等于开放一条子进程执行通道。`env` 只写不读：接口只回键名，diff 里显示 `redacted:` 指纹而不是值 |
 | 语音 | ✅（默认关） | 入站转写（多 Provider 故障转移）+ 出站 edge-tts（需 `.[voice]`）。没有厂商凭据时以明确失败降级，不伪造结果 |
-| 流式输出 | ✅（默认关） | `STREAM_REPLY=true` 且适配器声明 `PROGRESSIVE` 才生效——目前只有 OneBot v11 声明。工具调用轮次不流式 |
+| 流式输出 | ✅（默认关） | `STREAM_REPLY=true` 且适配器声明 `PROGRESSIVE` 才生效——目前只有 OneBot v11 声明。工具调用轮次不流式。09 页可观察：首 token / 首句送达 / 整条回复三段耗时 + 实际发出的分句 |
 | 多语言 | ✅ | 中文 / English，三条通道：机器人发到群里的话（`DEFAULT_LOCALE`，人格卡可逐群覆盖）、API `detail`（按 `Accept-Language`）、面板全 12 页含外壳与图表（按浏览器切换并持久化）。流水线阶段名与顺序约束由后端按请求语言输出，不在前端维护第二份文案。**日志与堆栈有意保持英文**：同一事件在不同语言下变成不同字符串，会让 `grep` 与告警规则静默失效。`tests/test_webui_i18n.py` 用「模板里不得残留中文」防止半翻译回归 |
 | 插件间互相调用 | ❌ | 设计如此：插件 A 不能借插件 B 提权 |
 

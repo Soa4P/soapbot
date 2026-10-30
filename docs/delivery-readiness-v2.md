@@ -193,13 +193,15 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | --- | --- | --- |
 | 群聊对话 / 人格 / 记忆 / RAG | 已有 | 前序 wave |
 | 插件能力逐项授权 + 进程隔离 | 已有 | `test_plugin_isolation` 等 |
-| **流式（分句渐进发送）** | **本轮新增** | `tests/test_streaming_wiring.py`（13 项） |
-| **插件市场（上传/校验/安装）** | **本轮新增** | `tests/test_plugin_installer.py`（12 项）、`test_wave4_plugin_api.py` 上传 3 项 |
-| **MCP 客户端** | **本轮新增（后端）** | `tests/test_mcp_wiring.py`（10 项） |
+| **流式（分句渐进发送）** | **已完成** | `tests/test_streaming_wiring.py`（14 项，含「trace 是否带上面板要读的两个字段」）；浏览器用真实 stages 生成的数据实测 |
+| **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（12 项）、`test_wave4_plugin_api.py` 上传 3 项 |
+| **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（10 项）；真实 MCP 服务端仍未接 |
+| **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
 | **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（25 项） |
 | **多语言（对外文案 + 面板全 12 页）** | **已完成** | 后端 `tests/test_i18n.py`（22 项）、面板 `test_webui_i18n.py`（8 项）；浏览器逐页实测中英双向切换 |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
-| 面板流式观察（09 页分句展示） | **未实现** | `trace.chunks` 已写入，前端尚未渲染区块 |
+| **面板流式观察（09 页）** | **已完成** | 三段耗时阶梯（首 token / 首句送达 / 整条回复）、分句序列、中断与截断角标；中英双语浏览器实测 |
+| **上游连通性自检（doctor）** | **已完成** | `tests/test_posture.py`（41 项）；`doctor` 实跑输出 `[warn] provider.upstream`；`--probe` 为可选网络探测 |
 
 ---
 
@@ -221,11 +223,11 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
    Docker，静态检查能证明配置里写了 `read_only: true`，证明不了容器起得来。
 2. **真实语音链路实测**：转写槽位由 mock provider 验证过（含 URL 拒绝与降级），但**没有接**
    真实的 STT 厂商端点，`edge-tts` 也只验证了「依赖缺失时明确报错」这一条路径。
-3. **面板流式观察**：09 页目前只画阶段耗时，没有渲染分句序列与首字延迟。数据已经在
-   `trace.chunks` 里，缺的是前端区块。
-4. **面板内编辑 MCP 服务器**：现在只能看见状态并重连，增删仍要手改 `config/mcp.yaml`。
-   做成表单要走「读取 → diff → 确认 → 写入」那一套（对照 providers 的既有范式）。
-5. **第二个迁移版本**：迁移器已就位并被测试覆盖，但 `MIGRATIONS` 是空的。下一次 schema
+3. **真实云端 Provider 未接**：`config/providers.yaml` 是 `providers: []`，进程没有连接任何
+   上游模型端点。流式链路是用本地 fake provider 打通的（见
+   [`verification-matrix.md`](verification-matrix.md)），**不是真实云端**。拿到主机地址与凭据后，
+   `doctor --probe` 可以直接回答「通不通」。
+4. **第二个迁移版本**：迁移器已就位并被测试覆盖，但 `MIGRATIONS` 是空的。下一次 schema
    变更才真正考验它。
 
 ---
