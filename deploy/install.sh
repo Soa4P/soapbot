@@ -20,6 +20,29 @@ maybe_sudo() {
   if [[ "$(id -u)" -eq 0 ]]; then "$@"; else sudo "$@"; fi
 }
 
+die() {
+  printf '\n%s\n' "$*" >&2
+  exit 1
+}
+
+wait_for_apt() {
+  # A fresh VPS very often has unattended-upgrades mid-run. Charging into it yields
+  # "Could not get lock /var/lib/dpkg/lock-frontend", which turns a 30-second wait into a
+  # failure that reads like this project's fault. Found on a real host: <1 min after boot.
+  local waited=0
+  while ! flock -n /var/lib/dpkg/lock-frontend true 2>/dev/null; do
+    if [[ $waited -ge 180 ]]; then
+      die "another apt process still holds the package lock; let it finish and re-run"
+    fi
+    [[ $waited -eq 0 ]] && printf '      waiting for the package lock'
+    sleep 5
+    waited=$((waited + 5))
+    printf '.'
+  done
+  [[ $waited -gt 0 ]] && printf ' done\n'
+  return 0
+}
+
 have_python() {
   command -v python3 >/dev/null 2>&1 || command -v python3.12 >/dev/null 2>&1
 }
@@ -43,6 +66,7 @@ PY
 
 if ! usable_python; then
   export DEBIAN_FRONTEND=noninteractive
+  wait_for_apt
   maybe_sudo apt-get update -qq
   maybe_sudo apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates
 fi
