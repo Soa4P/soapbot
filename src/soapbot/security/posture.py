@@ -443,10 +443,16 @@ def check_provider_config(providers_file: Path | None) -> Finding:
 async def probe_providers(
     providers_file: Path | None,
     *,
-    timeout: float = 5.0,
+    timeout: float = 15.0,
     client_factory: Callable[..., Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Ask each endpoint whether it answers at all. **Network I/O — opt-in only.**
+
+    The timeout is generous on purpose. Measured on a real deployment: DNS 0.03 s, TCP
+    to `api.deepseek.com` **4.0 s**, TLS and 401 another 1.3 s — so the old 5 s default
+    reported a provider that works as `ConnectTimeout`. A probe that calls a slow link
+    "unreachable" is worse than no probe, because it sends someone to audit a firewall
+    over what is really a routing distance.
 
     Deliberately not part of :func:`run_posture_checks`: that report is used as a deploy
     gate, and a gate that needs the internet fails for reasons that have nothing to do
