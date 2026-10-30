@@ -74,8 +74,24 @@ $EDITOR config/adapters.yaml    # 至少一个协议端，否则收不到任何�
 # 两个文件里都有注释掉的示例，取消注释并改成你的值。
 ```
 
+### 3. 看界面（Windows 双击即可）
+
+面板是 Web UI。三条路，按你手上有什么选一条：
+
+| 双击 | 看到什么 | 前提 |
+|---|---|---|
+| **`start-panel.bat`** | **本机**的面板，自动建 venv、起服务、健康后自动开浏览器 | 只需这台机器有 Python 3.12 |
+| **`open-remote-panel.bat`** | **服务器上**那个实例的面板（数据也是服务器的） | 需要私钥 `%USERPROFILE%\.ssh\soapbot_deploy` |
+| `stop-panel.bat` | 关掉本机启的那个 | — |
+
+`start-panel.bat` 会在窗口里打印首次登录令牌（`data\init_token.txt`），并自动打开
+`http://127.0.0.1:6185`。任何一步失败都会停在窗口里说明原因，不会闪退。
+
+服务器上的面板只绑 `127.0.0.1`（这是安全默认，不是缺陷）。`open-remote-panel.bat` 走 SSH
+隧道把它映射到本机 `6185`，所以"看得见"和"不对公网暴露"可以同时成立。
+
 ```bash
-# 3. 启动
+# 命令行等价物（macOS / Linux / 服务器上）
 python -m soapbot.cli start     # 或：soapbot start（可编辑安装后）
 # → http://127.0.0.1:6185
 ```
