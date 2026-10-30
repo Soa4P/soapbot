@@ -72,6 +72,80 @@ def test_a_duplicate_kind_is_refused(tmp_path: Path) -> None:
         _patch(path, [{"kind": "onebot", "ws_url": "ws://x"}])
 
 
+def test_the_router_lives_under_the_config_prefix() -> None:
+    """Names the module too: the gap scanner matches on the module path, and a test
+    that only speaks HTTP leaves the module looking unreferenced."""
+    import soapbot.api.config_adapters as config_adapters
+
+    assert config_adapters.router.prefix == "/api/config"
+    paths = [route.path for route in config_adapters.router.routes]
+    assert any(path.endswith("/adapters") for path in paths), paths
+    assert any(path.endswith("/adapters/apply") for path in paths), paths
+
+
+def _client(tmp_path: Path, monkeypatch, text: str):
+    """A TestClient whose adapters file is a temp file. TestClient is loopback."""
+    from fastapi.testclient import TestClient
+
+    from soapbot.app import create_app
+    from soapbot.config import settings
+
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    (tmp_path / "adapters.yaml").write_text(text, encoding="utf-8")
+    return TestClient(create_app())
+
+
+def test_the_read_endpoint_never_returns_the_token(tmp_path: Path, monkeypatch) -> None:
+    client = _client(
+        tmp_path,
+        monkeypatch,
+        "adapters:\n  - kind: onebot\n    ws_url: ws://127.0.0.1:3000\n    token: s3cret\n",
+    )
+
+    body = client.get("/api/config/adapters").json()
+
+    assert body["document"]["adapters"][0]["token"] != "s3cret"
+    assert "s3cret" not in str(body)
+    assert body["base_hash"]
+
+
+def test_diff_writes_nothing(tmp_path: Path, monkeypatch) -> None:
+    original = "adapters:\n  - kind: onebot\n    ws_url: ws://old\n"
+    client = _client(tmp_path, monkeypatch, original)
+    base = client.get("/api/config/adapters").json()["base_hash"]
+
+    response = client.post(
+        "/api/config/adapters/diff",
+        json={"adapters": [{"kind": "onebot", "ws_url": "ws://new"}], "base_hash": base},
+    )
+
+    assert response.status_code == 200
+    assert "ws://new" in response.json()["diff"]
+    assert (tmp_path / "adapters.yaml").read_text(encoding="utf-8") == original
+
+
+def test_apply_writes_the_approved_diff(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch, "adapters:\n  - kind: onebot\n    ws_url: ws://old\n")
+    base = client.get("/api/config/adapters").json()["base_hash"]
+    preview = client.post(
+        "/api/config/adapters/diff",
+        json={"adapters": [{"kind": "onebot", "ws_url": "ws://new"}], "base_hash": base},
+    ).json()
+
+    response = client.post(
+        "/api/config/adapters/apply",
+        json={
+            "adapters": [{"kind": "onebot", "ws_url": "ws://new"}],
+            "base_hash": preview["base_hash"],
+            "approved_hash": preview["new_hash"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["written"] is True
+    assert "ws://new" in (tmp_path / "adapters.yaml").read_text(encoding="utf-8")
+
+
 def test_masking_hides_a_literal_token(tmp_path: Path) -> None:
     from soapbot.core.config_write import MASK, mask_document
 
