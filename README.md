@@ -484,8 +484,11 @@ python scripts/bootstrap.py --dir D:\soapbot --port 6185
 | 平台 | 谁来托管进程 | `--autostart` 做什么 |
 |---|---|---|
 | Windows | 双击 `start-panel.bat`；或用 detached 进程后台起 | 注册计划任务 `soapbot-panel`（登录时启动） |
-| Linux | systemd unit（有 root）/ 用户级 unit（无 root，会提示 `loginctl enable-linger`） | 等价于 `systemctl enable --now` |
+| Linux | systemd unit（有 root 时还会建 `soapbot` 系统账号并把服务跑成它，而不是 root）/ 用户级 unit（无 root，会提示 `loginctl enable-linger`） | 等价于 `systemctl enable --now` |
 | 无 systemd | 明确告知：用 supervisor / openrc，或直接前台跑 | 不假装成功 |
+
+已存在的同名 unit 若**不是**本安装器写的，一律不动（`--unit <名字>` 起第二份实例）——
+覆盖别人的 unit 会把它指向新目录，而数据还留在原处。
 
 完全没有 Linux 主机时也可一张命令：
 
@@ -495,6 +498,15 @@ curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/install
 
 它只负责弄到 Python ≥ 3.12（22.04 上自动换 deadsnakes 的 3.12）并 clone，然后调用上面
 **同一个** `bootstrap.py`——两处分叉的安装器正是第一版脚本 systemd-only 的成因。
+
+> **Ubuntu 上已经在真机跑过（不是只看代码）**：雨云 Ubuntu 24.04、root 登录、全新目录
+> `/opt/soapbot-test`、端口 6186：venv → `pip install -e .` → 配置 → `systemctl enable --now`
+> → `/api/health` 报 ok → 面板 `index.html` 与 JS 资源均 200；`doctor` 以服务账号运行时
+> `privilege.uid` 为 ok（uid 996）。三个真机失败点都是这样被抓到并修掉的：
+> `python3` 存在但没有 `ensurepip`（Debian 把 `python3-venv` 拆出去了）、另一进程占用
+> `dpkg` 锁、以及 unit 缺省 `User=` 导致服务跑成 root。
+>
+> **仍未实测**：Docker 路径（本机无 `docker`）、非 Debian 系发行版、以及在已存数据的旧安装上升级。
 
 > **首次运行没有 Provider 是刻意的**：模板 `config/providers.yaml` 是空的。一个引用了未设置环境变量的
 > 模板，会让每一次全新安装都以 `references unset environment variable` 拒绝启动——什么都没配就已经看起来坏了。
