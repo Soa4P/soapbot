@@ -340,12 +340,16 @@ tmpfs: [/tmp]
 
 ---
 
-## 8. 容器验收清单（尚未执行，需在有 Docker 的机器上跑）
+## 8. 容器验收清单（已于 2026-10-30 在真机执行）
 
-**当前状态：静态审阅通过，未实测。** 本机没有 `docker` 命令（`docker --version` 报
-command not found），`scripts/check_deploy.py` 只能读文件做结构检查——那能证明
-`read_only: true` 这行存在，不能证明容器真的起得来。下面的每一条都需要一台装有 Docker
-的机器，按顺序执行，并把实际输出记下来。
+**当前状态：已在雨云 Ubuntu 24.04 主机实测，7 条自动化项通过，#6/#7 待人工执行。**
+
+跑这一遍的代价是发现两个真缺陷：`seccomp:default` 让容器**根本创建不出来**（Docker 把
+冒号后的值当成 compose 目录下的文件路径），`doctor` 在容器内把 `0.0.0.0` 判成 CRITICAL
+导致自检永远 FAIL。两者都已修复。前者正是静态检查不可能发现的——`check_deploy.py` 验证
+的是「这一行存在且写法像样」，而 Docker 的语义是「冒号后面是文件路径」。
+
+下面的每一条都需要一台装有 Docker 的机器，按顺序执行，并把实际输出记下来。
 
 前置：`deploy/daemon-mirror.md` 里的镜像加速必须先配好，否则 `build` 在第一条 `FROM`
 就超时（已实测直连 Docker Hub 不通）。
@@ -361,6 +365,25 @@ command not found），`scripts/check_deploy.py` 只能读文件做结构检查�
 | 7 | `docker compose restart soapbot` 后再看第 12 页 | 刚才的开关变成已生效值 | 写入成功了但读取路径不一致——`.env` 与进程读到的不是同一个文件 |
 | 8 | `docker compose down && docker compose up -d` | 面板数据、`/data/.env` 设置都还在 | 卷没生效，或数据写到了容器层 |
 | 9 | `docker compose exec soapbot sh -c 'cat /proc/1/comm'` | `tini` | `ENTRYPOINT` 被覆盖，插件子进程会成为孤儿 |
+
+### 8.1 实测记录（2026-10-30，雨云 Ubuntu 24.04 / 2 vCPU / 3.9 GB）
+
+| # | 结果 | 实际输出 |
+|---|---|---|
+| 1 构建 | **PASS** | `soapbot:hardened`，430 MB，约 75 秒 |
+| 2 启动 | **PASS** | `Up (healthy)`，端口 `127.0.0.1:6185->6185/tcp` |
+| 3 非 root | **PASS** | `uid=10001(app) gid=10001(app)` |
+| 4 只读根 | **PASS** | `touch: cannot touch '/app/x': Read-only file system` |
+| 5 健康端点 | **PASS** | `{"status":"ok","version":"0.1.0","uptime_seconds":32.967}` |
+| 6 设置页写入 | **待人工** | 需要消费一次性 bootstrap token；那是运维的首次登录，测试把它用掉等于把人锁在门外 |
+| 7 重启后读取 | **待人工** | 随 #6 |
+| 8 卷持久化 | **PASS** | `down` + `up` 后 `/data/secret.key` md5 不变（`64406e29…`），`soapbot.db`、`jwt.key`、`plugins/` 均在 |
+| 9 init | **PASS** | `tini` |
+| doctor | **PASS** | `verdict: PASS`；`provider.upstream`（无上游）与 `fs.plugin_dir`（插件目录可写）两条 medium 警告符合预期 |
+
+主机环境：Linux 6.8.0-49 / Docker 29.1.3 / Compose 2.40.3；Docker Hub 直连可用，**未**配置镜像加速
+（`daemon-mirror.md` 的前提在这台机器上不成立：`curl -sI https://registry-1.docker.io/v2/` 返回 401
+而不是超时）。
 
 第 6 步是这一轮新增的：只读根文件系统与「设置页可写」在静态层面是矛盾的，`check_deploy.py`
 现在会检查 `SOAPBOT_ENV_FILE` 是否落在可写挂载内，但**只有真实的 `curl`/浏览器点击**才能
