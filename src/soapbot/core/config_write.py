@@ -35,6 +35,7 @@ results, so the same code is used by the endpoint and by the tests without an ap
 
 from __future__ import annotations
 
+import copy
 import difflib
 import hashlib
 import logging
@@ -322,6 +323,86 @@ def validate_providers(document: dict[str, Any]) -> list[str]:
     # provider whose *id* survives but whose kind would fail to construct. That needs
     # the registry, so it is left to a dry-run at the call site rather than duplicated
     # here.
+    return problems
+
+
+def adapter_index(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Adapters keyed by ``kind``, in file order.
+
+    ``kind`` is the identity here, not ``id``: the runtime registers one adapter per
+    kind, so two entries with the same kind silently collapse into one at startup. That
+    is the rule `load_adapters` enforces by raising, and it is why the editor's primary
+    key is the kind rather than a free-form name.
+    """
+    entries = document.get("adapters") or []
+    if not isinstance(entries, list):
+        return {}
+    return {
+        str(item.get("kind")): item
+        for item in entries
+        if isinstance(item, dict) and item.get("kind")
+    }
+
+
+def apply_adapter_patch(
+    document: dict[str, Any], patch: list[dict[str, Any]]
+) -> tuple[dict[str, Any], list[str]]:
+    """Merge adapter entries by ``kind``. Unknown options are kept, not dropped.
+
+    Adapter options are a free-form bag (``ws_url``, ``token``, ``self_id`` ...), so this
+    cannot validate field names the way the provider patch does. What it can enforce is
+    the one rule that breaks startup: two entries with the same kind.
+    """
+    result = copy.deepcopy(document)
+    entries = result.get("adapters")
+    if not isinstance(entries, list):
+        entries = []
+        result["adapters"] = entries
+
+    by_kind = adapter_index(result)
+    changed: list[str] = []
+    for incoming in patch:
+        kind = str(incoming.get("kind") or "").strip()
+        if not kind:
+            raise ConfigError("adapter entry requires 'kind'")
+        current = by_kind.get(kind)
+        if current is None:
+            fresh = {key: value for key, value in incoming.items() if value is not None}
+            fresh["kind"] = kind
+            entries.append(fresh)
+            by_kind[kind] = fresh
+            changed.append(kind)
+            continue
+        for key, value in incoming.items():
+            if key == "kind" or value is None:
+                continue
+            if current.get(key) != value:
+                current[key] = value
+                changed.append(f"{kind}.{key}")
+    return result, changed
+
+
+def validate_adapters(document: dict[str, Any]) -> list[str]:
+    """The subset of `load_adapters` that can be checked without a live connection."""
+    entries = document.get("adapters")
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        return ["adapters 必须是列表"]
+
+    problems: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(entries):
+        if not isinstance(item, dict):
+            problems.append(f"adapters[{index}] 必须是映射")
+            continue
+        kind = str(item.get("kind") or "").strip()
+        if not kind:
+            problems.append(f"adapters[{index}] 缺少 kind")
+            continue
+        if kind in seen:
+            problems.append(f"重复的 adapter kind：{kind}（运行时按 kind 唯一注册）")
+        seen.add(kind)
     return problems
 
 
