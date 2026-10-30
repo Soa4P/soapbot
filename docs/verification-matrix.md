@@ -46,7 +46,7 @@
 | 能力 | 结论 | 缺什么 |
 |---|---|---|
 | 真实 STT / TTS 厂商端点 | **未验证** | 无凭据；只验证过拒绝与降级路径 |
-| 真实云端 Model Provider | **未验证** | `config/providers.yaml` 是 `providers: []`。真实 MCP 服务端已接（见上表），它证明的是协议与进程，不证明任何模型厂商 |
+| 真实云端 Model Provider | **已验证（2026-10-30）** | `providers.yaml` 接 DeepSeek（`model: deepseek-flash`）；容器内真实调用返回「我是深度求索开发的AI助手。」；`doctor --probe` 报 `HTTP 401` 属预期（该探测**不发密钥**，只证明到达） |
 | 真机 QQ（OneBot / 官方） | **未验证** | mock 适配器验证；限频与被动回复窗口未测 |
 
 ---
