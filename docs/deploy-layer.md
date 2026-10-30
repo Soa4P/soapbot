@@ -410,6 +410,10 @@ python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥路径> --ba
 第 14 项是补上的盲区：`restart: unless-stopped` 只管容器，不管 Docker 自己。若
 `docker.service` 没有 `enabled`，宿主重启后容器不会回来，而重启前这份报告全绿。
 
+**重启实测（2026-10-30）**：`systemctl reboot` 之后主机约 50 秒恢复 SSH，容器在无人干预下
+自己回到 `Up (healthy)`，健康端点返回 ok，备份定时器重新挂上 `03:30 UTC`，再跑 `--verify`
+仍是 14/14。这条比"`is-enabled` 显示 enabled"有力：前者是配置，后者是结果。
+
 备份也不再靠人记得跑，装了每日定时：
 
 ```
