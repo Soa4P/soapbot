@@ -34,7 +34,7 @@
 | 真实 MCP 服务端（第三方 filesystem server） | `mcp/client.py`、`core/builder.py` | `tests/test_mcp_live.py`（opt-in：`SOAPBOT_LIVE_MCP=1`）、`test_mcp_wiring.py`（15 项） | 07 页写入 `npx -y @modelcontextprotocol/server-filesystem <dir>` → 热加载 → 14 个工具；`tools/call` 读回文件内容 | **自动 + 实测** |
 | MCP 握手协商与失败区分 | `mcp/client.py` | `test_mcp_wiring.py`（服务端回旧版本时采纳其版本；握手期崩溃的错误带 stderr 与退出码） | 真实服务端返回 `2025-06-18`，客户端采纳而非假定自己的 | **自动 + 实测** |
 | 三家 Provider 的报文映射 | `providers/anthropic.py`、`gemini.py`、`ollama.py` | `tests/test_providers_mapping.py`（7 项：system 提升、data URL 转换、token 字段名、`done` 终止、角色重命名、429→`ProviderError`） | — | **仅自动** |
-| 可访问性静态规则 | `scripts/check_a11y.py` | 22 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 走查 12 页发现两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space | **自动 + 实测** |
+| 可访问性静态规则 | `scripts/check_a11y.py` | 22 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 规则查出两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space。**但这两行的键盘路径只由模板断言覆盖**：本机没有已配置的人格与会话，表格为空，浏览器里按不到那一行 | **仅自动**（键盘实测缺数据） |
 | 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（16 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；三家 provider 补测后降为 16 | **自动 + 实测** |
 | 上游连通性静态检查 | `security/posture.py` | `tests/test_posture.py`（7 项：空配置、缺文件、坏 YAML、本机端点、明文 http、远端、进报告） | `python -m soapbot.cli doctor` 实跑，输出 `[warn] provider.upstream (medium)` | **自动 + 实测** |
 | `doctor --probe` 网络探测 | `security/posture.py`、`cli.py` | `test_posture.py`：401 ⇒ 可达、503 ⇒ 不可达（mock transport，规则本身）；另有本地回环服务端的 Socket 测试 | 只对本地回环跑过。**本机回环被拦截返回 502，那条 Socket 测试在此环境会 skip**，规则由 mock 版覆盖 | **仅自动**（真实云端探测**未验证**） |
