@@ -96,7 +96,11 @@ services:
       # make `ports:` below connect to nothing. The isolation comes from publishing on
       # the *host* loopback (127.0.0.1:6185), which is the line below `ports:`.
       SOAPBOT_HOST: 0.0.0.0
-      SOAPBOT_CONFIG_DIR: /app/config
+      # Writable, on the volume: the panel edits these files, and a read-only mount
+      # turns its editor into a form that can never save. The shipped defaults stay
+      # read-only at /app/config and are copied here on first start.
+      SOAPBOT_CONFIG_DIR: /data/config
+      SOAPBOT_CONFIG_TEMPLATE_DIR: /app/config
       # The language the bot speaks *in a group* (refusals, voice labels). The panel is
       # not set here: it follows each browser and is switched on page 12, because two
       # operators reading the same container may want different languages.
