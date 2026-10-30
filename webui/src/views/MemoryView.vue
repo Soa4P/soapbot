@@ -164,12 +164,17 @@ function resetDraft(): void {
               </tr>
             </thead>
             <tbody>
+              <!-- Focusable and Enter/Space-operable for the same reason as the persona
+                   table: selecting a row is the only way into a session's history. -->
               <tr
                 v-for="row in rows"
                 :key="row.session_key"
                 style="cursor: pointer"
+                tabindex="0"
                 :style="selected === row.session_key ? 'background: var(--brand-soft)' : ''"
                 @click="openSession(row.session_key)"
+                @keydown.enter.prevent="openSession(row.session_key)"
+                @keydown.space.prevent="openSession(row.session_key)"
               >
                 <td class="key">{{ row.session_key }}</td>
                 <td class="num">{{ num(row.message_count) }}</td>

@@ -72,6 +72,14 @@ jobs:
         # and the local one becomes decorative.
         run: python scripts/check_contrast.py
 
+      - name: Accessibility (static rules)
+        run: python scripts/check_a11y.py
+
+      - name: Test gaps
+        # Two static rules: modules no test names, and a "N passed" in prose that
+        # disagrees with the board. Deliberately not coverage — see the script header.
+        run: python scripts/check_test_gaps.py --strict
+
       # mypy is deliberately *not* a gate here. The baseline is 42 errors across 17
       # files, and none of them are new: making the job fail would mean the first
       # push to this repository is red, which teaches everyone to ignore the badge.
