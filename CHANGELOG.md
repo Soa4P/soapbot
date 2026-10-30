@@ -12,6 +12,10 @@
 
 ### 新增
 
+- **Windows 双击启动器**：`start-panel.bat`（本地起面板并自动开浏览器）、`stop-panel.bat`、
+  `open-remote-panel.bat`（SSH 隧道看服务器上那个实例）。此前"看界面"只能靠手敲
+  `python -m soapbot.cli start` 再自己输网址，README 里也只有一行字——面板一直存在，但没有
+  任何可点的入口。
 - **真实 MCP 服务端接上了**（`tests/test_mcp_live.py`，opt-in：`SOAPBOT_LIVE_MCP=1`）。
   之前所有 MCP 结论都来自一个照着客户端写的假服务端，它能证明的只有「客户端和自己谈得拢」。
   现在接的是第三方的 `@modelcontextprotocol/server-filesystem`：14 个工具、`tools/call`
