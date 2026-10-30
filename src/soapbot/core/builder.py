@@ -431,7 +431,6 @@ def build_runtime(
     # MCP servers are configured, not discovered: nothing is started unless
     # config/mcp.yaml names it, and a rejected configuration degrades to "no external
     # tools" with an error in the log rather than stopping the bot.
-    mcp_manager = None
     mcp_servers = []
     try:
         from soapbot.mcp.config import load_config as load_mcp_config
@@ -440,12 +439,16 @@ def build_runtime(
     except Exception as exc:
         logger.error("mcp configuration rejected, continuing without it: %s", exc)
 
-    if mcp_servers:
-        from soapbot.mcp.client import McpManager
+    # Created even when the list is empty, because the panel writes into *this object*.
+    # Gating on a non-empty list meant the first server anyone added was the one case
+    # that could not hot-load: the manager did not exist, so the endpoint had nothing to
+    # reload and told the operator to restart — which is the chore the editor exists to
+    # remove.
+    from soapbot.mcp.client import McpManager
 
-        mcp_manager = McpManager(mcp_servers, role_rank=_mcp_role_rank)
-        if tool_registry is not None:
-            tool_registry.register_source(mcp_manager)
+    mcp_manager = McpManager(mcp_servers, role_rank=_mcp_role_rank)
+    if tool_registry is not None:
+        tool_registry.register_source(mcp_manager)
 
     pipeline = build_pipeline(
         personas=persona_store,
