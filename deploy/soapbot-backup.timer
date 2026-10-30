@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily snapshot of the soapbot data volume
+
+[Timer]
+# 03:30 local time, quiet hour for a single-operator box.
+OnCalendar=*-*-* 03:30:00
+# If the host was off at 03:30, run on next boot instead of skipping the day silently.
+Persistent=true
+# Spread across a few minutes so a fleet of these does not all start at once.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Snapshot the soapbot data volume
+Documentation=file:///opt/soapbot/docs/deploy-layer.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The script lives in the checkout so it is versioned with the code it backs up.
+ExecStart=/opt/soapbot/deploy/backup.sh
+# A backup that hangs must not block the next one.
+TimeoutStartSec=300
