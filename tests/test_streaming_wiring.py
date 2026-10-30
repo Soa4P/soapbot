@@ -251,6 +251,36 @@ async def test_stream_sends_one_message_per_sentence() -> None:
     assert [reply for _, reply in adapter.sent[1:]] == ["", ""]
 
 
+async def test_the_trace_carries_what_the_panel_shows() -> None:
+    """The 09 page reads `chunks` and `stream`, and both originate in these two stages.
+
+    Every link after this one is asserted separately (the snapshot in
+    ``test_pipeline_trace``, the wire format in the endpoint tests). What was missing was
+    the join: a rename in the model stage would leave the panel rendering an empty list
+    forever, and no single test would fail.
+    """
+    from soapbot.core.trace import TraceStore
+
+    adapter = _Recorder()
+    ctx = PipelineContext(event=_event(), adapter=adapter)
+    stage = ModelStage(
+        _engine(_TokenProvider(["你好。", "今天天气不错！"])), streaming=True, send_interval=0
+    )
+
+    await stage.run(ctx)
+    await ReplyStage().run(ctx)
+
+    store = TraceStore()
+    store.on_processed(ctx)
+    trace = store.recent()[0]
+
+    assert trace.chunks == ["你好。", "今天天气不错！"]
+    assert trace.stream["count"] == 2
+    assert trace.stream["first_token_ms"] is not None
+    assert trace.stream["first_send_ms"] is not None
+    assert trace.stream["interrupted"] is False
+
+
 async def test_reply_stage_does_not_resend_what_was_streamed() -> None:
     adapter = _Recorder()
     ctx = PipelineContext(event=_event(), adapter=adapter)
