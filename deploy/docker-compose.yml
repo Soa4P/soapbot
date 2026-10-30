@@ -26,10 +26,17 @@ services:
     # any setuid binary incidentally present in the image is a local root path.
     security_opt:
       - no-new-privileges:true
-      # seccomp default profile blocks ~44 dangerous syscalls (ptrace, mount,
+      # seccomp's built-in profile blocks ~44 dangerous syscalls (ptrace, mount,
       # bpf, ...). A plugin that tries to escape the interpreter usually needs one
       # of these, so this is the layer that turns "a Python bug" into "a crash".
-      - seccomp:default
+      #
+      # `seccomp=builtin`, not `seccomp:default`. Docker reads the value after the
+      # separator as a *file path* resolved next to this compose file, so
+      # `seccomp:default` fails container creation with
+      #   opening seccomp profile (default) failed: open .../deploy/default: no such file
+      # The built-in profile is applied anyway when the key is absent; naming it
+      # explicitly is what makes that visible in the file.
+      - seccomp=builtin
     # A writable root filesystem lets a compromised dependency drop a payload that
     # survives a container restart. The app writes only to /data and /tmp.
     read_only: true
