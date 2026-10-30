@@ -65,6 +65,18 @@ for line in sys.stdin:
 '''
 
 
+#: Dies during the handshake, the way a package that failed to download does: reads the
+#: one request, puts a line on stderr, exits.
+CRASHER = r'''
+import sys
+
+sys.stdin.readline()
+sys.stderr.write("npm error 404 Not Found - GET https://registry.npmjs.org/nope\n")
+sys.stderr.flush()
+sys.exit(9)
+'''
+
+
 def _script(tmp_path: Path) -> Path:
     path = tmp_path / "fake_server.py"
     path.write_text(SERVER, encoding="utf-8")
@@ -98,6 +110,10 @@ async def test_client_handshakes_lists_and_calls(tmp_path: Path) -> None:
     client = McpClient(_server(tmp_path))
     try:
         tools = await client.list_tools()
+        # The fake answers with an older version than we ask for, on purpose: taking the
+        # server's answer is the negotiation, and pinning our own would have made this
+        # line read "2025-06-18" while the server actually runs on something else.
+        assert client.protocol_version == "2024-11-05"
         assert [t.name for t in tools] == ["echo"]
         # Namespaced so one server cannot shadow another's tool.
         assert tools[0].qualified_name == "mcp__fake__echo"
@@ -112,6 +128,26 @@ async def test_missing_executable_is_a_clear_error(tmp_path: Path) -> None:
     client = McpClient(McpServer(name="x", command=("definitely-not-a-binary",), timeout=5))
     with pytest.raises(Exception, match="not found on PATH"):
         await client.list_tools()
+
+
+async def test_a_server_that_dies_in_the_handshake_says_so(tmp_path: Path) -> None:
+    """The two ways a real server fails must not read the same.
+
+    A package that never downloaded and a protocol we do not speak both surface as "the
+    pipe closed", and they need opposite fixes. So the message has to name which one
+    happened, and carry whatever the child managed to say — with ``stderr`` discarded
+    this used to be the only unfixable-looking error in the codebase.
+    """
+    script = tmp_path / "crasher.py"
+    script.write_text(CRASHER, encoding="utf-8")
+    client = McpClient(
+        McpServer(name="crasher", command=(sys.executable, str(script)), timeout=10)
+    )
+    with pytest.raises(Exception, match="exited during the handshake") as caught:
+        await client.list_tools()
+    message = str(caught.value)
+    assert "404 Not Found" in message
+    await client.close()
 
 
 # ------------------------------------------------------------- role filtering
@@ -140,6 +176,27 @@ async def test_registry_lists_mcp_tools_for_allowed_callers(tmp_path: Path) -> N
     try:
         await manager.ensure_tools()
         names = [t["name"] for t in registry.available_for(_principal(Role.MEMBER))]
+        assert names == ["mcp__fake__echo"]
+    finally:
+        await manager.close()
+
+
+async def test_the_first_server_added_shows_up_without_a_restart(tmp_path: Path) -> None:
+    """Empty -> one is the path every new install takes, and it used to need a restart.
+
+    The manager was created only when ``mcp.yaml`` already named a server, so the panel
+    had no object to reload into and could only answer "written, takes effect after
+    restart" — for the one edit the editor exists to make unnecessary.
+    """
+    manager = McpManager([], role_rank=_rank)
+    registry = PluginToolRegistry(PluginLoader(plugins_dir=tmp_path / "plugins"))
+    registry.register_source(manager)
+    try:
+        assert registry.available_for(_principal(Role.MEMBER)) == []
+
+        await manager.reload([_server(tmp_path)])
+
+        names = [tool["name"] for tool in registry.available_for(_principal(Role.MEMBER))]
         assert names == ["mcp__fake__echo"]
     finally:
         await manager.close()

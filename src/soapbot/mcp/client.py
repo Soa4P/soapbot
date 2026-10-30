@@ -33,7 +33,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_VERSION = "2024-11-05"
+#: The newest version this client speaks. The server answers with the version *it*
+#: supports and that answer wins, so sending our newest and accepting the reply is the
+#: negotiation the spec describes. Pinning one old version instead means the day a
+#: server drops it we fail a handshake we could have survived.
+PROTOCOL_VERSION = "2025-06-18"
+
+#: Versions whose wire format has been exercised against this client. An answer outside
+#: this set is accepted rather than refused — ``initialize``/``tools/list``/``tools/call``
+#: have not changed shape in any published version, and refusing would fail a server
+#: that works — but it is logged, because "we are guessing" is worth knowing.
+KNOWN_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 
 #: Tool names are namespaced so one server cannot shadow another's tool, and so a
 #: model-issued name can be routed without consulting a global registry.
@@ -74,6 +84,10 @@ class McpClient:
         self._next_id = 0
         self._lock = asyncio.Lock()
         self.last_error = ""
+        #: What the server answered to ``initialize``. Empty until a handshake succeeds.
+        self.protocol_version = ""
+        self._stderr_tail = b""
+        self._stderr_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------ lifecycle
     async def _ensure_started(self) -> None:
@@ -105,19 +119,24 @@ class McpClient:
                 *command[1:],
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                # Kept rather than silenced: when a start fails, the child's last words
+                # are usually the entire diagnosis ("404 Not Found" for a package that
+                # never downloaded). Nothing reads it unless something goes wrong.
+                stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
         except OSError as exc:
             raise McpError(f"server {self.server.name} failed to start: {exc}") from exc
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
 
         # Handshake inline rather than through _request: _request would try to start
         # the server first, which is the call we are already inside.
         self._next_id += 1
+        request_id = self._next_id
         await self._send(
             {
                 "jsonrpc": "2.0",
-                "id": self._next_id,
+                "id": request_id,
                 "method": "initialize",
                 "params": {
                     "protocolVersion": PROTOCOL_VERSION,
@@ -126,9 +145,14 @@ class McpClient:
                 },
             }
         )
-        await asyncio.wait_for(
-            self._await_response(self._next_id), timeout=self.server.timeout
-        )
+        try:
+            result = await asyncio.wait_for(
+                self._await_response(request_id), timeout=self.server.timeout
+            )
+        except McpError as exc:
+            await self._settle_stderr()
+            raise self._handshake_failure(exc) from exc
+        self._accept_protocol(result)
         await self._notify("notifications/initialized", {})
         # Cleared on success, not only set on failure. Without this a server that went
         # down and came back keeps reporting the old error, so "reconnect" appears to
@@ -136,15 +160,108 @@ class McpClient:
         self.last_error = ""
         logger.info("mcp server up name=%s pid=%s", self.server.name, self._proc.pid)
 
+    async def _drain_stderr(self) -> None:
+        """Keep the tail of what the child said, for error messages only.
+
+        Bounded at 2 KB: a server that logs every request must not grow this for the
+        life of the process, and the last screenful is what explains a failure anyway.
+        """
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            while True:
+                chunk = await proc.stderr.read(1024)
+                if not chunk:
+                    return
+                self._stderr_tail = (self._stderr_tail + chunk)[-2048:]
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # the pipe closing under us is not worth reporting
+            return
+
+    async def _settle_stderr(self) -> None:
+        """Give the stderr reader a moment to catch up before reporting a failure.
+
+        The child writes its last line and exits; the pipe closes one scheduler tick
+        later. Reading the tail without waiting would produce "it said nothing" for the
+        exact failure where what it said is the whole answer.
+        """
+        task = self._stderr_task
+        if task is None:
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+
+    def _handshake_failure(self, cause: McpError) -> McpError:
+        """Say which half broke: the server never came up, or it refused us.
+
+        On the wire both look like "the pipe closed", and they need opposite fixes — one
+        is a package that never downloaded, the other a protocol we do not speak. The
+        exit code and the child's stderr are the only things that tell them apart.
+        """
+        proc = self._proc
+        code = None if proc is None else proc.returncode
+        tail = self._stderr_tail.decode("utf-8", "replace").strip()
+        said = f"; stderr: {tail[-400:]}" if tail else ""
+        # EOF counts as death even when the watcher has not reaped the child yet: at
+        # that instant `returncode` is still None, and the honest reading of "the pipe
+        # closed" is that the process is gone, not that it argued with us.
+        if code is not None or "closed the connection" in str(cause):
+            where = f"exit code {code}" if code is not None else "the pipe closed"
+            return McpError(
+                f"server {self.server.name} exited during the handshake ({where}){said}"
+            )
+        return McpError(f"server {self.server.name} rejected the handshake: {cause}{said}")
+
+    def _accept_protocol(self, result: dict[str, Any]) -> None:
+        """Take the version the server answered with, not the one we asked for.
+
+        The spec has the server reply with a version *it* supports; the client decides
+        whether it can play along. It can — the three calls we make have not changed
+        shape in any published version — so an unknown answer is accepted and logged
+        rather than turned into a failed start. Refusing would take a working server
+        out of service on the strength of a string we do not recognise.
+        """
+        negotiated = str(result.get("protocolVersion") or "")
+        self.protocol_version = negotiated or PROTOCOL_VERSION
+        if negotiated and negotiated not in KNOWN_PROTOCOL_VERSIONS:
+            logger.warning(
+                "mcp server %s negotiated untested protocol %s (asked %s)",
+                self.server.name,
+                negotiated,
+                PROTOCOL_VERSION,
+            )
+        elif negotiated and negotiated != PROTOCOL_VERSION:
+            logger.info(
+                "mcp server %s negotiated protocol %s (asked %s)",
+                self.server.name,
+                negotiated,
+                PROTOCOL_VERSION,
+            )
+
     async def close(self) -> None:
         proc, self._proc = self._proc, None
-        if proc is None or proc.returncode is not None:
+        task, self._stderr_task = self._stderr_task, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        if proc is None:
             return
-        proc.terminate()
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
-        if proc.returncode is None:  # pragma: no cover - stubborn child
-            proc.kill()
+        if proc.returncode is None:
+            proc.terminate()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=3.0)
+            if proc.returncode is None:  # pragma: no cover - stubborn child
+                proc.kill()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
+        # Reap the pipes as well. Leaving them open makes CPython print "Exception
+        # ignored in BaseSubprocessTransport.__del__" once the transport is collected —
+        # a traceback on a clean shutdown, which reads like a crash in a deployment log.
+        with contextlib.suppress(Exception):
+            await proc.communicate()
 
     # -------------------------------------------------------------------- protocol
     async def _send(self, payload: dict[str, Any]) -> None:
