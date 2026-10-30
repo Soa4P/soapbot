@@ -55,6 +55,7 @@ from soapbot.api.admin import router as admin_router
 from soapbot.api.auth import configure_auth
 from soapbot.api.auth import router as auth_router
 from soapbot.api.bilibili import router as bilibili_router
+from soapbot.api.config_adapters import router as config_adapters_router
 from soapbot.api.config_write import router as config_write_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
@@ -439,6 +440,7 @@ def create_app() -> FastAPI:
     app.include_router(plugins_router)
     app.include_router(bilibili_router)
     app.include_router(config_write_router)
+    app.include_router(config_adapters_router)
     app.include_router(pipeline_router)
     app.include_router(settings_router)
 
