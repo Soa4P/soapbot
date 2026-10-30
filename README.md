@@ -218,7 +218,7 @@ soapbot/
 ├── webui/              # 前端源码（Vite + Vue 3 + TypeScript）
 ├── config/             # providers / adapters / personas（Provider 可经面板写入，需 diff 确认）
 ├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录（gitignore）
-├── deploy/             # Dockerfile 与 docker-compose
+├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
 └── tests/              # pytest（1086 项通过 / 9 项跳过）
@@ -465,6 +465,30 @@ make doctor         # 部署姿态检查
 > 把该文件里的下一个真实错误一并藏掉。降到 0 之后应当改为阻断。
 
 不用 `make` 也可以，见[快速开始](#快速开始)。
+
+### Linux 服务器（一条命令，不用 Docker）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/install.sh | sudo bash
+```
+
+一条命令做完：装系统依赖（Python < 3.12 时自动换成 3.12）→ clone 到 `/opt/soapbot`
+→ venv + `pip install -e .` → 复制 `.env` 并把数据目录、配置目录写成**绝对路径** →
+写一个 systemd unit → 轮询 `/api/health` → 打印面板地址、令牌获取方式和下一条该做的事。
+
+幂等：再跑一次就是升级（拉新代码、重装依赖、重启服务），不会建出第二份。
+面板仍绑 `127.0.0.1`，从自己电脑怎么看：
+
+```bash
+ssh -L 6185:127.0.0.1:6185 <user>@<服务器>     # 然后本机打开 http://127.0.0.1:6185
+```
+
+不用 systemd（只想前台跑）加 `--no-service`；换目录/systemd 时用 `--dir`。
+**这些全部在本机 Ubuntu 之外未经实测**：本机没有 Linux 主机，脚本只通过语法检查与逐段复核；
+首次在真实服务器上跑时请把输出整段发回来，它会指出第一个真实失败点。
+
+> Docker 路径仍然保留，但它是第二选择：Docker Hub 在很多网络里根本连不上（镜像构建第一步
+> 就失败），而上面这条命令只需要能访问 GitHub。
 
 ### Docker
 

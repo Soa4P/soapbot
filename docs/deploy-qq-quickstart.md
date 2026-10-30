@@ -21,7 +21,16 @@
 它会：找不到 `.venv` 就建一个 → 装依赖 → 起服务 → **等到能访问才自动打开浏览器**。
 窗口里会打印首次登录令牌（也存在 `data\init_token.txt`）。
 
-### Linux / 服务器
+### Linux / 服务器（一条命令）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/install.sh | sudo bash
+```
+
+装依赖 → clone 到 `/opt/soapbot` → venv → 复制 `.env` → 写 systemd unit → 起服务 →
+轮询到 `/api/health` 通过 → 打印面板地址和登录令牌的取法。重复执行等于升级（拉代码、重装、重启）。
+
+想手动装就照旧：
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
