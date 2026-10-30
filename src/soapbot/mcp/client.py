@@ -112,6 +112,14 @@ class McpClient:
             # cannot chain a second command.
             raise McpError(f"server {self.server.name}: {command[0]!r} not found on PATH")
 
+        # A new child means a new buffer. The tail describes *one* process, and reload()
+        # reuses this client when only the command changed — so the object can start
+        # twice, and without the reset the second failure quotes the first attempt's
+        # stderr. The old reader is stopped first: it can otherwise append one more
+        # chunk after the reset and reintroduce exactly the leak this prevents.
+        await self._stop_stderr()
+        self._stderr_tail = b""
+
         env = {**os.environ, **self.server.env}
         try:
             self._proc = await asyncio.create_subprocess_exec(
@@ -240,13 +248,18 @@ class McpClient:
                 PROTOCOL_VERSION,
             )
 
+    async def _stop_stderr(self) -> None:
+        """Stop the stderr reader. Safe to call when there is none."""
+        task, self._stderr_task = self._stderr_task, None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
     async def close(self) -> None:
         proc, self._proc = self._proc, None
-        task, self._stderr_task = self._stderr_task, None
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        await self._stop_stderr()
         if proc is None:
             return
         if proc.returncode is None:
