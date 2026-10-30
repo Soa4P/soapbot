@@ -104,6 +104,21 @@ def ensure_source(args: argparse.Namespace) -> Path:
     return target
 
 
+def _check_interpreter_can_venv() -> None:
+    """Debian ships ``python3`` without ``ensurepip``, so ``-m venv`` fails with a message
+    telling you to install a package — after the installer has already printed three
+    reassuring steps. Saying it first is the difference between a fix and a mystery."""
+    probe = subprocess.run(
+        [sys.executable, "-c", "import ensurepip"], capture_output=True, text=True
+    )
+    if probe.returncode != 0:
+        die(
+            f"{sys.executable} cannot create virtual environments (ensurepip missing).\n"
+            "      Fix: apt install python3-venv   (Fedora/RHEL: python3-pip python3-devel),\n"
+            "      then run this installer again."
+        )
+
+
 def ensure_venv(root: Path, extras: list[str]) -> Path:
     venv = root / ".venv"
     # Windows puts the interpreter at Scripts/python.exe, POSIX at bin/python. Reusing the
@@ -113,6 +128,7 @@ def ensure_venv(root: Path, extras: list[str]) -> Path:
         "python.exe" if os.name == "nt" else "python"
     )
     if not python.exists():
+        _check_interpreter_can_venv()
         say("2/6", f"creating the virtual environment in {venv}")
         run(sys.executable, "-m", "venv", str(venv))
 

@@ -24,7 +24,24 @@ have_python() {
   command -v python3 >/dev/null 2>&1 || command -v python3.12 >/dev/null 2>&1
 }
 
-if ! have_python; then
+# "Python exists" and "Python can build a venv" are different claims, and Debian splits
+# them: python3 ships without ensurepip, so `python3 -m venv` fails telling you to install
+# python3-venv. Checking only that python3 exists is how the first test install died here,
+# on a machine that plainly had Python 3.12.
+usable_python() {
+  have_python || return 1
+  local candidate
+  candidate="$(command -v python3.12 || command -v python3)"
+  "$candidate" - >/dev/null 2>&1 <<'PY'
+import sys
+
+raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
+PY
+  [[ $? -eq 0 ]] || return 1
+  "$candidate" -c 'import ensurepip' >/dev/null 2>&1
+}
+
+if ! usable_python; then
   export DEBIAN_FRONTEND=noninteractive
   maybe_sudo apt-get update -qq
   maybe_sudo apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates
