@@ -233,6 +233,50 @@ def start_background(root: Path, python: Path, log: Path) -> None:
     subprocess.Popen([str(python), "-m", "soapbot.cli", "start"], **popen_kwargs)  # type: ignore[arg-type]
 
 
+def service_user(root: Path) -> tuple[str, str] | None:
+    """A service account, so an install does not create the failure `doctor` warns about.
+
+    The unit used to omit ``User=``, which on a systemd box means root — the exact
+    "process runs as uid 0" critical finding this project's own posture check fails on.
+    Creating an unprivileged account is the installer's job, not documentation the
+    operator has to read.
+    """
+    if os.name == "nt" or not which("useradd"):
+        return None
+
+    name = "soapbot"
+    exists = subprocess.run(["id", name], capture_output=True, text=True)
+    if exists.returncode != 0:
+        created = subprocess.run(
+            [
+                "useradd",
+                "--system",
+                "--no-create-home",
+                "--shell",
+                "/usr/sbin/nologin",
+                name,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if created.returncode != 0:
+            # Not root, most likely — say so and let the unit be a user unit instead.
+            print(f"      could not create {name}: {(created.stderr or '').strip()[:120]}")
+            return None
+
+    # The service writes here (SQLite, config, the .env the panel saves into), so handing
+    # the account a directory it cannot write is a service that fails on first save.
+    for target in (root / "data", root / "config"):
+        subprocess.run(
+            ["chown", "-R", f"{name}:{name}", str(target)], capture_output=True, text=True
+        )
+    env_file = root / ".env"
+    if env_file.exists():
+        subprocess.run(["chown", f"{name}:{name}", str(env_file)], capture_output=True, text=True)
+        subprocess.run(["chmod", "0640", str(env_file)], capture_output=True, text=True)
+    return name, name
+
+
 def install_service(
     root: Path, python: Path, env_path: Path, autostart: bool, unit: str
 ) -> str:
@@ -286,6 +330,10 @@ def install_service(
                 "file aside if it belongs to an old deployment you are replacing."
             )
         unit_path = existing
+        account = service_user(root)
+        run_as = f"User={account[0]}\nGroup={account[1]}" if account else "# running as the invoking user"
+        if account:
+            print(f"      service account: {account[0]}")
         contents = f"""{UNIT_MARKER}
 [Unit]
 Description=soapbot panel
@@ -300,6 +348,7 @@ EnvironmentFile={env_path}
 ExecStart={python} -m soapbot.cli start
 Restart=always
 RestartSec=5
+{run_as}
 
 [Install]
 WantedBy=multi-user.target
