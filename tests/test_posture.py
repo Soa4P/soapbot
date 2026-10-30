@@ -193,6 +193,22 @@ def test_wildcard_bind_is_critical(host):
     assert PostureReport(findings=[finding]).ok is False
 
 
+def test_a_wildcard_bind_inside_a_container_warns_instead_of_failing():
+    """In a container, 0.0.0.0 is how a published port reaches the process at all.
+
+    Reporting CRITICAL there made `doctor --strict` fail on deploy/docker-compose.yml —
+    the reference deployment of this very repository. A gate that is red on its own
+    hardened topology teaches people to pass `--strict` with their eyes closed. What is
+    actually knowable from inside is nothing: the exposure is the host's port mapping.
+    """
+    finding = check_bind_address("0.0.0.0", in_container=True)
+    assert finding.status is Status.WARN
+    assert finding.severity is Severity.MEDIUM
+    assert "docker port" in (finding.remediation or "")
+    # MEDIUM must not trip the gate — that is the whole point of the downgrade.
+    assert PostureReport(findings=[finding]).ok is True
+
+
 def test_specific_external_address_is_only_a_warning():
     """Binding one routable address may be deliberate (behind a proxy), so it warns
     rather than fails — but at MEDIUM, which does not block the gate."""

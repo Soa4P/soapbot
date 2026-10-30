@@ -279,9 +279,17 @@ def check_secrets_in_env() -> Finding:
     )
 
 
-def check_bind_address(host: str | None) -> Finding:
+def check_bind_address(host: str | None, *, in_container: bool = False) -> Finding:
     """The control API manages plugins and capabilities; a public bind is an
-    unauthenticated admin surface waiting to be found."""
+    unauthenticated admin surface waiting to be found.
+
+    Inside a container the reading changes, and only slightly: ``0.0.0.0`` is required
+    for a published port to reach the process at all, so the question becomes "what
+    did the host publish" — which is invisible from in here. That is a WARNING with an
+    instruction, not a CRITICAL failure. Keeping it critical would make
+    ``doctor --strict`` red on the compose file this repository ships, and a gate that
+    is red on its own reference deployment is a gate people learn to skip.
+    """
     if host is None:
         return Finding(
             check="net.bind",
@@ -291,6 +299,21 @@ def check_bind_address(host: str | None) -> Finding:
         )
     loopback = host in ("127.0.0.1", "::1", "localhost")
     if host in ("0.0.0.0", "::", ""):
+        if in_container:
+            return Finding(
+                check="net.bind",
+                status=Status.WARN,
+                severity=Severity.MEDIUM,
+                detail=(
+                    f"control API binds to all interfaces ({host!r}) *inside* the "
+                    "container; the real exposure is whatever the host publishes"
+                ),
+                remediation=(
+                    "On the host run `docker port <container>`: it must show "
+                    "127.0.0.1, not 0.0.0.0. A container cannot report the host's "
+                    "mapping, which is why this is a warning and not a verdict."
+                ),
+            )
         return Finding(
             check="net.bind",
             status=Status.FAIL,
@@ -478,16 +501,32 @@ async def probe_providers(
     return out
 
 
+def _in_container() -> bool:
+    """Whether this process runs under a container runtime.
+
+    Split out so :func:`check_bind_address` can ask the same question. Inside a
+    container ``0.0.0.0`` is not a choice — a published port targets the container's
+    interface, and binding its own loopback would make the mapping point at nothing.
+    The exposure boundary there is the *host's* port mapping, which nothing inside the
+    container can see.
+    """
+    if Path("/.dockerenv").exists() or Path("/run/.containerenv").exists():
+        return True
+    if sys.platform == "win32":
+        return False
+    try:
+        with open("/proc/1/cgroup", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return False
+    return any(t in content for t in ("docker", "kubepods", "containerd", "lxc"))
+
+
 def check_container() -> Finding:
     """Report whether the process is containerised, because the deployment-layer
     mitigations in the docs (read-only rootfs, network policy, seccomp) only exist
     inside a container runtime."""
-    in_container = Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
-    if not in_container and sys.platform != "win32":
-        with open("/proc/1/cgroup", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
-        in_container = any(t in content for t in ("docker", "kubepods", "containerd", "lxc"))
-    if in_container:
+    if _in_container():
         return Finding(
             check="deploy.container",
             status=Status.PASS,
@@ -634,7 +673,7 @@ def run_posture_checks(
         ),
         check_secrets_in_env,
         lambda: check_provider_config(providers_file),
-        lambda: check_bind_address(bind_host),
+        lambda: check_bind_address(bind_host, in_container=_in_container()),
         lambda: check_key_file_mode(key_path),
         lambda: check_plugin_dir_writable(plugin_dir),
         check_container,
