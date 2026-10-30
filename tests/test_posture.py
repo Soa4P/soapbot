@@ -26,6 +26,7 @@ from soapbot.security.posture import (
     Severity,
     Status,
     check_bind_address,
+    check_config_dir_writable,
     check_key_file_mode,
     check_provider_config,
     check_secrets_in_env,
@@ -435,3 +436,66 @@ async def test_probe_against_a_real_listening_endpoint(tmp_path: Path):
     assert results[0]["local"] is True
     # No credential was sent, so nothing in the result can leak one.
     assert "api_key" not in results[0]
+
+
+# --------------------------------------------------- the config directory is writable
+#
+# The symptom this check exists for: the panel answers "saved", the process restarts, and
+# the configuration is unchanged — because the directory is read-only or is not the one
+# the next boot reads. Naming the path is what makes that a five-second diagnosis.
+
+
+def test_a_writable_config_dir_passes_and_names_its_files(tmp_path: Path):
+    (tmp_path / "providers.yaml").write_text("providers: []\n", encoding="utf-8")
+    finding = check_config_dir_writable(tmp_path)
+    assert finding.status is Status.PASS
+    assert finding.severity is Severity.MEDIUM
+    assert "providers.yaml" in finding.detail
+
+
+def test_an_empty_but_writable_dir_passes_and_says_it_will_be_seeded(tmp_path: Path):
+    finding = check_config_dir_writable(tmp_path)
+    assert finding.status is Status.PASS
+    assert "播种" in finding.detail
+
+
+def test_a_missing_config_dir_is_a_warning(tmp_path: Path):
+    finding = check_config_dir_writable(tmp_path / "absent")
+    assert finding.status is Status.WARN
+    assert finding.severity is Severity.MEDIUM
+    assert finding.remediation
+
+
+def test_a_read_only_config_dir_explains_the_save_that_does_not_stick(
+    tmp_path: Path, monkeypatch
+):
+    """``os.access`` is patched because a POSIX chmod is meaningless on Windows, and
+    this check has to behave the same on both — it is the operator's diagnosis, not a
+    platform quirk they should have to know about."""
+    import soapbot.security.posture as posture
+
+    monkeypatch.setattr(posture.os, "access", lambda path, mode: False)
+    finding = check_config_dir_writable(tmp_path)
+    assert finding.status is Status.WARN
+    # The explanation is the feature: "saved" and "in effect" are different claims.
+    assert "重启后不会生效" in finding.detail
+    assert "只读" in finding.detail
+    # MEDIUM must not fail the deploy gate: editing files over SSH is a valid choice.
+    assert PostureReport(findings=[finding]).ok is True
+
+
+def test_an_unspecified_config_dir_is_unknown_not_pass():
+    assert check_config_dir_writable(None).status is Status.UNKNOWN
+
+
+def test_the_config_directory_check_reaches_the_report(tmp_path: Path):
+    report = run_posture_checks(
+        plugin_manager=None,
+        plugin_dir=tmp_path,
+        key_path=None,
+        data_dir=tmp_path,
+        bind_host="127.0.0.1",
+        config_dir=tmp_path,
+    )
+    finding = next(f for f in report.findings if f.check == "config.writable")
+    assert finding.status is Status.PASS

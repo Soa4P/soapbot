@@ -1,4 +1,8 @@
-"""Command line entry point: ``soapbot start`` / ``soapbot token`` / ``soapbot doctor``."""
+"""Command line entry point: ``soapbot start`` / ``setup`` / ``token`` / ``doctor``.
+
+``setup`` lives in :mod:`soapbot.cli_setup`: this module stays a parser plus delegation,
+so the wizard can be tested without going through argv.
+"""
 
 from __future__ import annotations
 
@@ -41,6 +45,39 @@ def main(argv: list[str] | None = None) -> int:
         help="also send one request to each provider base_url (network I/O)",
     )
 
+    p_setup = sub.add_parser(
+        "setup",
+        help="configure a provider and a QQ adapter from the terminal (no browser needed)",
+    )
+    p_setup.add_argument("--provider-id", default="")
+    p_setup.add_argument("--base-url", default="", help="e.g. https://api.deepseek.com/v1")
+    p_setup.add_argument("--model", default="")
+    p_setup.add_argument(
+        "--api-key-env",
+        default="",
+        help="name of the environment variable holding the key (preferred: nothing secret on disk)",
+    )
+    p_setup.add_argument(
+        "--api-key",
+        default="",
+        help="literal key; written to the file, so prefer --api-key-env",
+    )
+    p_setup.add_argument("--kind", default="onebot11")
+    p_setup.add_argument("--mode", default="", help="forward or reverse")
+    p_setup.add_argument("--ws-url", default="", help="forward mode: ws://host:port")
+    p_setup.add_argument("--host", default="", help="reverse mode: listen address")
+    p_setup.add_argument("--port", type=int, default=None, help="reverse mode: listen port")
+    p_setup.add_argument("--account-id", default="")
+    p_setup.add_argument("--access-token-env", default="")
+    p_setup.add_argument("--access-token", default="")
+    p_setup.add_argument("--skip-provider", action="store_true")
+    p_setup.add_argument("--skip-adapter", action="store_true")
+    p_setup.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="never prompt; fail if a required value is missing (for Ansible/CI)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.cmd == "version" or args.cmd is None:
@@ -52,6 +89,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "doctor":
         return _run_doctor(args)
+
+    if args.cmd == "setup":
+        from soapbot.cli_setup import run as run_setup
+
+        return run_setup(args)
 
     if args.cmd == "start":
         import uvicorn
@@ -175,6 +217,9 @@ def _run_doctor(args) -> int:
         data_dir=settings.data_dir,
         bind_host=args.host or settings.host,
         providers_file=settings.providers_file,
+        # Named explicitly: "saved in the panel but gone after restart" is almost always
+        # this directory being read-only or not the one the process reads.
+        config_dir=settings.config_dir,
     )
     if manager is not None and getattr(manager, "supervisor", None) is not None:
         # Nothing was loaded by this probe, so shut the supervisor down cleanly.

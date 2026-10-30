@@ -6,7 +6,6 @@ soapbot.api.pipeline
 soapbot.api.security
 soapbot.api.settings
 soapbot.bilibili.wbi
-soapbot.cli
 soapbot.core.bus
 soapbot.core.progressive
 soapbot.core.session

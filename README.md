@@ -94,6 +94,9 @@ $EDITOR config/adapters.yaml    # 至少一个协议端，否则收不到任何�
 # 命令行等价物（macOS / Linux / 服务器上）
 python -m soapbot.cli start     # 或：soapbot start（可编辑安装后）
 # → http://127.0.0.1:6185
+
+# 没有浏览器？交互式配 Provider 与 QQ 接入，校验不过不写盘
+python -m soapbot.cli setup
 ```
 
 ```bash
@@ -218,7 +221,7 @@ soapbot/
 ├── deploy/             # Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1025 项通过 / 10 项跳过）
+└── tests/              # pytest（1086 项通过 / 9 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点

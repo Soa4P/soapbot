@@ -160,12 +160,24 @@ async def read_settings(_: dict = Depends(require_api_auth)) -> dict[str, Any]:
             mcp_status = manager.status()
 
     tts_ready = _tts_available()
+
+    # The same check `doctor` runs, surfaced here because this is the page an operator
+    # opens after "I saved it and nothing changed". Reporting the path *and* whether it
+    # is writable is what distinguishes a read-only mount from a wrong directory.
+    from soapbot.security.posture import Status as PostureStatus
+    from soapbot.security.posture import check_config_dir_writable
+
+    config_finding = check_config_dir_writable(settings.config_dir)
+
     return {
         "version": __version__,
         "schema_version": schema_version,
         "expected_schema_version": SCHEMA_VERSION,
         "data_dir": str(settings.data_dir),
         "config_dir": str(settings.config_dir),
+        "config_dir_writable": config_finding.status is PostureStatus.PASS,
+        "config_dir_detail": config_finding.detail,
+        "config_dir_remediation": config_finding.remediation,
         "env_file": str(_env_path()),
         "startup_errors": get_startup_errors(),
         "values": _current_values(),

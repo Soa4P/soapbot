@@ -738,7 +738,7 @@
     }
   ],
   "verification": {
-    "pytest": "1025 passed, 10 skipped",
+    "pytest": "1086 passed, 9 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 14 通过；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

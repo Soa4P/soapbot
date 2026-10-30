@@ -39,6 +39,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -440,6 +441,88 @@ def check_provider_config(providers_file: Path | None) -> Finding:
     )
 
 
+def _probe_hint(status_code: int | None, error: str) -> str:
+    """One sentence an operator can act on, shared by ``doctor`` and the panel.
+
+    Kept here rather than in the API module so the two surfaces cannot drift into
+    explaining the same HTTP status differently — the panel is where people look, and
+    ``doctor`` is what CI reads, and a disagreement between them is worse than either.
+    """
+    if error:
+        return "连不上：检查网络、DNS、防火墙，以及 base_url 是否写对。"
+    if status_code is None:
+        return ""
+    if status_code in (401, 403):
+        return "401/403 表示端点活着（本次未发送密钥）"
+    if status_code == 404:
+        return "404：多半是 base_url 少了 /v1 这类路径前缀"
+    if status_code >= 500:
+        return f"上游返回 {status_code}：是对方出了问题，不是你的网络"
+    return "端点可达"
+
+
+async def probe_endpoint(
+    base_url: str,
+    *,
+    timeout: float = 15.0,
+    client_factory: Callable[..., Any] | None = None,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    """Ask one endpoint whether it answers at all. **Network I/O — opt-in only.**
+
+    ``GET {base_url}/models``, deliberately without the API key: a rejection proves the
+    endpoint is alive just as well as a 200 does, and staying credential-free means a
+    debug log, a screenshot or a support ticket cannot contain a secret.
+
+    ``client`` lets :func:`probe_providers` reuse one connection pool for a list of
+    providers; without it the function opens (and closes) its own.
+
+    The result carries no path, no query string and no credential — only the host an
+    operator typed, the status, the elapsed time and a sentence of advice.
+    """
+    import httpx
+
+    base = str(base_url or "").strip().rstrip("/")
+    result: dict[str, Any] = {
+        "ok": False,
+        "base_url": base,
+        "target": "",
+        "status_code": None,
+        "reachable": False,
+        "elapsed_ms": 0,
+        "error": "",
+        "hint": "",
+        # Stated rather than implied: the whole reason 401 counts as a pass.
+        "credential_sent": False,
+    }
+    if not base:
+        result["error"] = "base_url is empty"
+        result["hint"] = "填写完整地址，例如 https://api.deepseek.com/v1"
+        return result
+
+    split = urlsplit(base)
+    result["target"] = split.netloc or split.path
+
+    started = time.monotonic()
+    try:
+        if client is not None:
+            response = await client.get(f"{base}/models")
+        else:
+            open_client = client_factory or httpx.AsyncClient
+            async with open_client(timeout=timeout, follow_redirects=True) as owned:
+                response = await owned.get(f"{base}/models")
+    except Exception as exc:  # every failure is reported, none raised
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    else:
+        result["status_code"] = response.status_code
+        result["reachable"] = response.status_code < 500
+    result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+    result["ok"] = bool(result["reachable"])
+    result["hint"] = _probe_hint(result["status_code"], result["error"])
+
+    return result
+
+
 async def probe_providers(
     providers_file: Path | None,
     *,
@@ -489,21 +572,22 @@ async def probe_providers(
             base_url = str(item.get("base_url") or "").rstrip("/")
             if not base_url:
                 continue
-            entry: dict[str, Any] = {
-                "id": str(item.get("id") or "?"),
-                "base_url": base_url,
-                "local": _is_local_endpoint(base_url),
-                "reachable": False,
-                "status_code": None,
-                "error": "",
-            }
-            try:
-                response = await client.get(f"{base_url}/models")
-                entry["status_code"] = response.status_code
-                entry["reachable"] = response.status_code < 500
-            except Exception as exc:  # every failure is reported, none raised
-                entry["error"] = f"{type(exc).__name__}: {exc}"
-            out.append(entry)
+            # One implementation of the request and of the "401 is alive" rule; the
+            # panel's test button calls the same function, so a probe that works from
+            # ``doctor`` cannot disagree with one that works from the browser.
+            probe = await probe_endpoint(base_url, timeout=timeout, client=client)
+            out.append(
+                {
+                    "id": str(item.get("id") or "?"),
+                    "base_url": base_url,
+                    "local": _is_local_endpoint(base_url),
+                    "reachable": probe["reachable"],
+                    "status_code": probe["status_code"],
+                    "error": probe["error"],
+                    "elapsed_ms": probe["elapsed_ms"],
+                    "hint": probe["hint"],
+                }
+            )
     return out
 
 
@@ -657,6 +741,64 @@ def check_single_instance(data_dir: Path | None) -> Finding:
     )
 
 
+def check_config_dir_writable(config_dir: Path | None) -> Finding:
+    """Is the directory the panel writes *the same one the next boot reads*?
+
+    The failure this exists to name is specific and expensive: the panel answers
+    "saved", the operator restarts, and the running configuration is unchanged — because
+    the write went to a read-only layer, or to a different directory than the process
+    reads. Reporting the path, the write capability and which files are present is what
+    turns "it did not take effect" into a five-second diagnosis.
+
+    MEDIUM, not HIGH: a read-only panel on a deployment that edits files over SSH is a
+    legitimate choice, and a gate that fails on it would be disabled rather than fixed.
+    """
+    check = "config.writable"
+    if config_dir is None:
+        return Finding(
+            check=check,
+            status=Status.UNKNOWN,
+            severity=Severity.LOW,
+            detail="config directory not supplied to the posture check",
+        )
+
+    path = Path(config_dir)
+    names = ("providers.yaml", "adapters.yaml", "mcp.yaml")
+    present = [name for name in names if (path / name).is_file()]
+
+    if not path.exists():
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=f"{path} 不存在：面板保存会失败，服务只能读镜像内的模板",
+            remediation="让 SOAPBOT_CONFIG_DIR 指向可写的数据卷；首次启动会从模板播种。",
+        )
+
+    if not os.access(path, os.W_OK):
+        return Finding(
+            check=check,
+            status=Status.WARN,
+            severity=Severity.MEDIUM,
+            detail=(
+                f"{path} 不可写：面板可能显示「已保存」，但重启后不会生效"
+                "（写入被只读层拒绝，或写到与启动读取不同的目录）"
+            ),
+            remediation="把该目录挂到可写卷（compose 里的 /data/config），或以可写用户运行。",
+        )
+
+    return Finding(
+        check=check,
+        status=Status.PASS,
+        severity=Severity.MEDIUM,
+        detail=(
+            f"{path} 可写；已存在：{', '.join(present)}"
+            if present
+            else f"{path} 可写；配置文件尚未生成（首次启动会从模板播种）"
+        ),
+    )
+
+
 def run_posture_checks(
     *,
     plugin_manager=None,
@@ -665,6 +807,7 @@ def run_posture_checks(
     data_dir: Path | None = None,
     bind_host: str | None = None,
     providers_file: Path | None = None,
+    config_dir: Path | None = None,
 ) -> PostureReport:
     """Run every check and return the report. Never raises: a failing check is a
     finding, not an exception, so one broken probe cannot hide the other nine."""
@@ -685,6 +828,7 @@ def run_posture_checks(
         check_container,
         check_rootfs_readonly,
         lambda: check_single_instance(data_dir),
+        lambda: check_config_dir_writable(config_dir),
     ]
     for probe in probes:
         try:

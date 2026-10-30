@@ -135,6 +135,37 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  /**
+   * Connectivity probes. Neither call writes anything — they exist so "is this address
+   * reachable" stops requiring an SSH session and a `curl`.
+   *
+   * The provider probe sends **no** credential: a 401 counts as success, because a
+   * server that rejects you is a server that answered. That is why `ok` can be true
+   * while `status_code` is 401.
+   */
+  configProvidersTest: (body: { id?: string; base_url: string; timeout?: number }) =>
+    request<ProbeResult>('/api/config/providers/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /**
+   * `mode: 'reverse'` cannot be probed from here: the peer dials us. The server reports
+   * on the port instead — `in_use` means something is already listening (usually the
+   * good outcome), `free` means it is not listening yet.
+   */
+  configAdaptersTest: (body: {
+    kind: string
+    mode: string
+    ws_url?: string
+    host?: string
+    port?: number | null
+    access_token?: string
+  }) =>
+    request<AdapterProbeResult>('/api/config/adapters/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   plugins: () => request<any>('/api/plugins'),
   /**
    * Install a plugin package. The server answers `approved: false` on purpose — the
@@ -404,6 +435,31 @@ export interface ProvidersPatch {
   base_hash: string
   /** One entry per provider; only `id` is required, other fields are merged. */
   providers: (Partial<ProviderEntry> & { id: string })[]
+}
+
+/**
+ * What a probe reports. `credential_sent` is part of the contract rather than an
+ * implementation detail: the whole safety story of the provider probe is that it is
+ * false, and a UI that says "tested" without saying "without your key" invites the
+ * opposite assumption.
+ */
+export interface ProbeResult {
+  ok: boolean
+  target: string
+  status_code: number | null
+  reachable?: boolean
+  elapsed_ms: number
+  error: string
+  hint: string
+  credential_sent: boolean
+}
+
+/** `state` is the part the UI translates; `hint` is the server's own wording (CLI/API). */
+export interface AdapterProbeResult extends ProbeResult {
+  mode: 'forward' | 'reverse'
+  state: 'handshake_ok' | 'unauthorized' | 'not_onebot' | 'unreachable' | 'free' | 'in_use' | 'error'
+  detail?: string
+  retcode?: number | null
 }
 
 export interface DiffResult {
