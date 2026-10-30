@@ -34,10 +34,6 @@ MUSTACHE = re.compile(r"\{\{.*?\}\}", re.S)
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 
-def _attrs(tag: str) -> str:
-    return tag
-
-
 def _has(attrs: str, *names: str) -> bool:
     """True when any of ``names`` is present as an attribute, bare or bound.
 

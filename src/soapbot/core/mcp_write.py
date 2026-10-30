@@ -122,11 +122,7 @@ def apply_server_patch(
         entries = []
         result["servers"] = entries
 
-    by_name = {
-        str(item.get("name")): item
-        for item in entries
-        if isinstance(item, dict) and item.get("name")
-    }
+    by_name = server_index(result)
 
     changed: list[str] = []
     seen: set[str] = set()

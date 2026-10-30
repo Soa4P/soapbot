@@ -421,5 +421,11 @@ def check_secret_resolvable(value: Any, *, field_name: str) -> str:
 
     Thin on purpose: the write path must not grow a second interpretation of what a
     secret reference means. If startup rejects ``env:UNSET_VAR``, so does this.
+
+    Unused, and deliberately kept: :func:`validate_providers` resolves every secret
+    through :func:`parse_providers`, which is the same code at the same granularity, so
+    nothing needs a per-field pre-flight today. It stays because the alternative —
+    calling :func:`resolve_secret` directly from the API layer — is exactly the second
+    interpretation this docstring warns about.
     """
     return resolve_secret(value, field_name=field_name)
