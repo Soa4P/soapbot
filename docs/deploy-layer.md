@@ -342,7 +342,7 @@ tmpfs: [/tmp]
 
 ## 8. 容器验收清单（已于 2026-10-30 在真机执行）
 
-**当前状态：已在雨云 Ubuntu 24.04 主机实测，7 条自动化项通过，#6/#7 待人工执行。**
+**当前状态：已在雨云 Ubuntu 24.04 主机实测，9 条全部通过。**
 
 跑这一遍的代价是发现两个真缺陷：`seccomp:default` 让容器**根本创建不出来**（Docker 把
 冒号后的值当成 compose 目录下的文件路径），`doctor` 在容器内把 `0.0.0.0` 判成 CRITICAL
@@ -375,8 +375,8 @@ tmpfs: [/tmp]
 | 3 非 root | **PASS** | `uid=10001(app) gid=10001(app)` |
 | 4 只读根 | **PASS** | `touch: cannot touch '/app/x': Read-only file system` |
 | 5 健康端点 | **PASS** | `{"status":"ok","version":"0.1.0","uptime_seconds":32.967}` |
-| 6 设置页写入 | **待人工** | 需要消费一次性 bootstrap token；那是运维的首次登录，测试把它用掉等于把人锁在门外 |
-| 7 重启后读取 | **待人工** | 随 #6 |
+| 6 设置页写入 | **PASS** | `POST /api/settings` → `{"written":true,"changed":["default_locale","voice_enabled"],"restart_required":true}`；`/data/.env` 随即出现 `SOAPBOT_DEFAULT_LOCALE=en-US` 与 `SOAPBOT_VOICE_ENABLED=true` |
+| 7 重启后读取 | **PASS** | `restart` 后 `GET /api/settings` 返回 `en-US` / `true`，与磁盘一致；随后改回 `zh-CN` / `false` 并再重启复验 |
 | 8 卷持久化 | **PASS** | `down` + `up` 后 `/data/secret.key` md5 不变（`64406e29…`），`soapbot.db`、`jwt.key`、`plugins/` 均在 |
 | 9 init | **PASS** | `tini` |
 | doctor | **PASS** | `verdict: PASS`；`provider.upstream`（无上游）与 `fs.plugin_dir`（插件目录可写）两条 medium 警告符合预期 |
