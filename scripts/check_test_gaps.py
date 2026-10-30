@@ -51,7 +51,15 @@ PASSED = re.compile(r"(\d+)\s+(?:passed|项通过)")
 
 #: Documents a newcomer reads as "what is true today". Everything else under ``docs/``
 #: is a snapshot of a round and keeps its own numbers.
-LIVE_DOCUMENTS = ("README.md", "docs/verification-matrix.md")
+#:
+#: The delivery readiness report is included because its "未验证项" list and its header
+#: both read as the current state — it was quoting 886 and 959 passed while the suite ran
+#: 1024, and it still claimed the real MCP server had never been connected.
+LIVE_DOCUMENTS = ("README.md", "docs/verification-matrix.md", "docs/delivery-readiness-v2.md")
+
+#: What this rule can and cannot do: it pins *numbers*. A prose claim like "the real
+#: server was never connected" is invisible to it, so the list above is where the
+#: coverage stops. Pretending otherwise would be worse than the gap.
 
 #: Modules that exist to be executed rather than imported (an entry point, a script), or
 #: that only a subprocess can reach. Named here instead of guessed by regex, so the

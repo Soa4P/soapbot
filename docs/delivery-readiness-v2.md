@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `886 passed, 8 skipped`；CI 五任务全绿。
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `1025 passed, 10 skipped`；CI 五任务全绿。
 
 > 上一版此处写着「ubuntu 因一个偶发用例失败」，并把它归因于重启竞态。**那个判断是错的**，
 > 修正记录留在这一节里，因为「当时为什么看错」比结论本身更有用：
@@ -195,7 +195,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | 插件能力逐项授权 + 进程隔离 | 已有 | `test_plugin_isolation` 等 |
 | **流式（分句渐进发送）** | **已完成** | `tests/test_streaming_wiring.py`（14 项，含「trace 是否带上面板要读的两个字段」）；浏览器用真实 stages 生成的数据实测 |
 | **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（12 项）、`test_wave4_plugin_api.py` 上传 3 项 |
-| **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（10 项）；真实 MCP 服务端仍未接 |
+| **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（16 项）+ `tests/test_mcp_live.py`（opt-in）；已接真实 filesystem server，14 个工具 |
 | **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
 | **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（25 项） |
 | **多语言（对外文案 + 面板全 12 页）** | **已完成** | 后端 `tests/test_i18n.py`（22 项）、面板 `test_webui_i18n.py`（8 项）；浏览器逐页实测中英双向切换 |
@@ -213,7 +213,11 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
    被动回复窗口表现未测。
 3. **香港服务器未部署**。SSH 在协议握手前被本机出向策略掐断（22 与 443 均如此，对照
    `ssh.github.com:443` 可正常握手），因此部署命令一条都没执行。
-4. **MCP 只测了假服务端**。真实 MCP 服务（如 filesystem server）未接。
+
+> MCP 曾在这份清单里（「只测了假服务端」）。现在接了真实的
+> `@modelcontextprotocol/server-filesystem`：14 个工具、`tools/call` 读回文件内容，
+> 并从面板写入后热加载成功。证据见 [`verification-matrix.md`](verification-matrix.md)，
+> 复跑用 `SOAPBOT_LIVE_MCP=1 pytest tests/test_mcp_live.py`（opt-in，需联网装 npm 包）。
 
 ---
 
@@ -235,7 +239,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 959 passed, 8 skipped
+python -m pytest -q                 # 1025 passed, 10 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度

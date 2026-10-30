@@ -265,7 +265,7 @@ SOAPBOT_ENABLE_BUDGET=true
 ## 10. 后续（不属于本轮）
 
 - Wave 7 JWT 就位后再开放 `/api/budget/*` 只读视图
-- 审批提醒（`render_pending_notice` 已备，尚未接 notice 通道）
+- ~~审批提醒（`render_pending_notice` 已备，尚未接 notice 通道）~~ —— 已接入：`budget/commands.py` 在回复里调用它，见 §11
 - 额度策略按角色区分（当前全作用域统一上限）
 
 ---

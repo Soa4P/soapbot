@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-10-30T16:31:30+08:00",
+  "updated_at": "2026-10-30T17:04:11+08:00",
   "current": null,
   "phases": [
     {
@@ -583,6 +583,66 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph12",
+      "index": "P12",
+      "name": "已发现缺陷的修复",
+      "goal": "修掉排查中确认的四处缺陷：一处死代码、一处跨进程状态残留、四处已被证伪的文档陈述、以及覆盖不到该文档的扫描规则。",
+      "tasks": [
+        {
+          "id": "ph12-t1",
+          "name": "删除 check_a11y.py 的死函数",
+          "status": "done",
+          "note": "写脚本时的中间层残留；ruff 默认不检查模块级未使用函数，所以门禁没拦住",
+          "files": [
+            {
+              "path": "scripts/check_a11y.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph12-t2",
+          "name": "McpClient 跨进程 stderr 残留",
+          "status": "done",
+          "note": "reload 复用同一 client 时 stderr 尾部不清空，第二次启动失败的报错里会混入第一个进程的输出；改为 spawn 前先停读再清空，并用同实例两次启动的测试钉住",
+          "files": [
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_wiring.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph12-t3",
+          "name": "交付文档四处已被证伪的陈述",
+          "status": "done",
+          "note": "886/959 passed 改为 1024/10；「真实 MCP 服务端仍未接」与「只测了假服务端」按实测结果改写，其余未验证项原样保留",
+          "files": [
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph12-t4",
+          "name": "把该文档纳入断层扫描",
+          "status": "done",
+          "note": "LIVE_DOCUMENTS 增加一份；手改数字验证能拦（exit 1），恢复后 exit 0。注释写明这条规则只钉数字、钉不住散文",
+          "files": [
+            {
+              "path": "scripts/check_test_gaps.py",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -678,7 +738,7 @@
     }
   ],
   "verification": {
-    "pytest": "1024 passed, 10 skipped",
+    "pytest": "1025 passed, 10 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "0 阻断 / 1 告警 / 14 通过",
