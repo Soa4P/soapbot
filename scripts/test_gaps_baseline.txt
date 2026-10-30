@@ -1,0 +1,19 @@
+# Modules no test names. Shrink this file when a test starts naming one;
+# adding a line here means accepting that nobody looks at that module.
+
+soapbot.api.bilibili
+soapbot.api.pipeline
+soapbot.api.security
+soapbot.api.settings
+soapbot.bilibili.wbi
+soapbot.cli
+soapbot.core.bus
+soapbot.core.progressive
+soapbot.core.session
+soapbot.core.text
+soapbot.examples.plugins.admin.main
+soapbot.examples.plugins.echo.main
+soapbot.examples.plugins.help.main
+soapbot.examples.plugins.remind.main
+soapbot.logging_setup
+soapbot.memory.migrations

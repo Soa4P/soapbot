@@ -350,12 +350,41 @@ def test_the_provider_check_reaches_the_report(tmp_path: Path):
     assert finding.severity is Severity.MEDIUM
 
 
-async def test_probe_against_a_real_listening_endpoint(tmp_path: Path):
-    """The probe's contract is "did something answer", not "was the key accepted".
+async def test_a_rejection_counts_as_reachable(tmp_path: Path) -> None:
+    """The rule: "did something answer", not "was the key accepted".
 
-    A throwaway HTTP server stands in for the vendor. It returns 401 — and 401 is a
-    *pass*, because a server that rejects you is a server that answered. That is also
-    why the probe never sends the key.
+    Through a mock transport rather than a socket, because on a host that intercepts
+    loopback HTTP (CI containers, some corporate images) the request comes back as an
+    infrastructure error and the rule under test never runs at all. The socket is the
+    next test's job.
+    """
+    import httpx
+
+    def factory(**kwargs):
+        transport = httpx.MockTransport(lambda request: httpx.Response(401))
+        return httpx.AsyncClient(transport=transport, **kwargs)
+
+    path = _providers_file(tmp_path, _one_provider("https://api.example.com/v1"))
+    results = await probe_providers(path, timeout=3.0, client_factory=factory)
+
+    assert results[0]["reachable"] is True
+    assert results[0]["status_code"] == 401
+
+    def broken(**kwargs):
+        transport = httpx.MockTransport(lambda request: httpx.Response(503))
+        return httpx.AsyncClient(transport=transport, **kwargs)
+
+    down = await probe_providers(path, timeout=3.0, client_factory=broken)
+    # 5xx means the far side is the one that is ill, and that is a finding, not a pass.
+    assert down[0]["reachable"] is False
+
+
+async def test_probe_against_a_real_listening_endpoint(tmp_path: Path):
+    """The same rule over a real socket — when the host lets one through.
+
+    A throwaway HTTP server stands in for the vendor and answers 401. It also asserts
+    that the probe sends no credential: 401 is a *pass*, and that is only true because
+    nothing sensitive was on the wire.
     """
     import contextlib
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -382,8 +411,11 @@ async def test_probe_against_a_real_listening_endpoint(tmp_path: Path):
         server.server_close()
 
     assert len(results) == 1
+    if results[0]["status_code"] != 401:
+        # Something between this process and loopback answered instead of the server.
+        # That is a property of the host, not of the probe; the rule is covered above.
+        pytest.skip(f"loopback HTTP is intercepted here (HTTP {results[0]['status_code']})")
     assert results[0]["reachable"] is True
-    assert results[0]["status_code"] == 401
     assert results[0]["local"] is True
     # No credential was sent, so nothing in the result can leak one.
     assert "api_key" not in results[0]

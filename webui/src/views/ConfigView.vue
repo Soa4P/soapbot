@@ -421,7 +421,16 @@ async function applyChanges(): Promise<void> {
           </thead>
           <tbody>
             <template v-for="row in personaRows" :key="row.id">
-              <tr style="cursor: pointer" @click="toggle(row.id)">
+              <!-- Focusable and Enter/Space-operable: the row is a disclosure, and a
+                   mouse-only one is a dead end for anyone who tabs through the table. -->
+              <tr
+                style="cursor: pointer"
+                tabindex="0"
+                :aria-expanded="expanded === row.id"
+                @click="toggle(row.id)"
+                @keydown.enter.prevent="toggle(row.id)"
+                @keydown.space.prevent="toggle(row.id)"
+              >
                 <th scope="row">
                   {{ row.id }}
                   <span v-if="!row.enabled" class="tag bad" style="margin-left: 6px">{{ t('config.disabled') }}</span>

@@ -39,6 +39,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -420,6 +421,7 @@ async def probe_providers(
     providers_file: Path | None,
     *,
     timeout: float = 5.0,
+    client_factory: Callable[..., Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Ask each endpoint whether it answers at all. **Network I/O — opt-in only.**
 
@@ -446,7 +448,12 @@ async def probe_providers(
         return []
 
     out: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    # Injectable so the "a rejection is proof of life" rule can be tested without a
+    # listening socket. The live-endpoint test proves the socket; this seam keeps the
+    # rule itself testable on a host that intercepts loopback HTTP (CI containers, some
+    # corporate images), where a real 401 never arrives.
+    open_client = client_factory or httpx.AsyncClient
+    async with open_client(timeout=timeout, follow_redirects=True) as client:
         for item in providers:
             if not isinstance(item, dict):
                 continue

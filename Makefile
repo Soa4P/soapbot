@@ -21,7 +21,9 @@ help:
 	@echo "make fmt        自动格式化 + 修可修问题"
 	@echo "make typecheck  mypy（当前基线非零，非阻断）"
 	@echo "make contrast   WCAG 对比度校验（含在 check 内）"
-	@echo "make check      lint + contrast + test（CI 阻断项同款）"
+	@echo "make a11y       可访问性静态检查（含在 check 内）"
+	@echo "make gaps       测试断层扫描：孤儿模块与过期数字（含在 check 内）"
+	@echo "make check      lint + contrast + a11y + gaps + test（CI 阻断项同款）"
 	@echo "make deploy-check 容器部署配置静态检查（不需要 docker）"
 	@echo "make ui         构建前端到 src/soapbot/webui/dist"
 	@echo "make progress   启动开发进度看板 http://127.0.0.1:8099/"
@@ -55,6 +57,14 @@ typecheck:
 contrast:
 	$(BIN)/python scripts/check_contrast.py
 
+# Static gaps: modules no test names, and "N passed" in prose that disagrees with the
+# board. `--strict` also fails when the orphan set drifts from scripts/test_gaps_baseline.txt.
+gaps:
+	$(BIN)/python scripts/check_test_gaps.py --strict
+
+a11y:
+	$(BIN)/python scripts/check_a11y.py
+
 # The board is a static page; this is the shortest way to look at it without
 # remembering the flags. Must be HTTP — `file://` blocks the fetch of progress.json.
 progress:
@@ -67,7 +77,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint contrast test
+check: lint contrast a11y gaps test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:
