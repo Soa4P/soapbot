@@ -329,6 +329,13 @@ class Settings(BaseSettings):
     def adapters_file(self) -> Path:
         return self.config_dir / "adapters.yaml"
 
+    @property
+    def mcp_file(self) -> Path:
+        """External tool servers. A property, not a constant, because the tests point
+        ``config_dir`` at a temporary directory and a hard-coded path would keep writing
+        to the checkout."""
+        return self.config_dir / "mcp.yaml"
+
     def ensure_dirs(self) -> None:
         for sub in ("", "logs", "uploads", "plugins", "avatars"):
             (self.data_dir / sub).mkdir(parents=True, exist_ok=True)

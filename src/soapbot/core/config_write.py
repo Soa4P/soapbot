@@ -41,6 +41,7 @@ import logging
 import os
 import stat
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -329,6 +330,10 @@ def build_patch(
     path: Path,
     patch: list[dict[str, Any]],
     base_hash: str,
+    apply_fn: Callable[..., tuple[dict[str, Any], list[str]]] = apply_provider_patch,
+    validate_fn: Callable[[dict[str, Any]], list[str]] = validate_providers,
+    diff_render: Callable[[dict[str, Any]], str] = render_masked,
+    filename: str = "providers.yaml",
 ) -> PatchResult:
     """Compute the candidate document and its diff. **Does not write.**
 
@@ -336,18 +341,24 @@ def build_patch(
     and :class:`ConfigError` if the candidate would not boot. Both are raised before
     anything touches the filesystem, which is what makes "confirm then save" honest:
     the diff the operator approves is a diff that already passed validation.
+
+    The three injection points default to the provider behaviour, so existing callers
+    are unchanged. They exist because ``mcp.yaml`` needs the same three steps with three
+    different rules: list items merged by name instead of by id, a parser that also
+    spawns-args-checks, and a diff renderer that must redact every ``env`` value rather
+    than only the keys named like secrets.
     """
     current = read_document(path)
     current_hash = _hash_document(current)
     if base_hash and base_hash != current_hash:
         raise ConfigConflictError(current_hash, "")
 
-    candidate, changed = apply_provider_patch(current, patch)
-    problems = validate_providers(candidate)
+    candidate, changed = apply_fn(current, patch)
+    problems = validate_fn(candidate)
     if problems:
         raise ConfigError("; ".join(problems))
 
-    diff = unified_diff(render_masked(current), render_masked(candidate))
+    diff = unified_diff(diff_render(current), diff_render(candidate), filename)
     return PatchResult(
         document=candidate,
         rendered=render(candidate),

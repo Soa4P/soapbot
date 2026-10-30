@@ -131,6 +131,16 @@ class Permission(StrEnum):
     APPROVE_PAYMENT = "approve_payment"
     """Approve a spending request. Owner-only by policy."""
 
+    MANAGE_MCP = "mcp_manage"
+    """Add, edit or remove an external tool server.
+
+    One rank above ``MANAGE_CONFIG``, and not because of secrets. An MCP entry is an
+    argv that the host will execute as a child process on every start, whose tools the
+    model may then call with the user's message as input. That is a different kind of
+    act from editing a provider's base URL, so it belongs to the owner — the role that
+    already approves payments.
+    """
+
     VIEW_AUDIT = "view_audit"
 
 
@@ -147,6 +157,7 @@ PERMISSION_MIN_ROLE: dict[Permission, Role] = {
     Permission.MANAGE_CONFIG: Role.ADMIN,
     Permission.MODERATE_GROUP: Role.ADMIN,
     Permission.APPROVE_PAYMENT: Role.OWNER,
+    Permission.MANAGE_MCP: Role.OWNER,
     Permission.VIEW_AUDIT: Role.ADMIN,
 }
 

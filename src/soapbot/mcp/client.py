@@ -243,6 +243,20 @@ class McpClient:
         return text
 
 
+def _spawn_signature(server: McpServer) -> tuple[Any, ...]:
+    """The fields that decide what gets executed.
+
+    ``description`` is deliberately absent: it is shown in the panel and nothing else,
+    so editing it is not a reason to kill a working child process.
+    """
+    return (
+        server.command,
+        tuple(sorted(server.env.items())),
+        server.timeout,
+        server.min_role,
+    )
+
+
 class McpManager:
     """All configured servers, exposed as one tool source for the registry."""
 
@@ -270,6 +284,43 @@ class McpManager:
             except Exception as exc:
                 self._tools[name] = []
                 logger.warning("mcp tool listing failed server=%s: %s", name, exc)
+
+    async def reload(self, servers: list[McpServer]) -> None:
+        """Re-point at a new server list **without replacing this object**.
+
+        The tool registry holds *this instance* as its source, so handing back a new
+        manager would leave the registry talking to an object nobody updates. Unchanged
+        servers keep their live client — closing and respawning every server on each
+        save turns a one-line description edit into a reconnect storm — and only a
+        change to the spawn signature gets a restart.
+        """
+        incoming = {s.name: s for s in servers}
+
+        for name, client in list(self._clients.items()):
+            fresh = incoming.get(name)
+            if fresh is None:
+                with contextlib.suppress(Exception):
+                    await client.close()
+                del self._clients[name]
+                self._servers.pop(name, None)
+                self._tools.pop(name, None)
+                continue
+            if _spawn_signature(fresh) != _spawn_signature(client.server):
+                with contextlib.suppress(Exception):
+                    await client.close()
+                # In place: every later call reads `client.server` when it spawns, so
+                # swapping the attribute is enough and keeps callers' references valid.
+                client.server = fresh
+            self._servers[name] = fresh
+
+        for name, server in incoming.items():
+            if name not in self._clients:
+                self._clients[name] = McpClient(server)
+                self._servers[name] = server
+
+        # Enumerate after the swap, so the status the caller reports describes the new
+        # list. Per-server failures stay contained (see ``ensure_tools``).
+        await self.ensure_tools()
 
     async def close(self) -> None:
         for client in self._clients.values():

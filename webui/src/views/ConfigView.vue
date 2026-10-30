@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { api, type DiffResult, type ProviderEntry, type ProvidersDocument, type ProvidersPatch } from '@/api/client'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DiffEditor from '@/components/DiffEditor.vue'
+import McpServers from '@/components/McpServers.vue'
 import { t } from '@/i18n'
 import { num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -392,6 +393,9 @@ async function applyChanges(): Promise<void> {
       </div>
     </div>
   </section>
+
+  <!-- After providers: the same three-step write flow, different rules. -->
+  <McpServers />
 
   <section class="panel">
     <div class="panel__head">

@@ -40,9 +40,10 @@ from pydantic import BaseModel, Field
 from soapbot.api.auth import require_api_auth
 from soapbot.api.locale import request_locale
 from soapbot.config import settings
-from soapbot.core import config_write
+from soapbot.core import config_write, mcp_write
 from soapbot.core.config_files import ConfigError
 from soapbot.i18n import t
+from soapbot.mcp.config import KNOWN_ROLES, parse_servers
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
@@ -270,3 +271,224 @@ def _audit(actor: str, outcome: str, action: str, fields: list[str]) -> None:
         outcome=outcome,
         detail=f"actor={actor} fields={','.join(fields)[:400] or '-'}",
     )
+
+
+# --------------------------------------------------------------------------- MCP
+#
+# Same three-step shape as providers, with the differences that matter:
+#
+# * **OWNER, not ADMIN.** An entry here is an argv the host executes and whose tools the
+#   model may call. Editing a provider changes where a request is sent; editing this
+#   changes what code runs on the host.
+# * **Read returns env key names only.** The value never leaves the server, so the panel
+#   cannot echo a mask back over a real token — the provider bug is unreachable here by
+#   construction rather than by a guard someone must remember to keep.
+# * **Apply hot-reloads.** MCP servers are already child processes with a reconnect path
+#   (`ensure_tools`); asking for a full restart to add one would be a worse trade than
+#   the reconnect this already does on every failure.
+
+
+class McpServerPatchEntry(BaseModel):
+    """One server in a patch. Every field except ``name`` is optional."""
+
+    name: str = Field(..., min_length=1, max_length=64)
+    description: str | None = None
+    command: list[str] | None = None
+    """argv. A string is rejected: see ``soapbot.mcp.config``."""
+    env: dict[str, str] | None = None
+    """Full replacement when present; omitted means "keep what is on disk"."""
+    timeout: float | None = Field(default=None, gt=0)
+    min_role: str | None = None
+    delete: bool = False
+
+
+class McpDiffRequest(BaseModel):
+    base_hash: str = ""
+    servers: list[McpServerPatchEntry] = Field(default_factory=list)
+
+
+class McpApplyRequest(McpDiffRequest):
+    approved_hash: str = ""
+
+
+def _mcp_path():
+    return settings.mcp_file
+
+
+def _mcp_manager():
+    """The live manager, or ``None`` when the runtime is not up.
+
+    Imported lazily: ``soapbot.app`` imports the routers, so a module-level import would
+    be circular.
+    """
+    from soapbot.app import get_runtime
+
+    runtime = get_runtime()
+    return None if runtime is None else getattr(runtime, "mcp", None)
+
+
+def _mcp_status(manager) -> dict[str, Any]:
+    """Live state keyed by server name, so the table needs one fetch, not two."""
+    if manager is None:
+        return {}
+    return {
+        item["name"]: {"tools": item["tools"], "error": item["error"]}
+        for item in manager.status().get("servers", [])
+    }
+
+
+def _mcp_patch_payload(payload: McpDiffRequest) -> list[dict[str, Any]]:
+    # `exclude_unset` for the same reason as providers: a field the client did not send
+    # must not arrive as an explicit null and blank what is on disk.
+    return [entry.model_dump(exclude_unset=True) for entry in payload.servers]
+
+
+@router.get("/mcp")
+async def read_mcp(_auth: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
+    """The server list as the editor should see it. Env values are not included."""
+    path = _mcp_path()
+    try:
+        document = config_write.read_document(path)
+    except ConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "servers": mcp_write.public_servers(document),
+        "base_hash": config_write.file_hash(path),
+        "path": str(path),
+        "roles": sorted(KNOWN_ROLES),
+        "status": _mcp_status(_mcp_manager()),
+        "restart_required": False,
+        "hint": "env 只写不读：这里只返回键名；提交时不带 env 表示保留文件里的原值。",
+    }
+
+
+@router.post("/mcp/diff")
+async def diff_mcp(
+    payload: McpDiffRequest,
+    request: Request,
+    _auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """Candidate diff for a server patch. Writes nothing."""
+    _require_permission(_auth, request, Permission.MANAGE_MCP)
+    try:
+        result = mcp_write.build_mcp_patch(
+            path=_mcp_path(),
+            patch=_mcp_patch_payload(payload),
+            base_hash=payload.base_hash,
+        )
+    except config_write.ConfigConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "mcp.yaml 在你编辑期间被改动，请重新载入后再提交。",
+                "current_hash": exc.current_hash,
+            },
+        ) from exc
+    except ConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "diff": result.diff,
+        "changed_fields": result.changed_fields,
+        "base_hash": result.base_hash,
+        "new_hash": result.new_hash,
+        "empty": result.empty,
+    }
+
+
+@router.post("/mcp/apply")
+async def apply_mcp(
+    payload: McpApplyRequest,
+    request: Request,
+    _auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """Write the patch, then re-point the live manager at the result.
+
+    The response carries per-server outcomes rather than a bare "saved": a server that
+    was written but cannot start is exactly the case the operator needs to see, and it
+    is indistinguishable from success if the endpoint only reports the write.
+    """
+    _require_permission(_auth, request, Permission.MANAGE_MCP)
+    path = _mcp_path()
+    actor = _caller_label(request)
+
+    try:
+        result = mcp_write.build_mcp_patch(
+            path=path,
+            patch=_mcp_patch_payload(payload),
+            base_hash=payload.base_hash,
+        )
+    except config_write.ConfigConflictError as exc:
+        _audit(actor, "deny", "mcp_stale_base_hash", [])
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "mcp.yaml 在确认前被改动，本次未写入。",
+                "current_hash": exc.current_hash,
+            },
+        ) from exc
+    except ConfigError as exc:
+        _audit(actor, "deny", "mcp_validation_failed", [])
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if result.empty:
+        return {"written": False, "reason": "no changes", "changed_fields": []}
+
+    if payload.approved_hash and payload.approved_hash != result.new_hash:
+        _audit(actor, "deny", "mcp_unapproved_diff", result.changed_fields)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "提交的改动与你确认过的 diff 不一致，本次未写入。",
+                "expected_hash": result.new_hash,
+                "approved_hash": payload.approved_hash,
+            },
+        )
+
+    try:
+        config_write.write_atomic(path, result.rendered)
+    except OSError as exc:
+        _audit(actor, "deny", f"mcp_write_failed:{exc.__class__.__name__}", result.changed_fields)
+        logger.exception("mcp configuration write failed for %s", path)
+        raise HTTPException(
+            status_code=500, detail=t("api.write_failed", request_locale(request))
+        ) from exc
+
+    _audit(actor, "allow", "mcp_servers_updated", result.changed_fields)
+
+    base = {
+        "written": True,
+        "changed_fields": result.changed_fields,
+        "base_hash": result.new_hash,
+    }
+
+    manager = _mcp_manager()
+    if manager is None:
+        return {
+            **base,
+            "restart_required": True,
+            "servers": {},
+            "note": "运行时未启动，改动已写入文件，下次启动生效。",
+        }
+
+    try:
+        # Parsed from the document we just validated rather than re-read from disk: the
+        # hash check already established that this is the file that was written, and a
+        # second read would introduce a window where another editor's save is picked up
+        # while the response still describes ours.
+        await manager.reload(parse_servers(result.document.get("servers") or []))
+    except Exception as exc:  # pragma: no cover - reload swallows per-server failures
+        logger.exception("mcp reload failed after write")
+        return {
+            **base,
+            "restart_required": True,
+            "servers": {},
+            "note": f"写入成功，但热加载失败（{type(exc).__name__}），需重启生效。",
+        }
+
+    return {
+        **base,
+        "restart_required": False,
+        "servers": _mcp_status(manager),
+    }
