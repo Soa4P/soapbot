@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +91,24 @@ class Settings(BaseSettings):
 
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
+
+    @model_validator(mode="after")
+    def _config_follows_data(self) -> Settings:
+        """Where the data went, the config went.
+
+        Two real failures come from leaving these independent. The shipped ``.env``
+        template sets ``SOAPBOT_CONFIG_DIR=./config``, which resolves against the process
+        working directory — under systemd that is the checkout, so the panel edited the
+        *template* and the next ``git pull`` reverted every provider it had been given.
+        And an operator who points ``data_dir`` at a volume still gets a config directory
+        next to the source tree unless they also know to move this one.
+
+        So: a config path that was never moved (still the shipped default, or the template's
+        relative ``./config``) follows the data directory instead.
+        """
+        if self.config_dir == Path("config") or self.config_dir == DEFAULT_DATA_DIR / "config":
+            self.config_dir = self.data_dir / "config"
+        return self
 
     # ---- runtime ----
     enable_runtime: bool = True
