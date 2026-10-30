@@ -1,12 +1,8 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-10-28T23:20:00+08:00",
-  "current": {
-    "phase": "ph1",
-    "task": "ph1-t6",
-    "step": "阶段 1 代码侧完成并验证；首次提交待确认 git 身份"
-  },
+  "updated_at": "2026-10-29T22:30:39+08:00",
+  "current": null,
   "phases": [
     {
       "id": "ph1",
@@ -97,8 +93,8 @@
         {
           "id": "ph1-t6",
           "name": "首次提交",
-          "status": "todo",
-          "note": "本机 git 无 user.name/user.email；改 git config 需用户确认。工作区已就绪，差一个身份与一次 commit",
+          "status": "done",
+          "note": "已完成：身份确认后多轮提交并推送，CI 5 个作业全绿（最近一次见 git log）。这条 note 曾长期停留在「待确认 git 身份」，是看板比实际落后的典型样本",
           "files": []
         }
       ]
@@ -331,6 +327,150 @@
           "files": []
         }
       ]
+    },
+    {
+      "id": "ph10",
+      "index": "10",
+      "name": "补齐四项「文档写了、面板上没有」的能力",
+      "goal": "09 页流式观察、面板内编辑 MCP、看板纠偏、上游连通性自检",
+      "tasks": [
+        {
+          "id": "ph10-t1",
+          "name": "09 页流式观察",
+          "status": "done",
+          "note": "后端早已写入 trace.chunks / stream，前端一个字段都没渲染。补三段耗时阶梯、分句序列、中断与截断角标；顺带发现 MessageTrace 在 TS 里声明了 extras 但 to_dict 从不序列化它，改用 stages 判断「回发环节是否跑过」",
+          "files": [
+            {
+              "path": "webui/src/views/PipelineView.vue",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/api/client.ts",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/i18n/locales/zh-CN.ts",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/i18n/locales/en-US.ts",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_pipeline_trace.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_streaming_wiring.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph10-t2",
+          "name": "面板内编辑 MCP 服务器",
+          "status": "done",
+          "note": "读取 → diff → 确认 → 写入，OWNER 权限（新增服务器等于开放子进程执行通道）。env 只写不读：接口只回键名，diff 里显示 redacted: 指纹而不是值——扁平 *** 会让「换了 token」渲染成「没有改动」",
+          "files": [
+            {
+              "path": "src/soapbot/core/mcp_write.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/api/config_write.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/config_write.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/mcp/config.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/security/principal.py",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/components/McpServers.vue",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/views/ConfigView.vue",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_write.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_config_api.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph10-t3",
+          "name": "上游连通性自检",
+          "status": "done",
+          "note": "providers: [] 以前不产生任何 finding，doctor 对「一个字都答不出来的机器人」打印 PASS。新增 provider.upstream 检查（WARN/MEDIUM，不拉红门禁），以及可选的 --probe 网络探测；探测不带密钥，401 也算「活着」",
+          "files": [
+            {
+              "path": "src/soapbot/security/posture.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/cli.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_posture.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph10-t4",
+          "name": "看板纠偏与验证矩阵",
+          "status": "done",
+          "note": "看板时间戳与 current 修正、ph1-t6 过期 note 改写；新增验证矩阵，按「自动+实测 / 仅自动 / 未验证」三分法标注",
+          "files": [
+            {
+              "path": "tests/test_progress_board.py",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/README.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -426,10 +566,10 @@
     }
   ],
   "verification": {
-    "pytest": "815 passed, 4 skipped",
+    "pytest": "1015 passed, 8 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
-    "deploy_check": "0 阻断 / 0 告警 / 14 通过",
+    "deploy_check": "0 阻断 / 1 告警 / 14 通过",
     "deps": "依赖清单一致",
     "clean_venv": "pip install . 成功并实际启动，/api/health 200",
     "docker_runtime": "未验证（本机无 Docker，装不上）"
