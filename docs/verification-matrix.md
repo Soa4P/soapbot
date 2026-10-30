@@ -84,6 +84,10 @@ cd webui && npm run typecheck && npm run build
 python scripts/check_contrast.py
 python scripts/check_deploy.py
 
+# 部署侧复验（需要一台已部署的主机）
+python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --verify   # §8 十三项
+python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --backup   # 数据卷快照
+
 # 部署姿态（含本轮新增的上游检查）
 python -m soapbot.cli doctor
 ```
