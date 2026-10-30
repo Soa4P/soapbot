@@ -114,6 +114,27 @@ export const api = {
     return request<any>(`/api/logs?${query.toString()}`)
   },
 
+  /**
+   * Config editing is three calls, not one `PUT`, and the split is the point: the
+   * operator approves the lines that will change, so `diff` must run against the real
+   * file and write nothing, and `apply` carries the hash of the diff that was shown.
+   */
+  configAdapters: () => request<any>('/api/config/adapters'),
+  configAdaptersDiff: (body: { adapters: unknown[]; base_hash: string }) =>
+    request<any>('/api/config/adapters/diff', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  configAdaptersApply: (body: {
+    adapters: unknown[]
+    base_hash: string
+    approved_hash: string
+  }) =>
+    request<any>('/api/config/adapters/apply', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   plugins: () => request<any>('/api/plugins'),
   /**
    * Install a plugin package. The server answers `approved: false` on purpose — the
