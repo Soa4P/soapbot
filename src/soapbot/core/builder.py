@@ -610,10 +610,29 @@ def build_memory_stack(
 
 
 def load_dotenv_if_present() -> None:
-    env = Path(__file__).resolve().parents[3] / ".env"
-    if not env.exists():
-        return
+    """Load the ``.env`` this process was told to read into ``os.environ``.
+
+    ``SOAPBOT_ENV_FILE`` is the variable the settings page writes through and the one
+    ``config.py`` hands to Pydantic. Deriving the path from the source file instead meant
+    the container read ``/app/.env`` — which does not exist there, the root filesystem is
+    read-only — while the settings page wrote ``/data/.env``.
+
+    That stayed invisible for as long as every key in the file was a ``SOAPBOT_*``
+    setting, because Pydantic reads that file itself. It stops being invisible the moment
+    a *secret* lives there: ``api_key: env:NAME`` resolves from ``os.environ``, so the
+    documented place to put a key was the one place it could not be read from, and
+    startup failed with "references unset environment variable".
+    """
     import os
+
+    configured = os.environ.get("SOAPBOT_ENV_FILE", "").strip()
+    env = (
+        Path(configured).expanduser()
+        if configured
+        else Path(__file__).resolve().parents[3] / ".env"
+    )
+    if not env.is_file():
+        return
 
     for line in env.read_text(encoding="utf-8").splitlines():
         line = line.strip()
