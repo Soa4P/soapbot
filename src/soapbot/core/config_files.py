@@ -71,6 +71,13 @@ class AdapterConfig:
     enabled: bool = True
 
 
+def env_file_hint() -> str:
+    """Where to write the missing variable — named, because "set it in the environment"
+    sends someone to edit their shell when every other value lives in ``.env``."""
+    path = os.environ.get("SOAPBOT_ENV_FILE", "")
+    return path or ".env"
+
+
 def resolve_secret(value: Any, *, field_name: str = "value") -> str:
     """Resolve ``env:`` / ``enc:v1:`` indirection; return literals unchanged."""
     if value is None:
@@ -86,7 +93,14 @@ def resolve_secret(value: Any, *, field_name: str = "value") -> str:
             # transport and rejected by the upstream, which turns a missing
             # environment variable into a runtime auth failure nobody can trace back
             # to this file.
-            raise ConfigError(f"{field_name} references unset environment variable {var!r}")
+            # The strictness stays — an empty key becomes a 401 upstream — but refusing to
+            # boot without saying how to make it true is just a bad error message wearing a
+            # principle as a costume.
+            raise ConfigError(
+                f"{field_name} references unset environment variable {var!r}. "
+                f"Set {var} in {env_file_hint()}, or change the entry to a literal key "
+                "(Provider 列表在第 07 页)。"
+            )
         return resolved
     if text.startswith("enc:v1:"):
         from soapbot.security.crypto import get_secret_box

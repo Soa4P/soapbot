@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `1086 passed, 9 skipped`；CI 五任务全绿。
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `1085 passed, 10 skipped`；CI 五任务全绿。
 
 > 上一版此处写着「ubuntu 因一个偶发用例失败」，并把它归因于重启竞态。**那个判断是错的**，
 > 修正记录留在这一节里，因为「当时为什么看错」比结论本身更有用：
@@ -239,7 +239,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 1086 passed, 9 skipped
+python -m pytest -q                 # 1085 passed, 10 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度

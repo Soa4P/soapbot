@@ -76,7 +76,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：1086 passed / 9 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：1085 passed / 10 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁

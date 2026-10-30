@@ -60,7 +60,9 @@ set "SOAPBOT_HOST=127.0.0.1"
 set "SOAPBOT_PORT=6185"
 set "SOAPBOT_ENABLE_RUNTIME=true"
 set "SOAPBOT_DATA_DIR=%CD%\data"
-set "SOAPBOT_CONFIG_DIR=%CD%\config"
+rem No SOAPBOT_CONFIG_DIR on purpose: the app seeds config/ into its own writable
+rem directory on first start, and pinning it here would make the template (which a
+rem `git pull` rewrites) the thing being edited.
 set "SOAPBOT_ENV_FILE=%CD%\.env"
 if not exist "%SOAPBOT_DATA_DIR%" mkdir "%SOAPBOT_DATA_DIR%"
 

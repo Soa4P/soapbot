@@ -221,7 +221,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1086 项通过 / 9 项跳过）
+└── tests/              # pytest（1085 项通过 / 10 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
@@ -466,29 +466,42 @@ make doctor         # 部署姿态检查
 
 不用 `make` 也可以，见[快速开始](#快速开始)。
 
-### Linux 服务器（一条命令，不用 Docker）
+### 双端安装（Windows / Linux / macOS，同一个安装器）
+
+```bash
+python scripts/bootstrap.py                       # 装到当前目录（或 --dir）
+python scripts/bootstrap.py --autostart           # 开机/登录自动起来
+python scripts/bootstrap.py --check               # 只体检已有安装
+python scripts/bootstrap.py --dir D:\soapbot --port 6185
+```
+
+六个步骤两端一致：创建 venv → `pip install -e .` → 确认面板产物存在（缺 Node 时会明说）
+→ 把数据目录/配置目录写成**绝对路径**写进 `.env` → 交给平台自己的进程管理者 →
+轮询 `/api/health` 到通过 → 打印面板地址、取令牌的命令、下一步去第 07 页。幂等：再跑一次等于升级。
+
+两端唯一真正不同的地方在最后一步：
+
+| 平台 | 谁来托管进程 | `--autostart` 做什么 |
+|---|---|---|
+| Windows | 双击 `start-panel.bat`；或用 detached 进程后台起 | 注册计划任务 `soapbot-panel`（登录时启动） |
+| Linux | systemd unit（有 root）/ 用户级 unit（无 root，会提示 `loginctl enable-linger`） | 等价于 `systemctl enable --now` |
+| 无 systemd | 明确告知：用 supervisor / openrc，或直接前台跑 | 不假装成功 |
+
+完全没有 Linux 主机时也可一张命令：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/install.sh | sudo bash
 ```
 
-一条命令做完：装系统依赖（Python < 3.12 时自动换成 3.12）→ clone 到 `/opt/soapbot`
-→ venv + `pip install -e .` → 复制 `.env` 并把数据目录、配置目录写成**绝对路径** →
-写一个 systemd unit → 轮询 `/api/health` → 打印面板地址、令牌获取方式和下一条该做的事。
+它只负责弄到 Python ≥ 3.12（22.04 上自动换 deadsnakes 的 3.12）并 clone，然后调用上面
+**同一个** `bootstrap.py`——两处分叉的安装器正是第一版脚本 systemd-only 的成因。
 
-幂等：再跑一次就是升级（拉新代码、重装依赖、重启服务），不会建出第二份。
-面板仍绑 `127.0.0.1`，从自己电脑怎么看：
+> **首次运行没有 Provider 是刻意的**：模板 `config/providers.yaml` 是空的。一个引用了未设置环境变量的
+> 模板，会让每一次全新安装都以 `references unset environment variable` 拒绝启动——什么都没配就已经看起来坏了。
+> 在第 07 页加一个即可（那边有「测试」按钮能当场证明它答得上话）。
 
-```bash
-ssh -L 6185:127.0.0.1:6185 <user>@<服务器>     # 然后本机打开 http://127.0.0.1:6185
-```
-
-不用 systemd（只想前台跑）加 `--no-service`；换目录/systemd 时用 `--dir`。
-**这些全部在本机 Ubuntu 之外未经实测**：本机没有 Linux 主机，脚本只通过语法检查与逐段复核；
-首次在真实服务器上跑时请把输出整段发回来，它会指出第一个真实失败点。
-
-> Docker 路径仍然保留，但它是第二选择：Docker Hub 在很多网络里根本连不上（镜像构建第一步
-> 就失败），而上面这条命令只需要能访问 GitHub。
+> **Linux 一侧仍未在真机跑过**：本机没有 Linux 主机，`install.sh` 只通过语法检查；
+> 首次在服务器上运行请把输出整段发回，第一个真实失败点会被直接指出。
 
 ### Docker
 
