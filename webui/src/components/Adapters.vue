@@ -5,14 +5,11 @@
  * Deliberately the same three steps as the provider editor above it on this page, and
  * for the same reason: the operator approves concrete lines. A single save button would
  * mean the first time they see the resulting file is after it is already live.
- *
- * Labels are English rather than t(...) on purpose for now: the i18n test requires every
- * key to exist in both dictionaries, and adding half a page's worth of keys in the same
- * change as the page itself is how one of them ends up missing.
  */
 import { onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
+import { t } from '@/i18n'
 
 interface Draft {
   kind: string
@@ -39,6 +36,10 @@ function message(text: string) {
   status.value = text
 }
 
+function failure(key: string, error: unknown) {
+  message(t(key, { reason: (error as Error).message }))
+}
+
 async function load() {
   busy.value = true
   try {
@@ -59,7 +60,7 @@ async function load() {
     diff.value = ''
     message('')
   } catch (error) {
-    message(`load failed: ${(error as Error).message}`)
+    failure('adapters.loadFailed', error)
   } finally {
     busy.value = false
   }
@@ -84,9 +85,9 @@ async function preview() {
     })
     diff.value = body.diff || ''
     newHash.value = body.new_hash
-    message(body.empty ? 'no changes' : 'review the diff, then write')
+    message(body.empty ? t('adapters.noChanges') : t('adapters.review'))
   } catch (error) {
-    message(`preview failed: ${(error as Error).message}`)
+    failure('adapters.previewFailed', error)
   } finally {
     busy.value = false
   }
@@ -102,12 +103,12 @@ async function write() {
     })
     message(
       body.written
-        ? 'written - restart the container to connect the new adapter'
-        : `not written: ${body.reason ?? 'no changes'}`,
+        ? t('adapters.written')
+        : t('adapters.notWritten', { reason: body.reason ?? t('adapters.noChanges') }),
     )
     await load()
   } catch (error) {
-    message(`write failed: ${(error as Error).message}`)
+    failure('adapters.writeFailed', error)
   } finally {
     busy.value = false
   }
@@ -118,21 +119,17 @@ onMounted(load)
 
 <template>
   <section class="panel">
-    <h2>Protocol ends (adapters)</h2>
-    <p class="muted">
-      One entry per adapter <strong>kind</strong>. The runtime registers one adapter per
-      kind, so a second entry with the same kind would replace the first one's
-      connection settings instead of adding an account.
-    </p>
+    <h2>{{ t('adapters.title') }}</h2>
+    <p class="muted">{{ t('adapters.hint') }}</p>
 
     <table v-if="loaded">
       <thead>
         <tr>
-          <th>Kind</th>
-          <th>Enabled</th>
-          <th>WebSocket URL</th>
-          <th>Token</th>
-          <th>Self ID</th>
+          <th>{{ t('adapters.col.kind') }}</th>
+          <th>{{ t('adapters.col.enabled') }}</th>
+          <th>{{ t('adapters.col.ws') }}</th>
+          <th>{{ t('adapters.col.token') }}</th>
+          <th>{{ t('adapters.col.self') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -146,14 +143,20 @@ onMounted(load)
       </tbody>
     </table>
 
-    <p v-else class="muted">{{ busy ? 'loading...' : 'not loaded' }}</p>
+    <p v-else class="muted">
+      {{ busy ? t('adapters.loading') : t('adapters.notLoaded') }}
+    </p>
 
     <div class="row">
-      <button class="btn" :disabled="busy" @click="drafts.push(blank())">Add adapter</button>
-      <button class="btn lamp" :disabled="busy || !loaded" @click="preview">
-        Preview changes
+      <button class="btn" :disabled="busy" @click="drafts.push(blank())">
+        {{ t('adapters.add') }}
       </button>
-      <button class="btn" :disabled="busy || !diff" @click="write">Write</button>
+      <button class="btn lamp" :disabled="busy || !loaded" @click="preview">
+        {{ t('adapters.preview') }}
+      </button>
+      <button class="btn" :disabled="busy || !diff" @click="write">
+        {{ t('adapters.write') }}
+      </button>
     </div>
 
     <p v-if="status" class="muted">{{ status }}</p>
