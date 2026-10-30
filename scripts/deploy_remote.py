@@ -44,6 +44,10 @@ class Step:
     command: str
     expectation: str
     diagnosis: str
+    #: When set, the step passes if this substring appears in the output, *regardless of
+    #: exit code*. Some checks assert that something is refused — `touch /app/x` must
+    #: fail with "Read-only file system", and a zero exit code there would be the bug.
+    expect: str | None = None
     #: Filled in once the step has run.
     ok: bool | None = None
     output: str = ""
@@ -170,21 +174,196 @@ MANUAL = [
 ]
 
 
+COMPOSE = "docker compose -f deploy/docker-compose.yml"
+
+
+def _prelude(run: Run) -> str:
+    return f"cd {shlex.quote(run.directory)}\nC={shlex.quote(COMPOSE)}\n"
+
+
+def build_verify_steps(run: Run) -> list[Step]:
+    """The §8 checklist as executable assertions.
+
+    Three of these encode a trap that cost real time the first time round:
+
+    * the control API answers only from **inside** the container — a request through the
+      published port carries the docker gateway as its source address, so the loopback
+      shortcut does not fire and the answer is 401;
+    * `touch /app/x` must *fail*; a zero exit code there means `read_only` is off, which
+      is why this step asserts on text and not on the exit status;
+    * "healthy" is a container-level fact, not an app-level one — a container can report
+      healthy with a broken runtime, so the health endpoint is checked separately.
+    """
+    pre = _prelude(run)
+    return [
+        Step(
+            "容器在跑且 healthy",
+            pre + "$C ps --format '{{.Name}} {{.Status}}'",
+            "输出含 healthy",
+            "容器没起或健康检查不过：docker compose logs --tail 50 看 traceback。",
+            expect="healthy",
+        ),
+        Step(
+            "只发布到回环",
+            pre + "$C port soapbot 6185",
+            "输出 127.0.0.1:6185",
+            "绑到了 0.0.0.0 就等于把控制面挂到公网；这条比 doctor 的容器内判断更可靠。",
+            expect="127.0.0.1",
+        ),
+        Step(
+            "进程不是 root",
+            pre + "$C exec -T soapbot id",
+            "uid=10001",
+            "compose 的 user: 没生效。",
+            expect="uid=10001",
+        ),
+        Step(
+            "根文件系统只读",
+            pre + "$C exec -T soapbot sh -c 'touch /app/x' 2>&1 || true",
+            "报 Read-only file system",
+            "read_only 没生效——容器内可以写根文件系统，持久化后门成为可能。",
+            expect="Read-only file system",
+        ),
+        Step(
+            "健康端点",
+            pre + f"curl -s -m 8 http://127.0.0.1:{PORT}/api/health",
+            '返回 {"status":"ok"}',
+            "端口映射方向反了，或应用没监听；也可能是反代把它劫走。",
+            expect='"status":"ok"',
+        ),
+        Step(
+            "设置接口可读（容器内回环）",
+            pre
+            + f"""$C exec -T soapbot python - <<'PY'
+import urllib.request
+print(urllib.request.urlopen("http://127.0.0.1:{PORT}/api/settings", timeout=8).read().decode()[:300])
+PY""",
+            "返回的 env_file 是 /data/.env",
+            "宿主机 curl 进来会 401（源地址是 docker 网关）：必须从容器内部发请求。",
+            expect="/data/.env",
+        ),
+        Step(
+            "/data 可写",
+            pre + "$C exec -T soapbot sh -c 'test -w /data && echo writable'",
+            "输出 writable",
+            "数据卷挂载权限不对，设置页与插件都会写失败。",
+            expect="writable",
+        ),
+        Step(
+            "卷内关键文件在位",
+            pre + "$C exec -T soapbot sh -c 'ls /data/secret.key /data/soapbot.db'",
+            "列出 secret.key 与 soapbot.db",
+            "卷没挂上或首次启动失败；也说明 down/up 会丢数据。",
+            expect="secret.key",
+        ),
+        Step(
+            "pid 1 是 tini",
+            pre + "$C exec -T soapbot cat /proc/1/comm",
+            "tini",
+            "ENTRYPOINT 被覆盖，插件子进程会成为孤儿。",
+            expect="tini",
+        ),
+        Step(
+            "doctor 判定 PASS",
+            pre + "$C exec -T soapbot python -m soapbot.cli doctor 2>&1 | tail -1",
+            "verdict: PASS",
+            "doctor 是归因工具：它红在哪一条，就说明哪一层没生效。",
+            expect="verdict: PASS",
+        ),
+        Step(
+            "重启策略",
+            pre + "docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $($C ps -q soapbot)",
+            "unless-stopped",
+            "宿主机重启后服务不会自己回来。",
+            expect="unless-stopped",
+        ),
+        Step(
+            "磁盘水位低于 85%",
+            pre
+            + "u=$(df -P / | awk 'NR==2{gsub(\"%\",\"\",$5); print $5}'); "
+            "[ \"$u\" -lt 85 ] && echo \"disk ${u}%\"",
+            "输出 disk NN%（<85）",
+            "镜像与日志会把磁盘吃满；满了之后容器写入失败、数据库损坏。",
+            expect="disk ",
+        ),
+        Step(
+            "可用内存高于 200 MB",
+            pre
+            + "m=$(free -m | awk '/^Mem:/{print $7}'); [ \"$m\" -gt 200 ] && echo \"mem ${m}MB\"",
+            "输出 mem NNMB（>200）",
+            "1 GB 的 mem_limit 之外还要给宿主留余量，否则构建镜像时会被 OOM 打断。",
+            expect="mem ",
+        ),
+    ]
+
+
+def build_backup_steps(run: Run, keep: int) -> list[Step]:
+    """Snapshot the data volume and prove the archive is readable.
+
+    The failure mode worth guarding against is not "no file appeared" — it is a file of
+    plausible size that `tar` cannot open. The listing step is the one that matters.
+    """
+    pre = _prelude(run)
+    backup_dir = f"{run.directory}/backups"
+    return [
+        Step(
+            "打包数据卷",
+            pre
+            + f"mkdir -p {shlex.quote(backup_dir)}\n"
+            + "$C ps -q soapbot >/dev/null\n"
+            + "v=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Name}}{{end}}{{end}}' $($C ps -q soapbot))\n"
+            + '[ -n "$v" ] || { echo "no /data volume found"; exit 1; }\n'
+            + "docker run --rm --network none -v \"$v\":/data:ro -v "
+            + f"{shlex.quote(backup_dir)}:/backup alpine:3 "
+            + "sh -c 'tar czf /backup/soapbot-$(date +%F-%H%M%S).tgz -C /data .'\n"
+            + f"ls -1t {shlex.quote(backup_dir)}/*.tgz | head -1",
+            "打印新归档路径",
+            "拉不到 alpine 或卷名对不上；归档没生成说明这条备份链根本不工作。",
+            expect="soapbot-",
+        ),
+        Step(
+            "只保留最近 N 份",
+            pre + f"ls -1t {shlex.quote(backup_dir)}/*.tgz | tail -n +{keep + 1} | xargs -r rm -f; "
+            f"ls -1 {shlex.quote(backup_dir)} | wc -l",
+            f"剩余不超过 {keep} 份",
+            "轮转没生效会把磁盘慢慢填满。",
+        ),
+        Step(
+            "归档可列出内容",
+            pre + f"tar -tzf $(ls -1t {shlex.quote(backup_dir)}/*.tgz | head -1) | grep -m1 -E 'secret\\.key|soapbot\\.db'",
+            "能列出 secret.key 或 soapbot.db",
+            "归档损坏或打包时目录搞错了——文件存在不能证明能恢复。",
+        ),
+    ]
+
+
 def run_step(run: Run, step: Step) -> Step:
     argv = ssh_command(run, step.command)
+    # LF only. This file is authored on Windows, and a CRLF payload reaches bash as
+    # `cd /opt/soapbot\r` -- "No such file or directory", with the carriage return
+    # invisible in the message.
+    script = step.command.replace("\r\n", "\n").replace("\r", "\n")
+    # Bytes, not text: `text=True` writes through the platform's newline translation and
+    # turns every `\n` back into `\r\n` on the way to the pipe, which is how the CRLF
+    # above came back the first time it was "fixed".
     completed = subprocess.run(
         argv,
-        input=step.command,
+        input=script.encode("utf-8"),
         capture_output=True,
-        text=True,
         timeout=1800,
     )
-    step.output = (completed.stdout + completed.stderr).strip()
-    step.ok = completed.returncode == 0
+    step.output = (completed.stdout + completed.stderr).decode("utf-8", "replace").strip()
+    if step.expect is not None:
+        # Deliberately ignores the exit code: the interesting assertions here are that
+        # something was *refused*, and a clean exit in those cases means the control
+        # is not in effect.
+        step.ok = step.expect in step.output
+    else:
+        step.ok = completed.returncode == 0
     return step
 
 
-def report(run: Run) -> int:
+def report(run: Run, manual: bool = True) -> int:
     failed = [s for s in run.steps if s.ok is False]
     for index, step in enumerate(run.steps, 1):
         mark = "PASS  " if step.ok else "FAIL  "
@@ -197,16 +376,17 @@ def report(run: Run) -> int:
             print(f"         → 归因：{step.diagnosis}")
             break
 
-    print()
-    print("需要人工的三条（脚本不代劳，也不假装通过）：")
-    for tag, what, why in MANUAL:
-        print(f"  {tag}  {what}")
-        print(f"         理由：{why}")
+    if manual:
+        print()
+        print("需要人工的三条（脚本不代劳，也不假装通过）：")
+        for tag, what, why in MANUAL:
+            print(f"  {tag}  {what}")
+            print(f"         理由：{why}")
 
     if failed:
         print(f"\n第 {run.steps.index(failed[0]) + 1} 步失败，后续步骤未执行。")
         return 1
-    print("\n自动化可判定的七步全部通过。")
+    print(f"\n{len(run.steps)} 项全部通过。")
     return 0
 
 
@@ -226,9 +406,20 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--repo", default="https://github.com/Soa4P/soapbot.git")
     parser.add_argument("--commit", default="02ad519")
     parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="run the deploy-layer §8 checklist against a running deployment",
+    )
+    parser.add_argument(
+        "--backup", action="store_true", help="snapshot the /data volume and prove it lists"
+    )
+    parser.add_argument("--keep", type=int, default=3, help="how many archives to keep")
+    parser.add_argument(
         "--dry-run", action="store_true", help="print the steps and exit without connecting"
     )
     args = parser.parse_args(argv)
+    if args.verify and args.backup:
+        parser.error("--verify and --backup are separate runs; pick one")
 
     run = Run(
         host=args.host,
@@ -239,7 +430,12 @@ def main(argv: list[str]) -> int:
         repo=args.repo,
         port=args.port,
     )
-    run.steps = build_steps(run)
+    if args.verify:
+        run.steps = build_verify_steps(run)
+    elif args.backup:
+        run.steps = build_backup_steps(run, args.keep)
+    else:
+        run.steps = build_steps(run)
 
     if args.dry_run:
         print(f"目标：{args.user}@{args.host}:{args.port}  密钥：{args.key or '(ssh 默认)'}")
@@ -254,7 +450,7 @@ def main(argv: list[str]) -> int:
         run_step(run, step)
         if step.ok is False:
             break
-    return report(run)
+    return report(run, manual=not (args.verify or args.backup))
 
 
 if __name__ == "__main__":

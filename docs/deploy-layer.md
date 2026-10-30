@@ -388,3 +388,32 @@ tmpfs: [/tmp]
 第 6 步是这一轮新增的：只读根文件系统与「设置页可写」在静态层面是矛盾的，`check_deploy.py`
 现在会检查 `SOAPBOT_ENV_FILE` 是否落在可写挂载内，但**只有真实的 `curl`/浏览器点击**才能
 证明权限位、挂载点和进程读取路径三者对得上。
+
+### 8.2 一条命令复验（2026-10-30 补齐）
+
+§8.1 是手工跑的，每一步都要现拼 `docker compose exec`。现在固化进部署驱动器：
+
+```bash
+# 13 项：healthy / 只绑回环 / 非 root / 只读根 / 健康端点 / 容器内回环读设置
+#        / /data 可写 / 卷内关键文件 / tini / doctor PASS / 重启策略 / 磁盘 / 内存
+python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥路径> --verify
+
+# 数据卷快照：打包 → 只留 3 份 → 证明归档能被 tar 列出
+python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥路径> --backup
+```
+
+实跑结果（2026-10-30，同一台雨云主机）：**13 项全 PASS**，磁盘 17%、可用内存 3231 MB、
+重启策略 `unless-stopped`；备份产出 `soapbot-2026-10-30-121626.tgz`，`tar -tzf` 能列出
+`./soapbot.db`。
+
+三个坑已经写进脚本，不再靠人记：
+
+1. **控制面只能在容器内部调**。宿主机 `curl 127.0.0.1:6185` 返回 401——经端口映射进来的
+   请求，容器内看到的源地址是 docker 网关，不是回环，免令牌通路不命中。
+2. **`text=True` 会把 `\n` 翻译回 `\r\n`**。脚本在 Windows 上编写，远端 bash 收到的是
+   `cd /opt/soapbot\r`，报 "No such file or directory" 而回车符在报错里看不见。改成传字节。
+3. **`touch /app/x` 必须失败才算通过**。这步断言的是"被拒绝"，退出码为 0 恰恰是缺陷，
+   所以判据看输出文本而不是退出码。
+
+备份那条刻意多走一步：只看文件存在没有意义，**归档能不能被 `tar -tzf` 列出**才是可恢复的
+证据——备份最常见的失败是"生成了一个打不开的文件"。
