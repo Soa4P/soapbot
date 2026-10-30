@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import { api } from '@/api/client'
+import SetupGuide from '@/components/SetupGuide.vue'
 import { t } from '@/i18n'
 import { compact, num, uptime } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -57,6 +58,11 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
 </script>
 
 <template>
+  <!-- First, before any readout: a missing provider makes every number below meaningless,
+       and an operator's first question is "why does it not answer", not "what is the
+       inbound rate". The card hides itself once the five checks pass. -->
+  <SetupGuide />
+
   <div v-if="runtime.error.value" class="error-banner">
     {{ runtime.error.value }}
   </div>

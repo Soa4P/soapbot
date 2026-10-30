@@ -268,6 +268,33 @@ const schemaMismatch = computed(
               <td class="mono">{{ info.data.value?.data_dir || '—' }}</td>
             </tr>
             <tr>
+              <td class="key">{{ t('settings.runtime.configDir') }}</td>
+              <td class="mono">
+                {{ info.data.value?.config_dir || '—' }}
+                <!-- These two rows answer the question the panel otherwise lies about:
+                     "I saved it, why is it not in effect?" A path plus a writability
+                     flag separates a read-only mount from a wrong directory. -->
+                <span
+                  class="pill"
+                  :class="info.data.value?.config_dir_writable ? 'ok' : 'bad'"
+                  style="margin-left: 8px"
+                >
+                  <i class="dot" />{{ info.data.value?.config_dir_writable
+                    ? t('settings.runtime.configWritable')
+                    : t('settings.runtime.configReadOnly') }}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="key">{{ t('settings.runtime.configDetail') }}</td>
+              <td>
+                <span class="hint">{{ info.data.value?.config_dir_detail || '—' }}</span>
+                <span v-if="info.data.value?.config_dir_remediation" class="hint" style="display: block">
+                  {{ info.data.value.config_dir_remediation }}
+                </span>
+              </td>
+            </tr>
+            <tr>
               <td class="key">{{ t('settings.runtime.envFile') }}</td>
               <td class="mono">{{ info.data.value?.env_file || '—' }}</td>
             </tr>

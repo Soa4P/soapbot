@@ -30,11 +30,22 @@ if not exist "%PY%" (
     "%PY%" -m pip install --quiet -e .
 )
 
+rem The committed checkout already ships built assets, so this normally succeeds. It only
+rem fires after a clean checkout; when it fails, say exactly which tool is missing rather
+rem than letting the panel open on a blank page.
 if not exist "src\soapbot\webui\dist\index.html" (
-    echo [x] the panel was never built: src\soapbot\webui\dist\index.html is missing.
-    echo     build it once with:  cd webui ^&^& npm install ^&^& npm run build
-    pause
-    exit /b 1
+    echo [1/4] building the panel assets ...
+    where npm >nul 2>nul
+    if %errorlevel%==0 (
+        pushd webui
+        call npm install --no-audit --no-fund
+        call npm run build
+        popd
+    ) else (
+        echo.
+        echo [!] no npm found - the panel will still serve the API, but the UI will be blank.
+        echo     Install Node.js 20+ from nodejs.org and run this again to get the interface.
+    )
 )
 
 if not exist ".env" (

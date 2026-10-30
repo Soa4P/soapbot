@@ -64,6 +64,10 @@ export default {
   'settings.runtime.schema': 'Database schema',
   'settings.runtime.expected': 'this build expects',
   'settings.runtime.dataDir': 'Data directory',
+  'settings.runtime.configDir': 'Config directory',
+  'settings.runtime.configWritable': 'writable',
+  'settings.runtime.configReadOnly': 'read-only',
+  'settings.runtime.configDetail': 'writability check',
   'settings.runtime.envFile': 'Config file',
   'settings.runtime.restartHint': 'These settings are written to .env and take effect on restart — the panel does not pretend otherwise.',
   'settings.runtime.startupErrors': 'Warnings recorded at startup:',
@@ -529,9 +533,12 @@ export default {
     'One entry per adapter kind. Two entries with the same kind do not add a second account — the later one replaces the earlier one\'s connection settings.',
   'adapters.col.kind': 'Kind',
   'adapters.col.enabled': 'Enabled',
-  'adapters.col.ws': 'WebSocket URL',
+  'adapters.col.mode': 'Mode',
+  'adapters.col.account': 'Bot QQ',
+  'adapters.col.ws': 'Dial URL (forward)',
+  'adapters.col.host': 'Listen host (reverse)',
+  'adapters.col.port': 'Listen port',
   'adapters.col.token': 'Token',
-  'adapters.col.self': 'Bot QQ',
   'adapters.add': 'Add adapter',
   'adapters.empty': 'No adapter yet. Use "Add adapter" to start.',
   'adapters.preview': 'Preview changes',
@@ -545,4 +552,105 @@ export default {
   'adapters.loadFailed': 'load failed: {reason}',
   'adapters.previewFailed': 'preview failed: {reason}',
   'adapters.writeFailed': 'write failed: {reason}',
+
+  // ------------------------------------------------- step-by-step recipes (NapCat example)
+  'adapters.howtoSummary': 'How to fill this in? Pick one of the two routes (NapCat example)',
+  'adapters.howtoPrelude':
+    'The QQ account itself is logged in inside NapCat (the protocol end); this page only connects this service to NapCat. Column mapping: forward "ws url" = NapCat\'s WebSocket *server* address; reverse "listen port" = the port that waits for NapCat to dial in.',
+  'adapters.howtoReverseTitle': 'Route A (recommended): reverse — NapCat dials in',
+  'adapters.howtoReverse1':
+    'Here: set mode to reverse and the listen port to 3001. If NapCat runs on the same machine, keep the listen address at 127.0.0.1.',
+  'adapters.howtoReverse2':
+    'Here: "Preview changes → Write", then restart the service — the adapter only starts listening at boot.',
+  'adapters.howtoReverse3':
+    'In NapCat: WebUI → Network config → add a "WebSocket client", URL ws://127.0.0.1:3001 (if NapCat is on another machine or in a container, use ws://<this server address>:3001), and enable it.',
+  'adapters.howtoReverse4':
+    'Check the connection on page 02. The "Test" button in reverse mode only proves the port is listening; whether the peer has dialled in is visible only on page 02.',
+  'adapters.howtoForwardTitle': 'Route B: forward — this service dials NapCat (NapCat\'s default)',
+  'adapters.howtoForward1':
+    'In NapCat: WebUI → Network config, confirm a "WebSocket server" is listening (default port 3001).',
+  'adapters.howtoForward2':
+    'Here: set mode to forward and the ws url to ws://127.0.0.1:3001 (adjust to the port NapCat actually listens on).',
+  'adapters.howtoForward3':
+    'Here: click "Test" — "handshake ok, OneBot answered" means it works. No restart needed for the test; write once it passes.',
+  'adapters.howtoCommonTitle': 'True for both routes',
+  'adapters.howtoCommon1': '"Bot QQ" is the account NapCat is logged in as.',
+  'adapters.howtoCommon2':
+    'The token must match on both sides: if NapCat has one set, put the same value here; if it has none, leave this empty too.',
+  'adapters.howtoCommon3':
+    'On either route, finish with "Preview changes → Write"; adapters only connect at service start, so a restart is needed after writing.',
+
+  // ------------------------------------------------- what each box actually means
+  // Following AstrBot's lead: every field gets one line saying which side it describes
+  // and where to copy it from. A bare column header leaves that reasoning to the person
+  // filling the form in.
+  'adapters.ph.account': "the bot's own QQ number",
+  'adapters.hint.kind': 'OneBot v11 standard — spoken by NapCat, Lagrange and go-cqhttp',
+  'adapters.hint.mode': 'forward = this service dials NapCat; reverse = wait for NapCat to dial in',
+  'adapters.hint.account': "the bot's own QQ number, not a group number",
+  'adapters.hint.ws': 'forward only: address of the "WebSocket server" inside NapCat',
+  'adapters.hint.host':
+    'reverse only: address this service listens on. 127.0.0.1 = local connections only; 0.0.0.0 = also accept other machines',
+  'adapters.hint.port':
+    'reverse only: port this service listens on — this is what the "WebSocket client" in NapCat connects to',
+  'adapters.hint.token': 'must match on both sides; empty on both = no token check',
+
+  // ---------------------------------------------- the line to paste on the other side
+  'adapters.targetLabelForward': 'Open this as the "WebSocket server" inside NapCat:',
+  'adapters.targetHintForward':
+    'It has to match the ws url above character for character. NapCat listens on 3001 by default, so this rarely needs changing.',
+  'adapters.targetLabelReverse': 'Paste this into the "WebSocket client" address in NapCat:',
+  'adapters.targetHintReverse':
+    '0.0.0.0 was already replaced with the machine you are browsing from. Write and restart this service first, then let NapCat connect.',
+  'adapters.copy': 'Copy',
+  'adapters.copied': 'Copied',
+  'adapters.copyFailed': 'the browser refused clipboard access: select {text} manually',
+
+  // ------------------------------------------------------- connectivity probes
+  'probe.column': 'Connectivity',
+  'probe.test': 'Test',
+  'probe.testing': 'Testing…',
+  'probe.ariaTest': 'Test provider {id}',
+  'probe.ariaTestKind': 'Test {kind} adapter',
+  'probe.http': 'HTTP {status}',
+  'probe.elapsed': '{ms} ms',
+  'probe.failed': 'test failed: {reason}',
+  'probe.providerHint':
+    'Test probes whether base_url answers at all: it sends no key, so a 401/403 counts as a pass (the endpoint is alive, it just refused an anonymous request).',
+  'probe.adapterHint':
+    'forward really handshakes and asks for get_login_info; reverse only reports on the local port — whether a peer has dialled in cannot be seen from here.',
+  'probe.code.ok': 'reachable',
+  'probe.code.authRejected': 'alive (401/403, no key sent)',
+  'probe.code.notfound': 'wrong path (404)',
+  'probe.code.serverError': 'upstream 5xx',
+  'probe.code.unreachable': 'unreachable',
+  'probe.code.error': 'failed',
+  'probe.code.handshake_ok': 'handshake ok, OneBot answered',
+  'probe.code.unauthorized': 'handshake rejected',
+  'probe.code.not_onebot': 'not OneBot',
+  'probe.code.free': 'port free, not listening yet',
+  'probe.code.in_use': 'port already listening',
+
+  // ------------------------------------------------------- first-run checklist
+  'setup.title': 'First-run checks',
+  'setup.hint': 'This card disappears once everything passes. Each row links straight to what needs fixing.',
+  'setup.dismiss': 'Do not show again',
+  'setup.ok': 'pass',
+  'setup.todo': 'to do',
+  'setup.go': 'Fix it',
+  'setup.providers': 'Provider configured',
+  'setup.providersOk': '{n} provider(s) available for model calls.',
+  'setup.providersMissing': 'No provider: the model stage is disabled, so the bot cannot reply at all.',
+  'setup.adapters': 'QQ adapter configured',
+  'setup.adaptersOk': '{n} adapter(s) written to the config.',
+  'setup.adaptersMissing': 'No adapter: the service runs, but no QQ message can reach it.',
+  'setup.online': 'Adapter online',
+  'setup.onlineOk': 'At least one adapter is connected to its protocol end.',
+  'setup.onlineMissing': 'Configured but not connected: check that NapCat is running and the address and token match.',
+  'setup.startup': 'No startup errors',
+  'setup.startupOk': 'Nothing failed to construct at startup.',
+  'setup.startupMissing': '{n} error(s) at startup — the adapter may never have been created.',
+  'setup.writable': 'Config directory writable',
+  'setup.writableOk': '{path} is writable: saving in the panel really lands on disk.',
+  'setup.writableMissing': '{path} is not writable: the panel may say "saved" and nothing changes after a restart.',
 }

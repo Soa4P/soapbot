@@ -69,12 +69,14 @@ python -m soapbot.cli start
 
 `--probe` 故意不发送 API Key：它打 `/models`，把 401/403 当成「活着」——一个拒绝你的服务器，是一个回答了的服务器。这样一份被转发的调试日志里不会出现凭据。
 
+同一套探测现在也在面板里：07 页每行一个「测试」按钮（`POST /api/config/providers/test`、`POST /api/config/adapters/test`），用表单里的草稿值、不写盘、Provider 侧不发密钥；需要 `MANAGE_CONFIG` 权限并限流到 30 次/分钟，避免管理面被当成内网端口扫描器。服务器上没有浏览器时，`soapbot setup` 走同一套「读 → 合并 → 校验 → 原子写」，校验不过绝不落盘。
+
 ---
 
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：1025 passed / 10 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：1086 passed / 9 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁

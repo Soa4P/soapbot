@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import { api, type DiffResult, type ProviderEntry, type ProvidersDocument, type ProvidersPatch } from '@/api/client'
+import {
+  api,
+  type DiffResult,
+  type ProbeResult,
+  type ProviderEntry,
+  type ProvidersDocument,
+  type ProvidersPatch,
+} from '@/api/client'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DiffEditor from '@/components/DiffEditor.vue'
 import Adapters from '@/components/Adapters.vue'
 import McpServers from '@/components/McpServers.vue'
+import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
 import { num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -124,6 +132,37 @@ function payload(): ProvidersPatch {
     providers: drafts.value
       .filter((row) => edited.value[row.id])
       .map((row) => ({ ...row, id: row.id ?? '' })),
+  }
+}
+
+/* --------------------------------------------------------------- probe (no writes) */
+
+/**
+ * One result per row, keyed by position. Position, not id: the id field is editable, and
+ * keying by a value the operator can retype mid-test would detach the answer from the row
+ * that asked for it.
+ */
+const probes = ref<Record<string, ProbeResult | null>>({})
+const probing = ref<Record<string, boolean>>({})
+const probeErrors = ref<Record<string, string>>({})
+
+async function testProvider(row: ProviderEntry, index: number): Promise<void> {
+  const key = String(index)
+  probing.value = { ...probing.value, [key]: true }
+  probeErrors.value = { ...probeErrors.value, [key]: '' }
+  probes.value = { ...probes.value, [key]: null }
+  try {
+    // The draft value, not the saved one. "Test before you save" is the whole feature;
+    // using the file's base_url would make the button useless during the edit that needs
+    // it. Nothing here touches `edited`, so a probe never dirties the form.
+    probes.value = {
+      ...probes.value,
+      [key]: await api.configProvidersTest({ id: row.id, base_url: row.base_url ?? '' }),
+    }
+  } catch (err) {
+    probeErrors.value = { ...probeErrors.value, [key]: (err as Error).message }
+  } finally {
+    probing.value = { ...probing.value, [key]: false }
   }
 }
 
@@ -262,6 +301,9 @@ async function applyChanges(): Promise<void> {
         <p class="hint" style="margin: 0 0 8px">
           {{ t('config.secretHint', { mask }) }}
         </p>
+        <!-- Says what the test button does *not* do. "Test connection" would otherwise be
+             read as "test my key", and a 401 would look like a broken panel. -->
+        <p class="hint" style="margin: 0 0 8px">{{ t('probe.providerHint') }}</p>
 
         <table class="data">
           <caption class="visually-hidden">{{ t('config.editCaption') }}</caption>
@@ -274,6 +316,7 @@ async function applyChanges(): Promise<void> {
               <th scope="col">API Key</th>
               <th scope="col" class="num">{{ t('overview.priority') }}</th>
               <th scope="col">{{ t('config.enabled') }}</th>
+              <th scope="col">{{ t('probe.column') }}</th>
               <th scope="col"><span class="visually-hidden">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
@@ -345,6 +388,23 @@ async function applyChanges(): Promise<void> {
                   :aria-label="t('config.enableFor', { id: row.id })"
                   @change="markEdited(row.id)"
                 />
+              </td>
+              <td>
+                <!-- Enabled by the draft base_url, not by `edited`: a provider can be
+                     tested the moment its address is typed, before anything is saved. -->
+                <button
+                  class="btn ghost"
+                  type="button"
+                  :disabled="probing[index] || !row.base_url"
+                  :aria-label="t('probe.ariaTest', { id: row.id })"
+                  @click="testProvider(row, index)"
+                >
+                  {{ probing[index] ? t('probe.testing') : t('probe.test') }}
+                </button>
+                <ProbeBadge :result="probes[index] ?? null" />
+                <span v-if="probeErrors[index]" class="hint" style="margin-left: 8px">
+                  {{ t('probe.failed', { reason: probeErrors[index] }) }}
+                </span>
               </td>
               <td>
                 <button class="btn ghost" type="button" @click="removeRow(index)">{{ t('config.remove') }}</button>

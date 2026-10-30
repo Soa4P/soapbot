@@ -111,10 +111,28 @@ def _isolated_runtime(monkeypatch, tmp_path):
       that, and tests that *do* want it enable it explicitly — an opt-in is the only
       way the suite can tell "the runtime works" apart from "the runtime was skipped".
     """
+    import os
+
     from soapbot.config import settings
+
+    # The lifespan loads `.env` into ``os.environ`` on purpose, so adapters and providers
+    # read the same variables the operator wrote. That also makes the process environment
+    # a shared resource across tests: a developer with a real root `.env` (everyone who
+    # has deployed from this checkout) would leak ``SOAPBOT_VOICE_ENABLED=false`` into
+    # every later test, and a real environment variable outranks the temp ``.env`` a test
+    # points ``Settings`` at. That is how the suite went green on CI and red on the
+    # machine that actually deploys. Snapshot and restore, so each test starts from the
+    # environment the runner gave it.
+    saved_env = dict(os.environ)
 
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     monkeypatch.setattr(settings, "enable_runtime", False)
+    yield
+    for key in set(os.environ) - set(saved_env):
+        os.environ.pop(key, None)
+    for key, value in saved_env.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
 
 
 @pytest.fixture

@@ -69,6 +69,10 @@ export default {
   'settings.runtime.schema': '数据库 schema',
   'settings.runtime.expected': '本版本期望',
   'settings.runtime.dataDir': '数据目录',
+  'settings.runtime.configDir': '配置目录',
+  'settings.runtime.configWritable': '可写',
+  'settings.runtime.configReadOnly': '不可写',
+  'settings.runtime.configDetail': '写入自检',
   'settings.runtime.envFile': '配置文件',
   'settings.runtime.restartHint': '以上设置写入 .env，需要重启进程才会生效——面板不会假装它已经生效。',
   'settings.runtime.startupErrors': '启动时记录的告警：',
@@ -546,9 +550,12 @@ export default {
     '一种 kind 只注册一个接入端。同一 kind 写两条不会变成两个账号，后一条会把前一条的连接参数顶掉。',
   'adapters.col.kind': '类型',
   'adapters.col.enabled': '启用',
-  'adapters.col.ws': 'WebSocket 地址',
+  'adapters.col.mode': '连接方式',
+  'adapters.col.account': '机器人 QQ',
+  'adapters.col.ws': '反连地址（forward）',
+  'adapters.col.host': '监听地址（reverse）',
+  'adapters.col.port': '监听端口',
   'adapters.col.token': '令牌',
-  'adapters.col.self': '机器人 QQ',
   'adapters.add': '新增接入',
   'adapters.empty': '还没有接入端。点「新增接入」开始。',
   'adapters.preview': '预览改动',
@@ -562,4 +569,100 @@ export default {
   'adapters.loadFailed': '载入失败：{reason}',
   'adapters.previewFailed': '预览失败：{reason}',
   'adapters.writeFailed': '写入失败：{reason}',
+
+  // ------------------------------------------------------------ 逐步配置说明（NapCat 为例）
+  'adapters.howtoSummary': '怎么填？两条路线选一条（以 NapCat 为例）',
+  'adapters.howtoPrelude':
+    'QQ 号本身是在 NapCat（协议端）里登录的；本页只负责把本服务和 NapCat 连起来。列的对应关系：forward 的「反向地址」= NapCat 的 WebSocket 服务器地址；reverse 的「监听端口」= 等 NapCat 来连的端口。',
+  'adapters.howtoReverseTitle': '路线 A（推荐）：reverse —— NapCat 主动连过来',
+  'adapters.howtoReverse1':
+    '这里：连接方式选 reverse，监听端口填 3001；NapCat 和本服务在同一台机器时，监听地址保持 127.0.0.1。',
+  'adapters.howtoReverse2': '这里：「预览改动 → 写入」，然后重启服务——适配器只在启动时开始监听。',
+  'adapters.howtoReverse3':
+    'NapCat 那边：WebUI → 网络配置 → 新建「WebSocket 客户端」，URL 填 ws://127.0.0.1:3001（NapCat 在另一台机器或容器里，就换成 ws://这台服务器的IP:3001），勾选启用。',
+  'adapters.howtoReverse4':
+    '回 02 运行状态页看连接结果。本行的「测试」在 reverse 下只能确认端口已在监听；对方有没有连进来，只有 02 页看得见。',
+  'adapters.howtoForwardTitle': '路线 B：forward —— 本服务连到 NapCat（NapCat 的默认方式）',
+  'adapters.howtoForward1':
+    'NapCat 那边：WebUI → 网络配置，确认有一个「WebSocket 服务器」在监听（默认端口 3001）。',
+  'adapters.howtoForward2':
+    '这里：连接方式选 forward，反向地址填 ws://127.0.0.1:3001（按 NapCat 实际监听的端口改）。',
+  'adapters.howtoForward3':
+    '这里：点本行「测试」——出现「已握手，OneBot 有应答」就是通了。这一步不用重启，测通了再写入。',
+  'adapters.howtoCommonTitle': '两条路线都要注意',
+  'adapters.howtoCommon1': '「机器人 QQ」填 NapCat 登录的那个 QQ 号。',
+  'adapters.howtoCommon2':
+    '「令牌」两边必须一致：NapCat 里设了 token，这里就填同一个；NapCat 没设，这里就留空。',
+  'adapters.howtoCommon3':
+    '无论哪条路线，改完都要「预览改动 → 写入」，且接入只在服务启动时连接——写入后要重启才生效。',
+
+  // --------------------------------------------------------- 每个框要填什么
+  // 这一组是照着 AstrBot 的做法写的：每个字段配一句「这是哪一边的、去哪儿抄」。
+  // 空的列头（"反向地址" 之类）把判断成本全留给了填表的人。
+  'adapters.ph.account': '机器人自己的 QQ 号',
+  'adapters.hint.kind': 'OneBot v11 标准：NapCat / Lagrange / go-cqhttp 都用它',
+  'adapters.hint.mode': 'forward = 本服务去连 NapCat；reverse = 等 NapCat 连过来',
+  'adapters.hint.account': '机器人自己的 QQ 号，不是群号',
+  'adapters.hint.ws': 'forward 时用：NapCat 的「WebSocket 服务器」地址',
+  'adapters.hint.host': 'reverse 时用：本服务监听的地址。127.0.0.1 = 只收本机连接；0.0.0.0 = 也收其他机器',
+  'adapters.hint.port': 'reverse 时用：本服务监听的端口，NapCat 的「WebSocket 客户端」连的就是它',
+  'adapters.hint.token': '两边必须完全一致；两边都留空 = 不校验 token',
+
+  // -------------------------------------------------- 对面（NapCat）要填的那一行
+  'adapters.targetLabelForward': 'NapCat 的「WebSocket 服务器」要开成：',
+  'adapters.targetHintForward': '和上面「反向地址」必须一字不差；NapCat 默认监听 3001，一般不用改。',
+  'adapters.targetLabelReverse': '粘到 NapCat 的「WebSocket 客户端」地址里：',
+  'adapters.targetHintReverse':
+    '已经把 0.0.0.0 换成了你正在访问的这台机器的地址。改完后先「写入」并重启本服务，再让 NapCat 连。',
+  'adapters.copy': '复制',
+  'adapters.copied': '已复制',
+  'adapters.copyFailed': '浏览器不给改剪贴板：请手动选中 {text}',
+
+  // ------------------------------------------------------------ 连通性探测
+  'probe.column': '连通性',
+  'probe.test': '测试',
+  'probe.testing': '测试中…',
+  'probe.ariaTest': '测试 Provider {id}',
+  'probe.ariaTestKind': '测试 {kind} 接入',
+  'probe.http': 'HTTP {status}',
+  'probe.elapsed': '{ms} ms',
+  'probe.failed': '测试失败：{reason}',
+  'probe.providerHint':
+    '「测试」只探测 base_url 是否可达：不发密钥，所以 401/403 也算通过（端点活着，只是拒绝了匿名请求）。',
+  'probe.adapterHint':
+    'forward 会真的握手并请求一次 get_login_info；reverse 测的是本机端口——对方是否连进来，这里看不到。',
+  'probe.code.ok': '可达',
+  'probe.code.authRejected': '端点活着（401/403，未发密钥）',
+  'probe.code.notfound': '路径不对（404）',
+  'probe.code.serverError': '上游 5xx',
+  'probe.code.unreachable': '连不上',
+  'probe.code.error': '失败',
+  'probe.code.handshake_ok': '已握手，OneBot 有应答',
+  'probe.code.unauthorized': '握手被拒绝',
+  'probe.code.not_onebot': '不像 OneBot',
+  'probe.code.free': '端口空闲，尚未监听',
+  'probe.code.in_use': '端口已在监听',
+
+  // ---------------------------------------------------------- 首次运行检查
+  'setup.title': '首次运行检查',
+  'setup.hint': '五项都通过后这张卡会自己消失。每一项都能直接跳到要改的地方。',
+  'setup.dismiss': '不再显示',
+  'setup.ok': '通过',
+  'setup.todo': '待办',
+  'setup.go': '去处理',
+  'setup.providers': 'Provider 已配置',
+  'setup.providersOk': '{n} 个 Provider 可用于模型调用。',
+  'setup.providersMissing': '没有 Provider：模型阶段被禁用，机器人不会产生任何回复。',
+  'setup.adapters': 'QQ 接入已配置',
+  'setup.adaptersOk': '{n} 个接入端已写入配置。',
+  'setup.adaptersMissing': '没有接入端：服务在跑，但收不到任何 QQ 消息。',
+  'setup.online': '适配器在线',
+  'setup.onlineOk': '至少一个适配器已连上协议端。',
+  'setup.onlineMissing': '已配置但未连上：确认 NapCat 已启动、地址与令牌一致。',
+  'setup.startup': '启动无错误',
+  'setup.startupOk': '启动日志里没有构造错误。',
+  'setup.startupMissing': '启动时记录了 {n} 个错误，适配器可能根本没被创建。',
+  'setup.writable': '配置目录可写',
+  'setup.writableOk': '{path} 可写：面板里的保存会真正落盘。',
+  'setup.writableMissing': '{path} 不可写：面板可能显示「已保存」，重启后却不生效。',
 }
