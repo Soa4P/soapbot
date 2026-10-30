@@ -77,6 +77,20 @@ sys.exit(9)
 '''
 
 
+def _crasher(tmp_path: Path, marker: str) -> Path:
+    """A child that reads one request, says ``marker`` on stderr, and exits."""
+    path = tmp_path / f"crash_{marker}.py"
+    path.write_text(
+        "import sys\n"
+        "sys.stdin.readline()\n"
+        f"sys.stderr.write({marker!r})\n"
+        "sys.stderr.flush()\n"
+        "sys.exit(9)\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _script(tmp_path: Path) -> Path:
     path = tmp_path / "fake_server.py"
     path.write_text(SERVER, encoding="utf-8")
@@ -122,6 +136,32 @@ async def test_client_handshakes_lists_and_calls(tmp_path: Path) -> None:
         assert text == 'got:{"text": "hi"}'
     finally:
         await client.close()
+
+
+async def test_a_restart_does_not_inherit_the_previous_stderr(tmp_path: Path) -> None:
+    """One client, two children: the second failure must not quote the first one.
+
+    ``reload()`` reuses a client when only the command changed, so the same object can
+    spawn twice. The stderr tail is a record of one process; if it survives the restart,
+    the operator fixing a command reads a mix of both attempts and cannot tell which
+    line came from the run they just caused.
+    """
+    client = McpClient(
+        McpServer(name="crasher", command=(sys.executable, str(_crasher(tmp_path, "FIRST"))))
+    )
+    with pytest.raises(Exception, match="FIRST"):
+        await client.list_tools()
+
+    client.server = McpServer(
+        name="crasher", command=(sys.executable, str(_crasher(tmp_path, "SECOND")))
+    )
+    with pytest.raises(Exception) as caught:
+        await client.list_tools()
+
+    message = str(caught.value)
+    assert "SECOND" in message
+    assert "FIRST" not in message
+    await client.close()
 
 
 async def test_missing_executable_is_a_clear_error(tmp_path: Path) -> None:
