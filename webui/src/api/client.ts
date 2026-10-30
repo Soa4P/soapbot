@@ -217,6 +217,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // --- MCP servers: same three steps, different rules ------------------------
+  //
+  // `configMcp` returns env **key names** only. The value never leaves the server, so
+  // an untouched `env` stays untouched: the patch omits the field and the disk wins.
+  configMcp: () => request<McpServerDocument>('/api/config/mcp'),
+  configMcpDiff: (payload: McpPatch) =>
+    request<DiffResult>('/api/config/mcp/diff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  configMcpApply: (payload: McpPatch & { approved_hash: string }) =>
+    request<McpApplyResult>('/api/config/mcp/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }
 
 export interface AuthStatus {
@@ -262,6 +278,23 @@ export interface StageTiming {
   order: number
 }
 
+/**
+ * Timing for a reply that was sent in pieces. Absent for a one-shot reply.
+ *
+ * `first_token_ms` is when the model produced anything at all; `first_send_ms` is when
+ * the *user* saw something. Streaming only pays off when the gap between them is small,
+ * which is why both are here rather than just the total.
+ */
+export interface StreamStats {
+  count?: number
+  chars?: number
+  first_token_ms?: number | null
+  first_send_ms?: number | null
+  total_ms?: number
+  interrupted?: boolean
+  truncated?: boolean
+}
+
 export interface MessageTrace {
   trace_id: string
   ts: number
@@ -271,7 +304,15 @@ export interface MessageTrace {
   halt_reason: string
   stages: StageTiming[]
   slowest: { name: string; elapsed_ms: number } | null
-  extras?: Record<string, string | number | boolean>
+  /**
+   * Sentences actually delivered, in order. Empty when the reply went out as one message.
+   *
+   * There is deliberately no `extras` here: the trace keeps one for debugging, but
+   * `to_dict` does not serialise it, so declaring it in this type would only invite the
+   * panel to read a field that is never on the wire.
+   */
+  chunks?: string[]
+  stream?: StreamStats
 }
 
 export interface TraceSummary {
@@ -358,4 +399,51 @@ export interface ApplyResult {
   base_hash?: string
   restart_required?: boolean
   reason?: string
+}
+
+/** One MCP server as the editor sees it. `env_keys` is names only — never values. */
+export interface McpServerRow {
+  name: string
+  description: string
+  command: string[]
+  timeout: number
+  min_role: string
+  env_keys: string[]
+}
+
+export interface McpServerDocument {
+  servers: McpServerRow[]
+  base_hash: string
+  path: string
+  roles: string[]
+  status: Record<string, { tools: number; error: string }>
+  restart_required: boolean
+  hint: string
+}
+
+export interface McpServerPatchEntry {
+  name: string
+  description?: string
+  command?: string[]
+  /** Full replacement when present; omit it to keep whatever is on disk. */
+  env?: Record<string, string>
+  timeout?: number
+  min_role?: string
+  delete?: boolean
+}
+
+export interface McpPatch {
+  base_hash: string
+  servers: McpServerPatchEntry[]
+}
+
+export interface McpApplyResult {
+  written: boolean
+  changed_fields: string[]
+  base_hash?: string
+  restart_required?: boolean
+  reason?: string
+  /** Per-server outcome after the live reload. Empty when the runtime is not up. */
+  servers?: Record<string, { tools: number; error: string }>
+  note?: string
 }

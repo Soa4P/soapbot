@@ -122,6 +122,68 @@ def test_non_scalar_extras_are_dropped() -> None:
     assert extras == {"provider": "primary", "tokens": 42}
 
 
+def test_stream_stats_and_chunks_survive_the_snapshot() -> None:
+    """The panel's streaming view reads these two fields, and nothing else asserted them.
+
+    ``extras`` is filtered to scalars, so the stream dict and the chunk list are carried
+    in their own fields. The whitelist is what keeps provider text and a duplicate of
+    ``sent`` out of the ring buffer, so it is pinned exactly rather than loosely: a
+    dropped key shows up in the panel as a blank column, not as an error.
+    """
+    store = TraceStore()
+    _feed(
+        store,
+        _Ctx(
+            [("model", 800.0)],
+            extras={
+                "reply_chunks": ["第一句。", "第二句。"],
+                "stream": {
+                    "count": 2,
+                    "chars": 12,
+                    "first_token_ms": 120.5,
+                    "first_send_ms": 300.25,
+                    "total_ms": 900.0,
+                    "interrupted": False,
+                    "truncated": True,
+                    # Not whitelisted: `sent` duplicates `reply_chunks`, and `error` can
+                    # carry upstream text that should not live in memory for the ring's
+                    # whole lifetime.
+                    "sent": ["raw"],
+                    "error": "upstream said something",
+                },
+            },
+        ),
+    )
+
+    trace = store.recent()[0]
+    assert trace.chunks == ["第一句。", "第二句。"]
+    assert trace.stream["first_token_ms"] == 120.5
+    assert trace.stream["first_send_ms"] == 300.25
+    assert trace.stream["truncated"] is True
+    assert "sent" not in trace.stream
+    assert "error" not in trace.stream
+    # The panel reads the serialised form, so the fields have to survive `to_dict`.
+    body = trace.to_dict()
+    assert body["chunks"] == ["第一句。", "第二句。"]
+    assert body["stream"]["count"] == 2
+
+
+def test_a_single_message_reply_has_empty_stream_fields() -> None:
+    """The non-streaming path sets ``reply_chunks`` to [] on purpose.
+
+    It is the same key as the progressive path so the reader never has to ask "was this
+    streamed?" — but that only works if the empty case is representable rather than
+    absent.
+    """
+    store = TraceStore()
+    _feed(store, _Ctx([("reply", 5.0)], extras={"reply_chunks": []}))
+
+    trace = store.recent()[0]
+    assert trace.chunks == []
+    assert trace.stream == {}
+    assert trace.to_dict()["chunks"] == []
+
+
 def test_ring_is_bounded_and_drops_the_oldest() -> None:
     store = TraceStore(capacity=3)
     for i in range(5):
@@ -310,8 +372,8 @@ def test_missing_stages_are_skipped_not_crashed() -> None:
 # ------------------------------------------------------------------- endpoints
 
 
-@pytest.fixture
-def traced_client(tmp_path, monkeypatch):
+def _client_with(tmp_path, monkeypatch, seed):
+    """A TestClient whose runtime exposes a store filled by ``seed``."""
     from fastapi.testclient import TestClient
 
     from soapbot.app import create_app
@@ -325,7 +387,7 @@ def traced_client(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "enable_runtime", False)
 
     store = TraceStore()
-    _feed(store, _Ctx([("dedup", 0.4), ("model", 120.0)], trace_id="abc"))
+    seed(store)
 
     import soapbot.app as app_module
 
@@ -334,6 +396,51 @@ def traced_client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(app_module, "_RUNTIME", _Runtime())
     return TestClient(create_app())
+
+
+@pytest.fixture
+def traced_client(tmp_path, monkeypatch):
+    def seed(store: TraceStore) -> None:
+        _feed(store, _Ctx([("dedup", 0.4), ("model", 120.0)], trace_id="abc"))
+
+    return _client_with(tmp_path, monkeypatch, seed)
+
+
+@pytest.fixture
+def stream_client(tmp_path, monkeypatch):
+    """Two traces side by side: one streamed, one delivered whole."""
+
+    def seed(store: TraceStore) -> None:
+        _feed(
+            store,
+            _Ctx(
+                [("model", 800.0)],
+                trace_id="streamed",
+                extras={
+                    "reply_chunks": ["第一句。", "第二句。"],
+                    "stream": {
+                        "count": 2,
+                        "chars": 12,
+                        "first_token_ms": 120.5,
+                        "first_send_ms": 300.25,
+                        "total_ms": 900.0,
+                        "interrupted": False,
+                        "truncated": True,
+                    },
+                    "send_ok": True,
+                },
+            ),
+        )
+        _feed(
+            store,
+            _Ctx(
+                [("reply", 5.0)],
+                trace_id="single",
+                extras={"reply_chunks": [], "send_ok": True},
+            ),
+        )
+
+    return _client_with(tmp_path, monkeypatch, seed)
 
 
 def test_topology_endpoint(traced_client) -> None:
@@ -347,6 +454,32 @@ def test_traces_endpoint_returns_recent(traced_client) -> None:
     assert body["traces"][0]["trace_id"] == "abc"
     assert body["traces"][0]["slowest"]["name"] == "model"
     assert body["summary"]["historical"] is False
+
+
+def test_traces_endpoint_exposes_stream_stats_and_chunks(stream_client) -> None:
+    """The 09 panel reads these two fields off the wire, not off ``extras``.
+
+    Asserting the snapshot is not enough: ``to_dict`` is a separate step and the panel
+    has no other route to the data, so a dropped key here is an invisible UI regression.
+    """
+    body = stream_client.get("/api/pipeline/traces?limit=10").json()
+    streamed = next(t for t in body["traces"] if t["trace_id"] == "streamed")
+    assert streamed["chunks"] == ["第一句。", "第二句。"]
+    assert streamed["stream"]["first_token_ms"] == 120.5
+    assert streamed["stream"]["first_send_ms"] == 300.25
+    assert streamed["stream"]["truncated"] is True
+
+    single = next(t for t in body["traces"] if t["trace_id"] == "single")
+    # `{}` rather than a missing key: the panel branches on presence, and an absent key
+    # would mean "older server" instead of "this reply was not streamed".
+    assert single["chunks"] == []
+    assert single["stream"] == {}
+
+
+def test_trace_detail_returns_the_same_chunks(stream_client) -> None:
+    body = stream_client.get("/api/pipeline/traces/streamed").json()
+    assert body["chunks"][0] == "第一句。"
+    assert body["stream"]["count"] == 2
 
 
 def test_trace_detail_404_for_evicted(traced_client) -> None:
