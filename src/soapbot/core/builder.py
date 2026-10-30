@@ -436,7 +436,7 @@ def build_runtime(
     try:
         from soapbot.mcp.config import load_config as load_mcp_config
 
-        mcp_servers = load_mcp_config(settings.config_dir / "mcp.yaml")
+        mcp_servers = load_mcp_config(settings.mcp_file)
     except Exception as exc:
         logger.error("mcp configuration rejected, continuing without it: %s", exc)
 

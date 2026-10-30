@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -45,7 +46,20 @@ def load_config(path: Path) -> list[McpServer]:
     if not isinstance(raw, dict):
         raise McpConfigError(f"{path.name} must be a mapping")
 
-    entries = raw.get("servers") or []
+    servers = parse_servers(raw.get("servers") or [])
+    logger.info("mcp configuration loaded servers=%d", len(servers))
+    return servers
+
+
+def parse_servers(entries: Any) -> list[McpServer]:
+    """Validate a ``servers`` list and build descriptions from it.
+
+    Split out of :func:`load_config` so the write path can validate a *candidate*
+    document with the exact code that runs at boot. Two parsers would eventually
+    disagree, and the disagreement would look like "the panel saved it, the process
+    refused to start" — the failure mode the whole diff-then-apply design exists to
+    prevent.
+    """
     if not isinstance(entries, list):
         raise McpConfigError("'servers' must be a list")
 
@@ -103,5 +117,4 @@ def load_config(path: Path) -> list[McpServer]:
             )
         )
 
-    logger.info("mcp configuration loaded servers=%d", len(servers))
     return servers
