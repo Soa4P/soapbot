@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-10-29T22:30:39+08:00",
+  "updated_at": "2026-10-30T16:31:30+08:00",
   "current": null,
   "phases": [
     {
@@ -471,6 +471,118 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph11",
+      "index": "P11",
+      "name": "真实性核查：真服务端、真映射、真键盘",
+      "goal": "把「有实现」与「真能用」在证据上分开：MCP 接真第三方服务端并从面板写入，三家 Provider 的报文映射补测，测试断层与可访问性变成可自动发现的门禁。",
+      "tasks": [
+        {
+          "id": "ph11-t1",
+          "name": "真实 MCP 服务端端到端",
+          "status": "done",
+          "note": "接 npx 的 server-filesystem：14 个工具、tools/call 读回内容。实测中发现空配置下 McpManager 根本不创建，导致「从零到一台」这次最该热加载的编辑只能重启；握手改为采纳服务端版本，失败信息带 stderr 尾部",
+          "files": [
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/builder.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_live.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_wiring.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph11-t2",
+          "name": "测试断层静态扫描",
+          "status": "done",
+          "note": "coverage 未安装且不得新增依赖，故只做引用级检查：孤儿模块 + 文档数字与看板一致性。首扫 19 个无人引用的模块，补测三家 provider 后降到 16",
+          "files": [
+            {
+              "path": "scripts/check_test_gaps.py",
+              "status": "done"
+            },
+            {
+              "path": "scripts/test_gaps_baseline.txt",
+              "status": "done"
+            },
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            },
+            {
+              "path": "Makefile",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph11-t3",
+          "name": "三家 Provider 报文映射补测",
+          "status": "done",
+          "note": "Anthropic / Gemini / Ollama 此前没有任何测试提到过。用 MockTransport 注入，断言 system 提升、data URL 转换、token 字段名、done 终止与 429 转 ProviderError",
+          "files": [
+            {
+              "path": "tests/test_providers_mapping.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph11-t4",
+          "name": "可访问性静态规则与修复",
+          "status": "done",
+          "note": "ConfDialog 早已有焦点陷阱与 Esc，计划里的假设不成立；实际问题是两张表格的行只能鼠标点。补 tabindex 与 Enter/Space，并让 @click.self 的遮罩层豁免",
+          "files": [
+            {
+              "path": "scripts/check_a11y.py",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/views/ConfigView.vue",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/views/MemoryView.vue",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph11-t5",
+          "name": "文档口径同步",
+          "status": "done",
+          "note": "验证矩阵按「自动+实测 / 仅自动 / 未验证」重写 MCP 与 Provider 两行；README 的测试总数与 mypy 基线改回真值",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -566,7 +678,7 @@
     }
   ],
   "verification": {
-    "pytest": "1015 passed, 8 skipped",
+    "pytest": "1024 passed, 10 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "0 阻断 / 1 告警 / 14 通过",

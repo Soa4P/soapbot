@@ -202,7 +202,7 @@ soapbot/
 ├── deploy/             # Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（800 项通过 / 4 项跳过）
+└── tests/              # pytest（1024 项通过 / 10 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
@@ -432,12 +432,14 @@ pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 ```bash
 make install        # 建虚拟环境 + 装开发依赖
 make run            # 先构建前端，再启动服务
-make check          # lint + test（与 CI 阻断项同一条命令）
+make check          # lint + 配色 + 可访问性 + 测试断层 + test（与 CI 阻断项同一条命令）
+make a11y           # 可访问性静态规则（按钮名称、点击目标可聚焦、img alt、对话框语义）
+make gaps           # 测试断层扫描：无人引用的模块、文档里与看板不一致的数字
 make typecheck      # mypy —— 当前基线非零，仅作参考，不阻断
 make doctor         # 部署姿态检查
 ```
 
-> **类型检查现状**：`mypy src` 目前报告 42 个错误，分布在 17 个文件，全部是既有问题。
+> **类型检查现状**：`mypy src` 目前报告 53 个错误，分布在 20 个文件，全部是既有问题。
 > 因此 CI 把它放在独立的 `types` job 里（`continue-on-error`），只报告不阻断。
 > 让它阻断会让首次推送就是红的，而让人们习惯红色徽章；按模块 `ignore_errors` 则会
 > 把该文件里的下一个真实错误一并藏掉。降到 0 之后应当改为阻断。

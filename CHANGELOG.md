@@ -12,6 +12,29 @@
 
 ### 新增
 
+- **真实 MCP 服务端接上了**（`tests/test_mcp_live.py`，opt-in：`SOAPBOT_LIVE_MCP=1`）。
+  之前所有 MCP 结论都来自一个照着客户端写的假服务端，它能证明的只有「客户端和自己谈得拢」。
+  现在接的是第三方的 `@modelcontextprotocol/server-filesystem`：14 个工具、`tools/call`
+  真的读回了文件内容。默认不进 CI——它要联网装 npm 包，一个会因为 npm 打嗝变红的门禁，
+  最后会被人标成 flaky，而 flaky 的门禁比窄门禁更糟。
+- **MCP 首次配置不再需要重启**。这条是实测查出来的：我按「面板新增 → 热加载」的路径走，
+  表格一直显示「状态未知（运行时未启动）」——而运行时明明在跑。原因是
+  `core/builder.py` 只在 `mcp.yaml` 已有服务器时才创建 `McpManager`，于是**最该热加载的
+  那一次**（从零到一台）恰好没有任何东西可加载，面板只能回一句「重启后生效」。现在管理器
+  总是创建，空列表只是它的初始状态。
+- **MCP 握手改为版本协商**。客户端原来硬编码 `2024-11-05` 并把 `initialize` 的结果丢掉。
+  现在发自己最新的版本、采纳服务端回的版本（实测对方回 `2025-06-18`），遇到没见过的版本
+  按 INFO/WARN 记录而不是拒绝——三个调用在已发布的各版本里报文没变过，为一个不认识的
+  字符串把一台能用的服务器停掉是更差的交易。
+- **握手失败与启动失败不再长得一样**。以前子进程 `stderr=DEVNULL`，npx 下载 404 和协议谈崩
+  都只表现为「connection closed」。现在保留 stderr 尾部 2 KB，握手期崩溃会写成
+  `exited during the handshake (exit code 9); stderr: npm error 404 ...`。
+- **三家 Provider 的报文映射补测**（`tests/test_providers_mapping.py`）。Anthropic、Gemini、
+  Ollama 此前**没有任何测试提到过**——它们是三个把我们的结构翻译成别人 schema 的地方，
+  而写错字段名不会抛异常，只会安静地少一半信息。
+- **两个新的静态门禁**：`scripts/check_test_gaps.py`（孤儿模块 + 文档数字与看板一致性，
+  带 `scripts/test_gaps_baseline.txt` 基线）与 `scripts/check_a11y.py`（按钮名称、点击目标
+  可聚焦、img alt、对话框语义）。都挂进 `make check` 与 CI 既有作业，不新增作业。
 - **09 页流式观察**。`trace.chunks` 与 `trace.stream` 从第一天就写进了环形缓冲，前端
   一个字段都没读——「有数据」和「看得见」之间隔着一次渲染。现在详情区有三段耗时阶梯
   （首 token / 首句送达 / 整条回复，共用同一刻度，所以「首句比整条短多少」是几何可见的）、
@@ -73,6 +96,12 @@
 
 ### 修复
 
+- **MCP 子进程关闭时打印 `Exception ignored in BaseSubprocessTransport.__del__`**。
+  `close()` 只 terminate + wait，没有收掉管道，于是传输对象被回收时 CPython 打一段
+  traceback——部署日志里看起来像崩溃，其实是正常关机。
+- **两张表格的行只能鼠标点**。人格表与会话表的 `<tr @click>` 没有 `tabindex`，键盘用户
+  根本到不了，且按 Enter 什么也不会发生。补上焦点与 Enter/Space；`@click.self` 的遮罩层
+  是例外，它不该成为 tab 停靠点（Esc 已经负责关闭）。
 - **`Pipeline.observe` 的回调是 async 的**。首版传入同步函数，`await None` 抛错被
   pipeline 当作 observer 错误吞掉，导致所有耗时静默丢失、端点仍返回 200 空列表。
   现由 `_observe_stage` 适配，并有测试断言它是协程函数。
