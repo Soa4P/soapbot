@@ -36,7 +36,7 @@
 | 三家 Provider 的报文映射 | `providers/anthropic.py`、`gemini.py`、`ollama.py` | `tests/test_providers_mapping.py`（7 项：system 提升、data URL 转换、token 字段名、`done` 终止、角色重命名、429→`ProviderError`） | — | **仅自动** |
 | 可访问性静态规则 | `scripts/check_a11y.py` | 22 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 规则查出两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space。**但这两行的键盘路径只由模板断言覆盖**：本机没有已配置的人格与会话，表格为空，浏览器里按不到那一行 | **仅自动**（键盘实测缺数据） |
 | 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（16 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；三家 provider 补测后降为 16 | **自动 + 实测** |
-| 容器部署 | `deploy/docker-compose.yml`、`deploy/Dockerfile` | `scripts/check_deploy.py`（静态，14 项） | 雨云 Ubuntu 24.04 真机：镜像 430 MB、`Up (healthy)`、`uid=10001`、只读根、`tini`、`doctor: PASS`、`down/up` 后 `/data` 数据不变。§8 的 #6/#7 需运维首次登录，见 `deploy-layer.md` §8.1 | **自动 + 实测**（两条待人工） |
+| 容器部署 | `deploy/docker-compose.yml`、`deploy/Dockerfile` | `scripts/check_deploy.py`（静态，14 项） | 雨云 Ubuntu 24.04 真机：镜像 430 MB、`Up (healthy)`、`uid=10001`、只读根、`tini`、`doctor: PASS`、`down/up` 后 `/data` 数据不变、设置写入后 `/data/.env` 落盘且重启可读回。§8 九条全过，见 `deploy-layer.md` §8.1 | **自动 + 实测** |
 | 上游连通性静态检查 | `security/posture.py` | `tests/test_posture.py`（7 项：空配置、缺文件、坏 YAML、本机端点、明文 http、远端、进报告） | `python -m soapbot.cli doctor` 实跑，输出 `[warn] provider.upstream (medium)` | **自动 + 实测** |
 | `doctor --probe` 网络探测 | `security/posture.py`、`cli.py` | `test_posture.py`：401 ⇒ 可达、503 ⇒ 不可达（mock transport，规则本身）；另有本地回环服务端的 Socket 测试 | 只对本地回环跑过。**本机回环被拦截返回 502，那条 Socket 测试在此环境会 skip**，规则由 mock 版覆盖 | **仅自动**（真实云端探测**未验证**） |
 | 进度看板契约 | `docs/progress/` | `tests/test_progress_board.py`（8 项：时间戳带时区、状态枚举、blocked 必须写原因、done 不得留未完成文件） | 浏览器打开：显示「最后更新 32 秒前」，无陈旧横幅 | **自动 + 实测** |
