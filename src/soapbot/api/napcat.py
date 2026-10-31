@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -66,6 +67,18 @@ async def status(
     login: dict[str, Any] = {"ok": False, "logged_in": False, "account": "", "phase": ""}
     if state.get("status") == "running":
         login = await napcat.login_state()
+    # A hand-installed NapCat has no container and no WebUI token we know, but its OneBot
+    # port answers — and that is the same evidence the adapter will get. Without this the
+    # "Connect" button never appeared for exactly the people who installed it themselves.
+    if not login.get("logged_in"):
+        probe = await napcat.probe_onebot()
+        if probe.get("ok"):
+            login = {
+                "ok": True,
+                "logged_in": True,
+                "account": probe.get("account", ""),
+                "phase": "onebot",
+            }
     return {
         **state,
         "starting": _start_task is not None and not _start_task.done(),
@@ -104,6 +117,46 @@ async def stop(
     result = await asyncio.to_thread(napcat.stop_container)
     _audit(_caller_label(request), "allow", "napcat_stop", [])
     return result
+
+
+@router.post("/connect")
+async def connect(
+    request: Request,
+    auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """Write the adapter for the protocol end the panel started. One button, no typing."""
+    _require_permission(auth, request, Permission.MANAGE_CONFIG)
+    _enforce_rate(auth, request)
+    result = await napcat.connect_adapter()
+    if not result.get("ok"):
+        # 409 again: "not scanned yet" is a state, not a fault.
+        raise HTTPException(status_code=409, detail=result.get("error", "not-logged-in"))
+    _audit(_caller_label(request), "allow", "napcat_connect", list(result.get("changed", [])))
+    return result
+
+
+@router.post("/restart")
+async def restart(
+    request: Request,
+    auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """Exit so the supervisor brings the panel back with the new adapter.
+
+    Refused when nothing supervises this process: a button that silently kills a
+    manually-started service is worse than telling the truth and asking for a restart.
+    """
+    _require_permission(auth, request, Permission.MANAGE_CONFIG)
+    _enforce_rate(auth, request)
+    watcher = napcat.supervisor()
+    if watcher is None:
+        raise HTTPException(
+            status_code=409,
+            detail="no supervisor: restart the panel yourself (systemctl restart soapbot / docker restart)",
+        )
+    _audit(_caller_label(request), "allow", "napcat_restart", [watcher])
+    # Answer first, exit after the response has a chance to flush.
+    asyncio.get_running_loop().call_later(0.5, os._exit, 75)
+    return {"ok": True, "restarting": True, "supervisor": watcher}
 
 
 @router.get("/qr")

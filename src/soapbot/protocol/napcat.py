@@ -28,6 +28,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -296,6 +297,96 @@ async def login_state() -> dict[str, Any]:
         "phase": str(data.get("loginPhase") or ""),
         "account": str(data.get("uin") or ""),
     }
+
+
+async def probe_onebot(port: int = WS_PORT, timeout: float = 3.0) -> dict[str, Any]:
+    """Ask the OneBot port who is on the other end.
+
+    This is the honest definition of "logged in": NapCat only opens its WebSocket server
+    after a QQ account has been scanned in. Checking that instead of a WebUI flag means the
+    panel's answer is the same thing the adapter will see when it connects.
+    """
+    from websockets.asyncio.client import connect
+
+    try:
+        async with connect(
+            f"ws://127.0.0.1:{port}",
+            open_timeout=timeout,
+            close_timeout=1.0,
+            max_size=1024 * 1024,
+        ) as ws:
+            await ws.send(json.dumps({"action": "get_login_info", "params": {}, "echo": "auto"}))
+            raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+    except Exception as exc:  # websockets raises a wide family: refused, timeout, protocol
+        return {"ok": False, "error": type(exc).__name__}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {"ok": False, "error": "not-json"}
+    if payload.get("retcode") not in (0, "0", None):
+        return {"ok": False, "error": "refused"}
+    data = payload.get("data") or {}
+    return {
+        "ok": True,
+        "account": str(data.get("user_id") or ""),
+        "nickname": str(data.get("nickname") or ""),
+    }
+
+
+async def connect_adapter() -> dict[str, Any]:
+    """Write the adapter that matches the protocol end we started.
+
+    The address is not a guess: :func:`start_container` bound 127.0.0.1:3001, and the account
+    number comes from the same ``get_login_info`` the adapter will call. This is the step
+    that turns "scan the QR, then type a WebSocket URL into a table" into one button.
+    """
+    from soapbot.core import config_write
+
+    probe = await probe_onebot()
+    if not probe.get("ok"):
+        return {"ok": False, "error": "not-logged-in", "detail": probe.get("error", "")}
+
+    path = settings.adapters_file
+    document = config_write.read_document(path)
+    entry = {
+        "kind": "onebot11",
+        "mode": "forward",
+        "enabled": True,
+        "ws_url": f"ws://127.0.0.1:{WS_PORT}",
+        "account_id": probe.get("account", ""),
+    }
+    patched, changed = config_write.apply_adapter_patch(document, [entry])
+    if not changed:
+        return {
+            "ok": True,
+            "written": False,
+            "reason": "unchanged",
+            "ws_url": entry["ws_url"],
+            "account": probe.get("account", ""),
+        }
+    config_write.write_atomic(path, config_write.render(patched))
+    logger.info("adapter written from the managed protocol end: %s", changed)
+    return {
+        "ok": True,
+        "written": True,
+        "changed": changed,
+        "ws_url": entry["ws_url"],
+        "account": probe.get("account", ""),
+    }
+
+
+def supervisor() -> str | None:
+    """What will bring this process back after it exits, if anything.
+
+    A self-restart is only honest when something is watching: systemd (a unit with
+    Restart=always), or Docker (a container restart policy). Without that, exiting from a
+    button is just killing the service.
+    """
+    if Path("/run/systemd/system").exists() and os.environ.get("INVOCATION_ID"):
+        return "systemd"
+    if Path("/.dockerenv").exists():
+        return "docker"
+    return None
 
 
 async def wait_until_ready(seconds: float = 120.0) -> dict[str, Any]:

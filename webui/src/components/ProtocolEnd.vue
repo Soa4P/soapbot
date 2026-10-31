@@ -106,6 +106,43 @@ async function showQr(): Promise<void> {
   }
 }
 
+/* ------------------------------------------------- connect (the whole point) */
+const connectNote = ref('')
+const needsRestart = ref(false)
+
+async function connect(): Promise<void> {
+  busy.value = true
+  connectNote.value = ''
+  try {
+    const body = await api.napcatConnect()
+    if (body.written) {
+      connectNote.value = t('napcat.connected', { account: body.account || '?' })
+      needsRestart.value = true
+    } else {
+      // Already correct: nothing to restart, nothing to explain.
+      connectNote.value = t('napcat.alreadyConnected')
+    }
+  } catch {
+    connectNote.value = t('napcat.connectNotReady')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function restart(): Promise<void> {
+  busy.value = true
+  connectNote.value = t('napcat.restarting')
+  try {
+    await api.napcatRestart()
+  } catch {
+    // 409: nothing supervises this process, so say what to type instead of pretending.
+    connectNote.value = t('napcat.restartManual')
+    needsRestart.value = true
+  } finally {
+    busy.value = false
+  }
+}
+
 function openWebui(): void {
   const url = state.value?.webui_url
   if (url) window.open(url, '_blank', 'noopener')
@@ -166,6 +203,18 @@ onBeforeUnmount(() => {
       <button v-if="canManage && state?.status === 'running'" class="btn ghost" type="button" @click="stop">
         {{ t('napcat.stop') }}
       </button>
+      <button
+        v-if="state?.logged_in"
+        class="btn lamp"
+        type="button"
+        :disabled="busy"
+        @click="connect"
+      >
+        {{ t('napcat.connect') }}
+      </button>
+      <button v-if="needsRestart" class="btn ghost" type="button" :disabled="busy" @click="restart">
+        {{ t('napcat.restart') }}
+      </button>
       <button class="btn ghost" type="button" @click="openWebui">
         {{ t('napcat.openWebui') }}
       </button>
@@ -174,6 +223,7 @@ onBeforeUnmount(() => {
     <!-- Generated locally from NapCat's login URL, so no third party ever sees the token. -->
     <div v-if="qrSvg" class="napcat__qr" v-html="qrSvg" />
     <p v-if="qrSvg" class="muted">{{ t('napcat.qrHint') }}</p>
+    <p v-if="connectNote" class="muted">{{ connectNote }}</p>
     <p v-if="error" class="muted">{{ error }}</p>
   </section>
 </template>

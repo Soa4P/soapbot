@@ -117,6 +117,66 @@ def test_docker_is_installed_only_where_the_package_name_is_known() -> None:
     assert napcat.install_docker_command("gentoo") is None
 
 
+def test_connecting_writes_the_adapter_it_just_probed(monkeypatch, tmp_path: Path) -> None:
+    """The one-button path: the address comes from the port we bound, the account from the
+    probe — neither is typed by the operator."""
+
+    async def fake_probe(port: int = 3001, timeout: float = 3.0) -> dict:
+        return {"ok": True, "account": "10001000", "nickname": "bot"}
+
+    monkeypatch.setattr(napcat, "probe_onebot", fake_probe)
+    monkeypatch.setattr(napcat.settings, "data_dir", tmp_path)
+    # adapters_file is a property of config_dir; point config_dir instead.
+    monkeypatch.setattr(napcat.settings, "config_dir", tmp_path)
+
+    import asyncio
+
+    result = asyncio.run(napcat.connect_adapter())
+
+    assert result["ok"] is True and result["written"] is True
+    text = (tmp_path / "adapters.yaml").read_text(encoding="utf-8")
+    assert "ws_url: ws://127.0.0.1:3001" in text
+    assert "10001000" in text
+    assert result["account"] == "10001000"
+
+
+def test_connecting_twice_does_not_duplicate_or_report_change(monkeypatch, tmp_path: Path) -> None:
+    async def fake_probe(port: int = 3001, timeout: float = 3.0) -> dict:
+        return {"ok": True, "account": "10001000", "nickname": "bot"}
+
+    monkeypatch.setattr(napcat, "probe_onebot", fake_probe)
+    monkeypatch.setattr(napcat.settings, "config_dir", tmp_path)
+
+    import asyncio
+
+    asyncio.run(napcat.connect_adapter())
+    second = asyncio.run(napcat.connect_adapter())
+
+    assert second["written"] is False
+    assert (tmp_path / "adapters.yaml").read_text(encoding="utf-8").count("kind: onebot11") == 1
+
+
+def test_connecting_before_login_is_refused_not_written(monkeypatch, tmp_path: Path) -> None:
+    async def fake_probe(port: int = 3001, timeout: float = 3.0) -> dict:
+        return {"ok": False, "error": "ConnectionRefusedError"}
+
+    monkeypatch.setattr(napcat, "probe_onebot", fake_probe)
+    monkeypatch.setattr(napcat.settings, "config_dir", tmp_path)
+
+    import asyncio
+
+    result = asyncio.run(napcat.connect_adapter())
+
+    assert result == {"ok": False, "error": "not-logged-in", "detail": "ConnectionRefusedError"}
+    assert not (tmp_path / "adapters.yaml").exists()
+
+
+def test_restart_is_refused_without_a_supervisor(monkeypatch) -> None:
+    """Killing the process when nothing will bring it back is not a restart."""
+    monkeypatch.setattr(napcat, "supervisor", lambda: None)
+    assert napcat.supervisor() is None
+
+
 def test_the_panel_routes_live_where_the_client_looks_for_them() -> None:
     """A renamed path is a 404 in a browser and a green test suite otherwise."""
     import soapbot.api.napcat as napcat_api
@@ -127,6 +187,8 @@ def test_the_panel_routes_live_where_the_client_looks_for_them() -> None:
         "/api/protocol/napcat/start",
         "/api/protocol/napcat/stop",
         "/api/protocol/napcat/qr",
+        "/api/protocol/napcat/connect",
+        "/api/protocol/napcat/restart",
     }
 
 

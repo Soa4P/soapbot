@@ -568,6 +568,14 @@ export default {
   'napcat.showQr': 'Show login QR',
   'napcat.openWebui': 'Open NapCat WebUI',
   'napcat.qrHint': 'Scan it with mobile QQ; this card switches to "logged in" by itself.',
+  'napcat.connect': 'Connect QQ',
+  'napcat.connected': 'Adapter written (QQ {account}). Restart the panel to pick it up.',
+  'napcat.alreadyConnected': 'The adapter is already configured — nothing to write.',
+  'napcat.connectNotReady': 'No logged-in QQ yet: scan the QR first.',
+  'napcat.restart': 'Restart panel',
+  'napcat.restarting': 'Restarting… the page will come back in a few seconds.',
+  'napcat.restartManual':
+    'This process is not supervised by systemd or a container, so it cannot restart itself: run systemctl restart soapbot (or docker restart <name>) on the host.',
   'napcat.qrNotReady': 'The QR is not ready yet — try again once it has finished starting.',
 
   // ------------------------------------------------------ find the local protocol end

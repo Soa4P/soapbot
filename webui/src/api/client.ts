@@ -159,6 +159,18 @@ export const api = {
     method: 'POST',
   }),
   napcatStop: () => request<{ ok: boolean }>('/api/protocol/napcat/stop', { method: 'POST' }),
+  /** Write the adapter for the running protocol end — the address is already known. */
+  napcatConnect: () =>
+    request<{ ok: boolean; written: boolean; ws_url?: string; account?: string }>(
+      '/api/protocol/napcat/connect',
+      { method: 'POST' },
+    ),
+  /** Exit so systemd/docker brings the panel back with the new adapter. 409 = no supervisor. */
+  napcatRestart: () =>
+    request<{ ok: boolean; restarting: boolean; supervisor: string }>(
+      '/api/protocol/napcat/restart',
+      { method: 'POST' },
+    ),
   /** The QR **URL** (not an image — that is what NapCat returns). 409 = not ready yet. */
   napcatQr: () => request<{ ok: boolean; url: string }>('/api/protocol/napcat/qr'),
 
