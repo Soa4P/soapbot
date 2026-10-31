@@ -600,7 +600,7 @@ export default {
   'napcat.alreadyConnected': '配置里已经有这条接入了，不用重复写。',
   'napcat.connectNotReady': '还没检测到已登录的 QQ：先扫码。',
   'napcat.onebotServerMissing':
-    '已登录，但 NapCat 里没开 OneBot 服务器（3001 没人监听）。我已经把这条配置写进 NapCat 了——重启一次 NapCat（schtasks /End /TN NapCat && schtasks /Run /TN NapCat）它就会开起来，再点「自动连上 QQ」即可。',
+    '已登录，但 NapCat 里没开 OneBot 服务器（3001 没人监听）。我已经把这条配置写进 NapCat 的 onebot11 配置了。注意：NapCat 只在启动时读网络配置，而重启会丢掉 QQ 登录态——所以顺序是「重启 NapCat → 重新扫码 → 再点自动连上 QQ」，这一次 3001 就会起来。',
   'napcat.restart': '重启面板',
   'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
   'napcat.restartManual':
