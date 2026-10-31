@@ -684,6 +684,10 @@ export default {
   'probe.code.in_use': '端口已在监听',
 
   // ---------------------------------------------------------- 首次运行检查
+  'overview.runtimeOffTitle': '机器人运行时已关闭（只跑面板）',
+  'overview.runtimeOffHint':
+    '这是安装时的一个设置：`SOAPBOT_ENABLE_RUNTIME=false`。面板能用、能改配置、能取二维码，但不会去连 QQ、也不会回消息。要让它真的干活：把 `.env` 里这一行改成 `true`，重启服务；然后第 07 页填 Provider 与 QQ 接入。',
+
   'setup.title': '首次运行检查',
   // 三段话是给「什么都没部署过」的人看的：先说手要怎么动，再说哪几项还是红的。
   'setup.stepsTitle': '三步走（没部署过也照样能做）',
