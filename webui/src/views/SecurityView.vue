@@ -36,6 +36,95 @@ function outcomeClass(outcome: string): string {
 
 const floors = computed<any[]>(() => access.data.value?.permissions ?? [])
 const roles = computed<any[]>(() => access.data.value?.roles ?? [])
+
+// ----------------------------------------------------------------- 授权名单编辑
+//
+// The lists were read-only here while the real edit path was "ssh in, edit .env, restart".
+// A panel that displays who holds power but cannot change it is a report, not a control.
+//
+// Draft-first: every edit lands in `draft`, and 保存 is the only thing that talks to the
+// server — same read → review → write discipline the other config pages use.
+const draft = ref<{ owners: string[]; admins: string[]; members: string[] }>({
+  owners: [],
+  admins: [],
+  members: [],
+})
+const dirty = ref(false)
+const addRole = ref<'owner' | 'admin' | 'member'>('admin')
+const addId = ref('')
+const authorityBusy = ref(false)
+const authorityNote = ref('')
+const authorityError = ref('')
+
+function seedDraft(): void {
+  draft.value = {
+    owners: [...(access.data.value?.owners ?? [])],
+    admins: [...(access.data.value?.admins ?? [])],
+    members: [...(access.data.value?.members ?? [])],
+  }
+  dirty.value = false
+}
+watch(access.data, () => {
+  if (!dirty.value) seedDraft()
+})
+
+/** The server refuses a write that would leave zero owners; catching it here too means the
+ * button explains itself instead of the operator discovering the rule from a 400. */
+const noOwnerLeft = computed(() => draft.value.owners.length === 0)
+
+function addEntry(): void {
+  const raw = addId.value.trim()
+  if (!raw) return
+  // Digits-only pre-check so a paste with spaces/labels is normalised, but a non-number
+  // is refused in place rather than stored and rejected by the server later.
+  const id = String(raw).replace(/[＋+]/g, '').replace(/\D/g, '')
+  if (!id) {
+    authorityError.value = t('security.qqInvalid')
+    return
+  }
+  authorityError.value = ''
+  const list = draft.value[roleKey[addRole.value]]
+  if (!list.includes(id)) list.push(id)
+  addId.value = ''
+  dirty.value = true
+}
+
+/** Role names are singular; the list keys (and the API fields) are plural. */
+const roleKey = {
+  owner: 'owners',
+  admin: 'admins',
+  member: 'members',
+} as const
+
+function removeEntry(role: 'owner' | 'admin' | 'member', id: string): void {
+  const key = roleKey[role]
+  draft.value[key] = draft.value[key].filter((x) => x !== id)
+  dirty.value = true
+}
+
+async function saveAuthority(): Promise<void> {
+  if (noOwnerLeft.value) {
+    authorityError.value = t('security.lastOwnerGuard')
+    return
+  }
+  authorityBusy.value = true
+  authorityError.value = ''
+  try {
+    const body = await api.writeAuthority({
+      owners: draft.value.owners,
+      admins: draft.value.admins,
+      members: draft.value.members,
+    })
+    draft.value = { owners: body.owners, admins: body.admins, members: body.members }
+    dirty.value = false
+    authorityNote.value = t('security.authoritySaved')
+    await access.reload()
+  } catch (error) {
+    authorityError.value = (error as Error).message
+  } finally {
+    authorityBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -147,22 +236,67 @@ const roles = computed<any[]>(() => access.data.value?.roles ?? [])
         </table>
 
         <div class="stack">
-          <div class="row">
-            <span class="eyebrow" style="width: 66px">owner</span>
-            <span v-for="id in access.data.value?.owners ?? []" :key="id" class="tag lamp">{{ id }}</span>
-            <span v-if="!access.data.value?.owners?.length" class="faint">{{ t('common.notConfigured') }}</span>
-          </div>
-          <div class="row">
-            <span class="eyebrow" style="width: 66px">admin</span>
-            <span v-for="id in access.data.value?.admins ?? []" :key="id" class="tag">{{ id }}</span>
-            <span v-if="!access.data.value?.admins?.length" class="faint">{{ t('common.notConfigured') }}</span>
-          </div>
-          <div class="row">
-            <span class="eyebrow" style="width: 66px">member</span>
-            <span v-for="id in access.data.value?.members ?? []" :key="id" class="tag">{{ id }}</span>
-            <span v-if="!access.data.value?.members?.length" class="faint">{{ t('common.notConfigured') }}</span>
+          <div v-for="role in (['owner', 'admin', 'member'] as const)" :key="role" class="row">
+            <span class="eyebrow" style="width: 66px">{{ role }}</span>
+            <span
+              v-for="id in draft[roleKey[role]]"
+              :key="`${role}-${id}`"
+              class="tag"
+              :class="role === 'owner' ? 'lamp' : ''"
+            >
+              {{ id }}
+              <button
+                class="tag__remove"
+                type="button"
+                :aria-label="t('security.removeAria', { id, role })"
+                @click="removeEntry(role, id)"
+              >
+                ×
+              </button>
+            </span>
+            <span v-if="!draft[roleKey[role]].length" class="faint">
+              {{ t('common.notConfigured') }}
+            </span>
           </div>
         </div>
+
+        <!-- The edit affordance lives next to the list it edits: a separate "权限管理"
+             page would separate the decision from the state it changes. -->
+        <div class="row" style="flex-wrap: wrap; gap: 8px">
+          <select v-model="addRole" class="field" style="width: 110px" :aria-label="t('security.roleAria')">
+            <option value="owner">owner</option>
+            <option value="admin">admin</option>
+            <option value="member">member</option>
+          </select>
+          <input
+            v-model="addId"
+            class="field"
+            style="width: 200px"
+            inputmode="numeric"
+            :placeholder="t('security.qqPlaceholder')"
+            :aria-label="t('security.qqAria')"
+            @keydown.enter.prevent="addEntry"
+          />
+          <button class="btn ghost" type="button" @click="addEntry">
+            {{ t('security.add') }}
+          </button>
+          <span class="strip__spacer" />
+          <button
+            class="btn"
+            type="button"
+            :disabled="authorityBusy || (!dirty && !noOwnerLeft)"
+            @click="saveAuthority"
+          >
+            {{ authorityBusy ? t('security.saving') : t('security.save') }}
+          </button>
+        </div>
+        <p v-if="authorityNote" class="hint" style="margin: 0; color: var(--ok)">
+          {{ authorityNote }}
+        </p>
+        <p v-if="authorityError" class="hint" style="margin: 0; color: var(--danger)">
+          {{ authorityError }}
+        </p>
+        <p class="hint" style="margin: 0">{{ t('security.authorityHint') }}</p>
 
         <!-- The `key=value` reading gets its own line: it is a config value to compare
              against a file, not a word in a sentence, and splitting a sentence around

@@ -269,6 +269,19 @@ export default {
   'security.permission': 'Permission',
   'security.minRole': 'Min role',
   'security.rolesAndLists': 'Roles and allow-lists',
+  'security.add': 'Add',
+  'security.saving': 'Saving…',
+  'security.save': 'Save lists',
+  'security.qqPlaceholder': 'QQ number, e.g. 123456789',
+  'security.qqAria': 'QQ number to authorise',
+  'security.roleAria': 'Role to grant',
+  'security.qqInvalid': 'Enter a numeric QQ number.',
+  'security.lastOwnerGuard': 'At least one owner must remain, or nobody can edit permissions again.',
+  'security.authoritySaved':
+    'Written to .env. Restart the panel to apply: schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (or however you start it).',
+  'security.authorityHint':
+    "Changes are written to the server's .env (SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS) and need a panel restart. An owner from first_run_owner is kept automatically so you cannot lock yourself out.",
+  'security.removeAria': 'Remove {id} from {role}',
   'security.allowListHint': 'The allow-list comes only from server config. The switch below decides whether roles declared by the protocol side in a message are trusted:',
   'security.trustWarn': 'When on, the protocol side may declare roles in a message — enable it only over a fully trusted transport.',
 
