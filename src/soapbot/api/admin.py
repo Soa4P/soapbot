@@ -109,10 +109,35 @@ async def runtime_status(_: dict = Depends(require_api_auth)) -> dict:
     from soapbot.app import get_startup_errors
 
     runtime = _runtime()
+    if runtime is None:
+        # "Runtime off" and "runtime broken" produced the same red banner, and the honest
+        # one is "you turned it off": a panel-only deployment (a fresh install that has no
+        # provider yet) is a supported state, not a failure. Answering 503 there made the
+        # first screen of a working install look like an error page.
+        from soapbot.config import settings
+
+        if not settings.enable_runtime:
+            return {
+                "version": __version__,
+                "enabled": False,
+                "running": False,
+                "metrics": {},
+                "adapters": {},
+                "adapter_count": 0,
+                "scheduler": {"running": False},
+                "startup_errors": [],
+                "config": {
+                    "providers_file": str(settings.providers_file),
+                    "adapters_file": str(settings.adapters_file),
+                },
+            }
+        raise HTTPException(status_code=503, detail="bot runtime failed to start; see the log")
+
     scheduler = _scheduler()
     status = runtime.status()
     return {
         "version": __version__,
+        "enabled": True,
         "running": status["running"],
         "metrics": status["metrics"],
         "adapters": status["adapters"],

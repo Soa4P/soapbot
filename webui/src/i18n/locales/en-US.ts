@@ -675,6 +675,10 @@ export default {
   'probe.code.in_use': 'port already listening',
 
   // ------------------------------------------------------- first-run checklist
+  'overview.runtimeOffTitle': 'Bot runtime is switched off (panel only)',
+  'overview.runtimeOffHint':
+    'That is a setting from install time: `SOAPBOT_ENABLE_RUNTIME=false`. The panel works, edits config and can show the login QR, but it will not connect to QQ or answer messages. To make it work: set that line to `true` in `.env`, restart the service, then fill in the Provider and QQ adapter on page 07.',
+
   'setup.title': 'First-run checks',
   'setup.stepsTitle': 'Three steps (works even if you have never deployed anything)',
   'setup.step1':

@@ -67,6 +67,17 @@ const providerStats = computed<Record<string, any>>(() => providers.data.value?.
     {{ runtime.error.value }}
   </div>
 
+  <!-- A panel-only deployment is a state, not a fault: say so in a neutral card and name
+       the variable, instead of leaving a red box that reads like a crash. -->
+  <section v-else-if="runtime.data.value && runtime.data.value.enabled === false" class="panel">
+    <div class="panel__head">
+      <h2>{{ t('overview.runtimeOffTitle') }}</h2>
+    </div>
+    <div class="panel__body">
+      <p class="hint" style="margin: 0">{{ t('overview.runtimeOffHint') }}</p>
+    </div>
+  </section>
+
   <section class="panel">
     <div class="panel__head">
       <h2>{{ t('overview.readouts') }}</h2>
