@@ -23,6 +23,7 @@ from soapbot.ai.stages import ModelStage, PersonaStage, SafetyStage
 from soapbot.ai.vision import DescriptionCache
 from soapbot.config import settings
 from soapbot.core.bus import EventBus
+from soapbot.core.observer import install_passive_observer
 from soapbot.core.pipeline import Pipeline
 from soapbot.core.runtime import BotRuntime
 from soapbot.core.stages import (
@@ -476,6 +477,13 @@ def build_runtime(
     pipeline.observe(_observe_stage(traces))
     bus.subscribe("message.processed", lambda ctx: _record_trace(traces, ctx))
 
+    # Passive mode: read what the bot was not asked to answer. Subscribed here, next to
+    # the trace collector, because both are "what happened" observers and both must be
+    # attached before the first message. Without it the wake gate halts before anything
+    # is archived, so an un-addressed group message never becomes context — the bot
+    # would not be quiet, it would be blind.
+    passive = install_passive_observer(bus, memory)
+
     return BotRuntime(
         pipeline=pipeline,
         bus=bus,
@@ -488,6 +496,7 @@ def build_runtime(
         bilibili=bilibili_client,
         traces=traces,
         mcp=mcp_manager,
+        passive=passive,
     )
 
 
