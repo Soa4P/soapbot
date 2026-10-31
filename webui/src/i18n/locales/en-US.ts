@@ -553,6 +553,24 @@ export default {
   'adapters.previewFailed': 'preview failed: {reason}',
   'adapters.writeFailed': 'write failed: {reason}',
 
+  // ------------------------------------------------------ find the local protocol end
+  'scan.button': 'Scan this machine',
+  'scan.scanning': 'Scanning…',
+  'scan.hint':
+    'Use this when the panel and NapCat run on the same machine: it finds the port NapCat opened for you.',
+  'scan.failed': 'scan failed: {reason}',
+  'scan.found': 'Found a logged-in protocol end (port {port}) — press Connect to put it in the table.',
+  'scan.none':
+    'No logged-in protocol end found. Make sure NapCat is running and logged in, or follow the steps below.',
+  'scan.connect': 'Connect',
+  'scan.added': 'Port {port} added to the table below; then Preview changes → Write.',
+  'scan.napcatWebui':
+    "This is NapCat's own WebUI: it is installed but not logged in — scan the QR there first.",
+  'scan.kind.onebot': 'OneBot, logged in',
+  'scan.kind.onebot_locked': 'OneBot, handshake refused',
+  'scan.kind.http': 'HTTP service',
+  'scan.kind.closed': 'nothing listening',
+
   // ------------------------------------------------- step-by-step recipes (NapCat example)
   'adapters.howtoSummary': 'How to fill this in? Pick one of the two routes (NapCat example)',
   'adapters.howtoPrelude':

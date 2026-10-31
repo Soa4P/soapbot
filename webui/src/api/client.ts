@@ -153,6 +153,12 @@ export const api = {
    * on the port instead — `in_use` means something is already listening (usually the
    * good outcome), `free` means it is not listening yet.
    */
+  /**
+   * Look for a protocol end on this machine (loopback only, fixed candidate ports).
+   * Writes nothing; returns what answered so the operator does not have to know a port.
+   */
+  protocolScan: () => request<ScanResult>('/api/protocol/scan'),
+
   configAdaptersTest: (body: {
     kind: string
     mode: string
@@ -460,6 +466,25 @@ export interface AdapterProbeResult extends ProbeResult {
   state: 'handshake_ok' | 'unauthorized' | 'not_onebot' | 'unreachable' | 'free' | 'in_use' | 'error'
   detail?: string
   retcode?: number | null
+}
+
+/** One candidate local port and what answered on it. */
+export interface ScanEntry {
+  port: number
+  kind: 'onebot' | 'onebot_locked' | 'http' | 'closed'
+  ok?: boolean
+  account?: string
+  detail?: string
+  ws_url?: string
+  status_code?: number | null
+  hint?: string
+}
+
+export interface ScanResult {
+  scanned: number
+  results: ScanEntry[]
+  /** Ready-to-apply adapter row for the first logged-in OneBot found. */
+  suggestion: { kind: string; mode: string; ws_url: string; account_id: string } | null
 }
 
 export interface DiffResult {

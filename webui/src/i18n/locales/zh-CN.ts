@@ -570,6 +570,21 @@ export default {
   'adapters.previewFailed': '预览失败：{reason}',
   'adapters.writeFailed': '写入失败：{reason}',
 
+  // ------------------------------------------------------------ 扫描本机协议端
+  'scan.button': '扫描本机协议端',
+  'scan.scanning': '扫描中…',
+  'scan.hint': '面板和 NapCat 在同一台机器时用这个：它会替你找出 NapCat 开在哪个端口。',
+  'scan.failed': '扫描失败：{reason}',
+  'scan.found': '找到已登录的协议端（端口 {port}），点「连上」填进表格。',
+  'scan.none': '没有找到已登录的协议端：先确认 NapCat 已启动并登录，或按下面的步骤配。',
+  'scan.connect': '连上',
+  'scan.added': '已把端口 {port} 填进下面的表格，接着「预览改动 → 写入」。',
+  'scan.napcatWebui': '这是 NapCat 的 WebUI：说明它装好了但还没登录，先去扫码登录。',
+  'scan.kind.onebot': '已登录的 OneBot',
+  'scan.kind.onebot_locked': 'OneBot，但握手被拒',
+  'scan.kind.http': 'HTTP 服务',
+  'scan.kind.closed': '没有服务',
+
   // ------------------------------------------------------------ 逐步配置说明（NapCat 为例）
   'adapters.howtoSummary': '怎么填？两条路线选一条（以 NapCat 为例）',
   'adapters.howtoPrelude':

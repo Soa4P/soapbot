@@ -10,7 +10,7 @@
  */
 import { onMounted, ref } from 'vue'
 
-import { api, type AdapterProbeResult } from '@/api/client'
+import { api, type AdapterProbeResult, type ScanEntry } from '@/api/client'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
 
@@ -233,6 +233,44 @@ function onModeChange(draft: Draft): void {
   }
 }
 
+/* ------------------------------------------------------------- find what is running */
+/*
+ * The step before this table: the operator has just installed a protocol end and has no
+ * idea which port it opened. Asking them to type a WebSocket URL is asking them to know
+ * the architecture. The server walks the usual ports and reports what answered; "连上"
+ * only fills a draft row, so the diff-then-write path is unchanged.
+ */
+const scanResults = ref<ScanEntry[]>([])
+const scanning = ref(false)
+const scanError = ref('')
+
+async function scanLocal(): Promise<void> {
+  scanning.value = true
+  scanError.value = ''
+  try {
+    const body = await api.protocolScan()
+    scanResults.value = body.results
+    // Apply nothing automatically: a port being open is not permission to rewrite the
+    // config. The button next to the row is the confirmation.
+    const found = body.suggestion
+    message(found ? t('scan.found', { port: found.ws_url.split(':').pop() ?? '' }) : t('scan.none'))
+  } catch (error) {
+    scanError.value = (error as Error).message
+  } finally {
+    scanning.value = false
+  }
+}
+
+function useFound(entry: ScanEntry): void {
+  drafts.value.push({
+    ...blank(),
+    mode: 'forward',
+    ws_url: entry.ws_url || `ws://127.0.0.1:${entry.port}`,
+    account_id: entry.account || '',
+  })
+  message(t('scan.added', { port: String(entry.port) }))
+}
+
 onMounted(load)
 </script>
 
@@ -271,6 +309,38 @@ onMounted(load)
         <li>{{ t('adapters.howtoCommon3') }}</li>
       </ul>
     </details>
+
+    <!-- Before the table, because this is what someone needs when they do not know the
+         table's first value. Only useful when the panel runs on the same machine as the
+         protocol end, which the hint says rather than implying the scan is universal. -->
+    <div class="scan">
+      <button class="btn" type="button" :disabled="scanning" @click="scanLocal">
+        {{ scanning ? t('scan.scanning') : t('scan.button') }}
+      </button>
+      <span class="muted">{{ t('scan.hint') }}</span>
+    </div>
+    <p v-if="scanError" class="muted">{{ t('scan.failed', { reason: scanError }) }}</p>
+    <ul v-if="scanResults.length" class="scan__list">
+      <li v-for="entry in scanResults" :key="entry.port" class="scan__item">
+        <code>127.0.0.1:{{ entry.port }}</code>
+        <span
+          class="tag"
+          :class="entry.kind === 'onebot' ? 'ok' : entry.kind === 'closed' ? 'idle' : 'warn'"
+        >
+          {{ t(`scan.kind.${entry.kind}`) }}
+        </span>
+        <span v-if="entry.account" class="muted">QQ {{ entry.account }}</span>
+        <span v-if="entry.hint === 'napcat_webui'" class="muted">{{ t('scan.napcatWebui') }}</span>
+        <button
+          v-if="entry.kind === 'onebot'"
+          class="btn ghost"
+          type="button"
+          @click="useFound(entry)"
+        >
+          {{ t('scan.connect') }}
+        </button>
+      </li>
+    </ul>
 
     <p v-if="!loaded" class="muted">
       {{ busy ? t('adapters.loading') : t('adapters.notLoaded') }}
@@ -430,6 +500,29 @@ onMounted(load)
 }
 td {
   vertical-align: middle;
+}
+.scan {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  flex-wrap: wrap;
+}
+.scan__list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.scan__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scan__item code {
+  font-family: var(--mono);
 }
 .howto {
   border: 1px solid var(--border);
