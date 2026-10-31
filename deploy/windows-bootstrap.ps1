@@ -94,10 +94,19 @@ Set-Content -Path $envFile -Value $lines -Encoding ASCII
 # ------------------------------------------------------------------------- 5. start
 if ($Start) {
     Step 'starting the panel'
-    $listening = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if (-not $listening) {
-        Start-Process $python -ArgumentList '-m', 'soapbot.cli', 'start' -WorkingDirectory $Dir -WindowStyle Hidden
-    }
+    # Registered as a scheduled task, NOT `Start-Process`. Two reasons, both learned the hard
+    # way: a process started inside a remote/WinRM session is killed when that session ends
+    # (so "it was running" one minute and gone the next, with nothing in any log), and a
+    # hidden child of an RDP session dies when the operator closes the window — which for a
+    # bot means it stops answering the moment you stop watching it.
+    $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
+        -Argument "/c cd /d $Dir && `"$python`" -m soapbot.cli start >> `"$Dir\panel.log`" 2>&1"
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName 'SoapbotPanel' -Action $action -Principal $principal `
+        -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName 'SoapbotPanel'
     for ($i = 0; $i -lt 45; $i++) {
         Start-Sleep -Seconds 2
         try {

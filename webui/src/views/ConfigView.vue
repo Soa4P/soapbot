@@ -68,7 +68,6 @@ const appliedFields = ref<string[]>([])
 const hasEdits = computed(() => Object.values(edited.value).some(Boolean))
 
 const mask = computed(() => document.value?.mask ?? '********')
-const sentinel = computed(() => document.value?.unchanged_sentinel ?? '__UNCHANGED__')
 
 async function loadForEdit(): Promise<void> {
   busy.value = true
@@ -102,13 +101,55 @@ function onSecretInput(row: ProviderEntry, event: Event): void {
   markEdited(row.id)
 }
 
+/* ------------------------------------------------------------------ provider presets */
+/*
+ * The empty row asks for four values nobody can invent: base_url, model, and a key that
+ * lives on some other website. A preset fills the three that are public knowledge and
+ * leaves exactly one field for the operator: the key. This is the difference between "read
+ * the docs" and "paste one thing".
+ */
+interface Preset {
+  key: string
+  label: string
+  kind: string
+  base_url: string
+  model: string
+}
+
+/* Brand names stay as-is; anything that is a sentence lives in i18n (config.presetKey.*). */
+const PRESETS: Preset[] = [
+  { key: 'deepseek', label: 'DeepSeek', kind: 'openai_compat', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-flash' },
+  { key: 'qwen', label: 'Qwen', kind: 'openai_compat', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { key: 'openai', label: 'OpenAI', kind: 'openai_compat', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { key: 'ollama', label: 'Ollama', kind: 'openai_compat', base_url: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
+]
+
+const lastPreset = ref<Preset | null>(null)
+
+function addPreset(preset: Preset): void {
+  const id = `provider-${drafts.value.length + 1}`
+  drafts.value.push({
+    id,
+    kind: preset.kind,
+    base_url: preset.base_url,
+    api_key: '',
+    model: preset.model,
+    priority: (drafts.value.length + 1) * 10,
+    enabled: true,
+  })
+  markEdited(id)
+  lastPreset.value = preset
+}
+
 function addRow(): void {
   const id = `provider-${drafts.value.length + 1}`
   drafts.value.push({
     id,
     kind: 'openai_compat',
     base_url: '',
-    api_key: sentinel.value,
+    // Empty, not the "unchanged" sentinel: a sentinel in a brand-new row reads as a
+    // placeholder the operator is supposed to keep, and saving it writes a literal marker.
+    api_key: '',
     model: '',
     priority: (drafts.value.length + 1) * 10,
     enabled: true,
@@ -305,6 +346,14 @@ async function applyChanges(): Promise<void> {
         <!-- Says what the test button does *not* do. "Test connection" would otherwise be
              read as "test my key", and a 401 would look like a broken panel. -->
         <p class="hint" style="margin: 0 0 8px">{{ t('probe.providerHint') }}</p>
+        <!-- Every column explained once, in the place where it is filled in. The three
+             values people get wrong most often are named explicitly. -->
+        <ul class="hint fieldmap">
+          <li>{{ t('config.hint.id') }}</li>
+          <li>{{ t('config.hint.baseUrl') }}</li>
+          <li>{{ t('config.hint.model') }}</li>
+          <li>{{ t('config.hint.key') }}</li>
+        </ul>
 
         <table class="data">
           <caption class="visually-hidden">{{ t('config.editCaption') }}</caption>
@@ -338,6 +387,7 @@ async function applyChanges(): Promise<void> {
                   class="field"
                   style="min-width: 120px"
                   :aria-label="t('common.type')"
+                  placeholder="openai_compat"
                   @input="markEdited(row.id)"
                 />
               </td>
@@ -346,6 +396,7 @@ async function applyChanges(): Promise<void> {
                   v-model="row.base_url"
                   class="field"
                   style="min-width: 180px"
+                  placeholder="https://api.deepseek.com/v1"
                   aria-label="Base URL"
                   @input="markEdited(row.id)"
                 />
@@ -355,6 +406,7 @@ async function applyChanges(): Promise<void> {
                   v-model="row.model"
                   class="field"
                   style="min-width: 120px"
+                  placeholder="deepseek-flash"
                   :aria-label="t('common.model')"
                   @input="markEdited(row.id)"
                 />
@@ -369,6 +421,7 @@ async function applyChanges(): Promise<void> {
                   :value="row.api_key"
                   aria-label="API Key"
                   spellcheck="false"
+                  placeholder="sk-... / env:DEEPSEEK_API_KEY"
                   @input="onSecretInput(row, $event)"
                 />
               </td>
@@ -413,6 +466,29 @@ async function applyChanges(): Promise<void> {
             </tr>
           </tbody>
         </table>
+
+        <!-- One click fills kind/base_url/model; the key is the only thing left to paste.
+             A blank row asks for three facts that live on other websites. -->
+        <div class="row presets" style="margin-top: 10px">
+          <span class="hint">{{ t('config.presetLabel') }}</span>
+          <button
+            v-for="preset in PRESETS"
+            :key="preset.key"
+            class="btn ghost"
+            type="button"
+            @click="addPreset(preset)"
+          >
+            + {{ preset.label }}
+          </button>
+        </div>
+        <p v-if="lastPreset" class="hint" style="margin: 4px 0 0">
+          {{
+            t('config.presetHint', {
+              site: t(`config.presetKey.${lastPreset.key}`),
+              model: lastPreset.model,
+            })
+          }}
+        </p>
 
         <div class="row" style="margin-top: 10px">
           <button class="btn ghost" type="button" @click="addRow">{{ t('config.addProvider') }}</button>

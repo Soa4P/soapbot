@@ -688,6 +688,21 @@ export default {
   'overview.runtimeOffHint':
     '这是安装时的一个设置：`SOAPBOT_ENABLE_RUNTIME=false`。面板能用、能改配置、能取二维码，但不会去连 QQ、也不会回消息。要让它真的干活：把 `.env` 里这一行改成 `true`，重启服务；然后第 07 页填 Provider 与 QQ 接入。',
 
+  'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
+  'config.presetKey.qwen': 'bailian.console.aliyun.com（阿里云百炼）',
+  'config.presetKey.openai': 'platform.openai.com/api-keys',
+  'config.presetKey.ollama': '本地不用 Key，随便填非空值即可',
+  'config.presetLabel': '一键填好（只差 Key）：',
+  'config.presetHint':
+    'Key 从 {site} 申请；model 已填 {model}，想换别的填它 /v1/models 列出的 id。填好点「测试」看是否可达，再「预览改动 → 写入」。',
+  'config.hint.id': 'ID：随便起一个名字（只用于人和日志），例如 deepseek。',
+  'config.hint.baseUrl':
+    'Base URL：模型服务地址，通常以 /v1 结尾。DeepSeek 是 https://api.deepseek.com/v1，本地 Ollama 是 http://127.0.0.1:11434/v1。少写 /v1 会 404。',
+  'config.hint.model':
+    'Model：服务商列出的模型 id，不是别名也不是中文名。DeepSeek 用 deepseek-flash，Qwen 用 qwen-plus。',
+  'config.hint.key':
+    'API Key：直接粘字符串，或写 env:变量名（更安全，变量放在 .env 里）。「测试」按钮不会发送 Key。',
+
   'setup.title': '首次运行检查',
   // 三段话是给「什么都没部署过」的人看的：先说手要怎么动，再说哪几项还是红的。
   'setup.stepsTitle': '三步走（没部署过也照样能做）',
@@ -704,10 +719,10 @@ export default {
   'setup.ok': '通过',
   'setup.todo': '待办',
   'setup.go': '去处理',
-  'setup.providers': 'Provider 已配置',
+  'setup.providers': 'Provider（模型）',
   'setup.providersOk': '{n} 个 Provider 可用于模型调用。',
   'setup.providersMissing': '没有 Provider：模型阶段被禁用，机器人不会产生任何回复。',
-  'setup.adapters': 'QQ 接入已配置',
+  'setup.adapters': 'QQ 接入（adapters）',
   'setup.adaptersOk': '{n} 个接入端已写入配置。',
   'setup.adaptersMissing': '没有接入端：服务在跑，但收不到任何 QQ 消息。',
   'setup.online': '适配器在线',
