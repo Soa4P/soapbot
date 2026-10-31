@@ -53,6 +53,18 @@ ENV_KEYS = (
 )
 
 
+#: Child output is decoded as UTF-8 explicitly. `text=True` alone means "the locale
+#: encoding", which on a Chinese Windows is GBK: one Chinese character in `doctor`'s output
+#: and the reader thread dies with UnicodeDecodeError — a crash caused entirely by the
+#: installer reading its own child's log.
+TEXT_KW: dict[str, object] = {
+    "capture_output": True,
+    "text": True,
+    "encoding": "utf-8",
+    "errors": "replace",
+}
+
+
 def say(step: str, message: str) -> None:
     print(f"\n[{step}] {message}")
 
@@ -62,19 +74,28 @@ def die(message: str) -> NoReturn:
     raise SystemExit(1)
 
 
-def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run and stream nothing: every command here either works or is explained."""
-    printable = " ".join(args)
-    print(f"      {printable[:120]}")
+def run(
+    *args: str | Path, cwd: Path | None = None, check: bool = True, quiet: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Run and stream nothing: every command here either works or is explained.
+
+    ``quiet`` is for internal probes (asking the app where its config directory is): those
+    are questions this script asks itself, not steps the operator needs to read.
+    """
+    # Paths come in from every caller, and one of them is always the interpreter or a
+    # directory, so stringify up front — joining them as-is is a TypeError waiting for the
+    # first path argument.
+    command = [str(a) for a in args]
+    if not quiet:
+        print(f"      {' '.join(command)[:120]}")
     result = subprocess.run(
-        [str(a) for a in args],
+        command,
         cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
+        **TEXT_KW,  # type: ignore[arg-type]
     )
     if check and result.returncode != 0:
         tail = (result.stderr or result.stdout or "").strip().splitlines()[-15:]
-        die(f"{args[0]} exited {result.returncode}\n      " + "\n      ".join(tail))
+        die(f"{command[0]} exited {result.returncode}\n      " + "\n      ".join(tail))
     return result
 
 
@@ -108,9 +129,7 @@ def _check_interpreter_can_venv() -> None:
     """Debian ships ``python3`` without ``ensurepip``, so ``-m venv`` fails with a message
     telling you to install a package — after the installer has already printed three
     reassuring steps. Saying it first is the difference between a fix and a mystery."""
-    probe = subprocess.run(
-        [sys.executable, "-c", "import ensurepip"], capture_output=True, text=True
-    )
+    probe = subprocess.run([sys.executable, "-c", "import ensurepip"], **TEXT_KW)
     if probe.returncode != 0:
         die(
             f"{sys.executable} cannot create virtual environments (ensurepip missing).\n"
@@ -124,8 +143,10 @@ def ensure_venv(root: Path, extras: list[str]) -> Path:
     # Windows puts the interpreter at Scripts/python.exe, POSIX at bin/python. Reusing the
     # caller's interpreter is tempting but wrong: an installer run from a system Python or
     # from inside another venv would install the project somewhere it is never used from.
-    python = venv / ("Scripts" if os.name == "nt" else "bin") / (
-        "python.exe" if os.name == "nt" else "python"
+    python = (
+        venv
+        / ("Scripts" if os.name == "nt" else "bin")
+        / ("python.exe" if os.name == "nt" else "python")
     )
     if not python.exists():
         _check_interpreter_can_venv()
@@ -164,9 +185,7 @@ def ensure_env(root: Path, python: Path, host: str, port: int) -> Path:
     say("5/6", "writing configuration")
     env_path = root / ".env"
     if not env_path.exists() and (root / ".env.example").exists():
-        env_path.write_text(
-            (root / ".env.example").read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        env_path.write_text((root / ".env.example").read_text(encoding="utf-8"), encoding="utf-8")
     data_dir = root / "data"
     config_dir = root / "config"
     data_dir.mkdir(exist_ok=True)
@@ -200,9 +219,31 @@ def ensure_env(root: Path, python: Path, host: str, port: int) -> Path:
     return env_path
 
 
+def effective_config_dir(root: Path, python: Path) -> str:
+    """Where the app will actually keep providers/adapters — asked, not assumed.
+
+    This line used to print ``<root>/config``, which is the *template*. The panel writes to
+    the data volume, so the summary was pointing at a directory the operator should never
+    edit — the same class of mistake the config-directory fix was about.
+    """
+    probe = run(
+        python,
+        "-c",
+        "from soapbot.config import settings; print(settings.config_dir)",
+        cwd=root,
+        check=False,
+        quiet=True,
+    )
+    resolved = (probe.stdout or "").strip().splitlines()
+    return resolved[-1] if resolved else str(root / "data" / "config")
+
+
 def python_in(root: Path) -> Path:
-    return root / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
-        "python.exe" if os.name == "nt" else "python"
+    return (
+        root
+        / ".venv"
+        / ("Scripts" if os.name == "nt" else "bin")
+        / ("python.exe" if os.name == "nt" else "python")
     )
 
 
@@ -245,7 +286,7 @@ def service_user(root: Path) -> tuple[str, str] | None:
         return None
 
     name = "soapbot"
-    exists = subprocess.run(["id", name], capture_output=True, text=True)
+    exists = subprocess.run(["id", name], **TEXT_KW)
     if exists.returncode != 0:
         created = subprocess.run(
             [
@@ -256,8 +297,7 @@ def service_user(root: Path) -> tuple[str, str] | None:
                 "/usr/sbin/nologin",
                 name,
             ],
-            capture_output=True,
-            text=True,
+            **TEXT_KW,
         )
         if created.returncode != 0:
             # Not root, most likely — say so and let the unit be a user unit instead.
@@ -267,19 +307,15 @@ def service_user(root: Path) -> tuple[str, str] | None:
     # The service writes here (SQLite, config, the .env the panel saves into), so handing
     # the account a directory it cannot write is a service that fails on first save.
     for target in (root / "data", root / "config"):
-        subprocess.run(
-            ["chown", "-R", f"{name}:{name}", str(target)], capture_output=True, text=True
-        )
+        subprocess.run(["chown", "-R", f"{name}:{name}", str(target)], **TEXT_KW)
     env_file = root / ".env"
     if env_file.exists():
-        subprocess.run(["chown", f"{name}:{name}", str(env_file)], capture_output=True, text=True)
-        subprocess.run(["chmod", "0640", str(env_file)], capture_output=True, text=True)
+        subprocess.run(["chown", f"{name}:{name}", str(env_file)], **TEXT_KW)
+        subprocess.run(["chmod", "0640", str(env_file)], **TEXT_KW)
     return name, name
 
 
-def install_service(
-    root: Path, python: Path, env_path: Path, autostart: bool, unit: str
-) -> str:
+def install_service(root: Path, python: Path, env_path: Path, autostart: bool, unit: str) -> str:
     """Hand supervision to the platform's own mechanism. Returns a human sentence.
 
     Refusing to overwrite an existing unit is not politeness: a real host can already have
@@ -309,20 +345,18 @@ def install_service(
                 task,
             ],
             cwd=str(root),
-            capture_output=True,
-            text=True,
+            **TEXT_KW,
         )
         if created.returncode == 0:
-            subprocess.run(["schtasks", "/Run", "/TN", unit], capture_output=True, text=True)
+            subprocess.run(["schtasks", "/Run", "/TN", unit], **TEXT_KW)
             return f"Windows: scheduled task '{unit}' runs at logon; started now."
         detail = (created.stderr or created.stdout or "").strip().splitlines()[-3:]
         return "Windows: could not register the logon task:\n      " + "\n      ".join(detail)
 
     if which("systemctl"):
         existing = Path(f"/etc/systemd/system/{unit}.service")
-        if (
-            existing.exists()
-            and UNIT_MARKER not in existing.read_text(encoding="utf-8", errors="replace")
+        if existing.exists() and UNIT_MARKER not in existing.read_text(
+            encoding="utf-8", errors="replace"
         ):
             return (
                 f"Linux: {existing} already exists and was not written by this installer, "
@@ -331,7 +365,11 @@ def install_service(
             )
         unit_path = existing
         account = service_user(root)
-        run_as = f"User={account[0]}\nGroup={account[1]}" if account else "# running as the invoking user"
+        run_as = (
+            f"User={account[0]}\nGroup={account[1]}"
+            if account
+            else "# running as the invoking user"
+        )
         if account:
             print(f"      service account: {account[0]}")
         contents = f"""{UNIT_MARKER}
@@ -353,9 +391,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 """
-        wrote = subprocess.run(
-            ["tee", str(unit_path)], input=contents, capture_output=True, text=True
-        )
+        wrote = subprocess.run(["tee", str(unit_path)], input=contents, **TEXT_KW)
         enabled = True
         if wrote.returncode != 0:
             # Not root, most likely. A per-user unit is the honest fallback: it survives a
@@ -363,9 +399,7 @@ WantedBy=multi-user.target
             user_unit = Path.home() / ".config" / "systemd" / "user"
             user_unit.mkdir(parents=True, exist_ok=True)
             (user_unit / f"{unit}.service").write_text(contents, encoding="utf-8")
-            subprocess.run(
-                ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
-            )
+            subprocess.run(["systemctl", "--user", "daemon-reload"], **TEXT_KW)
             enabled = (
                 subprocess.run(
                     ["systemctl", "--user", "enable", "--now", unit],
@@ -380,12 +414,8 @@ WantedBy=multi-user.target
                 + "\n      Note: a user unit stops when you log out unless lingering is on: "
                 "loginctl enable-linger $USER"
             )
-        subprocess.run(
-            ["systemctl", "daemon-reload"], capture_output=True, text=True
-        )
-        result = subprocess.run(
-            ["systemctl", "enable", "--now", unit], capture_output=True, text=True
-        )
+        subprocess.run(["systemctl", "daemon-reload"], **TEXT_KW)
+        result = subprocess.run(["systemctl", "enable", "--now", unit], **TEXT_KW)
         if result.returncode != 0:
             detail = (result.stderr or "").strip().splitlines()[-3:]
             return "Linux: unit wrote but would not start:\n      " + "\n      ".join(detail)
@@ -402,7 +432,10 @@ def check_only(root: Path, port: int) -> int:
     python = python_in(root)
     interpreter = str(python) if python.exists() else sys.executable
     say("check", f"python {interpreter}")
-    run(interpreter, "-m", "soapbot.cli", "doctor", cwd=root, check=False)
+    # Printed rather than captured: `--check` exists so a person can read the verdict, and
+    # swallowing it would leave the one command that reports problems silent.
+    doctor = run(interpreter, "-m", "soapbot.cli", "doctor", cwd=root, check=False, quiet=True)
+    print(doctor.stdout.rstrip() or doctor.stderr.rstrip())
     say("check", f"http://127.0.0.1:{port}/api/health")
     ok = health_ok(port)
     print("      ok" if ok else "      not answering — is the panel running?")
@@ -438,13 +471,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if sys.version_info < MIN_PYTHON:
-        die(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required (running {sys.version.split()[0]})")
+        die(
+            f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required (running {sys.version.split()[0]})"
+        )
 
-    say("1/6", "locating the source")
     root = ensure_source(args)
-
     if args.check:
+        say("check", "auditing an existing install (nothing will be changed)")
         return check_only(root, args.port)
+
+    say("1/6", f"installing from {root}")
 
     python = ensure_venv(root, args.extra)
     ensure_ui(root)
@@ -459,7 +495,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_start:
         say("start", f"waiting for http://{args.host}:{args.port}/api/health")
         log = root / "data" / "panel.log"
-        if (not args.no_service and os.name == "nt" and not args.autostart) or (not args.no_service and os.name != "nt" and "no systemd" in supervisor) or args.no_service:
+        if (
+            (not args.no_service and os.name == "nt" and not args.autostart)
+            or (not args.no_service and os.name != "nt" and "no systemd" in supervisor)
+            or args.no_service
+        ):
             start_background(root, python, log)
 
         for _ in range(30):
@@ -479,7 +519,8 @@ def main(argv: list[str] | None = None) -> int:
     print("  done.")
     print(f"  panel : {panel}")
     print(f"  token : {token_cmd}")
-    print(f"  data  : {root / 'data'}   config: {root / 'config'}   env: {env_path}")
+    print(f"  data  : {root / 'data'}   config: {effective_config_dir(root, python)}")
+    print(f"  env   : {env_path}")
     print(f"  supervisor: {supervisor}")
     if args.host in {"127.0.0.1", "localhost"}:
         print(

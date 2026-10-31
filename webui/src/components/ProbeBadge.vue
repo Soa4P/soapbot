@@ -80,7 +80,10 @@ const meta = computed(() => {
 </script>
 
 <template>
-  <span v-if="result" class="probe">
+  <!-- Announced: the result appears asynchronously next to the button that was pressed,
+       so a screen reader user would otherwise get no confirmation that anything happened.
+       `polite` because a probe is an answer, not an alarm. -->
+  <span v-if="result" class="probe" role="status" aria-live="polite">
     <span class="tag" :class="tone">{{ label }}</span>
     <span class="hint probe__meta">{{ meta }}</span>
     <span v-if="detail" class="hint probe__meta">{{ detail }}</span>

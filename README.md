@@ -216,8 +216,8 @@ soapbot/
 │   ├── examples/       # 随包发布的示例插件（不是内置功能，仍需批准）
 │   └── webui/dist/     # 前端构建产物（随 wheel 发布）
 ├── webui/              # 前端源码（Vite + Vue 3 + TypeScript）
-├── config/             # providers / adapters / personas（Provider 可经面板写入，需 diff 确认）
-├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录（gitignore）
+├── config/             # **模板**（providers/adapters/mcp/personas），首次启动播种到 data/config，之后不再读它
+├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录，以及 data/config（面板真正编辑的那份，gitignore）
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
