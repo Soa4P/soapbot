@@ -90,3 +90,24 @@ def test_a_store_without_a_directory_refuses_to_pretend(tmp_path: Path) -> None:
     assert store.path_for("x") is None
     with pytest.raises(RuntimeError):
         store.save(Persona(id="x", name="X"))
+
+
+def test_build_persona_store_creates_a_missing_directory(tmp_path: Path) -> None:
+    """A fresh install has no cards and no directory — and that is exactly when the
+    operator wants to write the first one.
+
+    The old builder only called ``load_directory`` when the directory already existed,
+    which also left the store without a directory, so every save failed with "persona
+    store has no directory to write to". Measured on a real box, not inferred.
+    """
+    from soapbot.core.builder import build_persona_store
+
+    target = tmp_path / "config" / "personas"
+    assert not target.exists()
+
+    store = build_persona_store(target)
+
+    assert target.is_dir()
+    assert store.directory == target
+    store.save(Persona(id="first", name="First", system_prompt="你好"))
+    assert (target / "first.md").is_file()
