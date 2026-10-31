@@ -582,7 +582,7 @@ export default {
   'napcat.alreadyConnected': 'The adapter is already configured — nothing to write.',
   'napcat.connectNotReady': 'No logged-in QQ yet: scan the QR first.',
   'napcat.onebotServerMissing':
-    'Logged in, but NapCat has no OneBot server listening on 3001. That entry has been written to its config — restart NapCat (schtasks /End /TN NapCat && schtasks /Run /TN NapCat) and press "Connect QQ" again.',
+    'Logged in, but NapCat has no OneBot server on 3001. The entry is now written to its onebot11 config. NapCat only reads network config at boot, and a restart drops the QQ session — so the order is: restart NapCat, scan the QR again, then press "Connect QQ"; 3001 comes up on that boot.',
   'napcat.restart': 'Restart panel',
   'napcat.restarting': 'Restarting… the page will come back in a few seconds.',
   'napcat.restartManual':
