@@ -103,6 +103,31 @@ async def test_a_reaction_is_not_worth_an_embedding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_image_with_no_caption_is_still_context() -> None:
+    """A group's images are exactly what passive mode is for; halting as ``empty_input``
+    is the same message as ``not_woken`` seen one stage later."""
+    store = _Recorder()
+    event = IncomingMessage(
+        adapter="onebot11",
+        message_id="m2",
+        scene=MessageScene.GROUP,
+        sender=Sender(user_id="10001", nickname="alice"),
+        segments=[MessageSegment.image(url="https://example.invalid/a.png")],
+        group_id="20001",
+        self_id="999",
+    )
+    ctx = PipelineContext(event=event, adapter=_Adapter())  # type: ignore[arg-type]
+    ctx.halt_reason = "empty_input"
+
+    await PassiveObserver(store)(ctx)
+
+    assert len(store.archived) == 1
+    # ``event.text`` renders the segment; the row keeps that rendering so recall sees
+    # the same string the answering path would have archived.
+    assert store.archived[0]["content"] == "[图片]"
+
+
+@pytest.mark.asyncio
 async def test_a_failing_store_never_breaks_the_message() -> None:
     class _Broken:
         async def archive_message(self, **_kwargs: Any) -> None:
