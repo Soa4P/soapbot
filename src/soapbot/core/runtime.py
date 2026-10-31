@@ -41,6 +41,7 @@ class BotRuntime:
         bilibili=None,
         traces=None,
         mcp=None,
+        passive=None,
         locale: str = "",
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
@@ -87,6 +88,13 @@ class BotRuntime:
 
         Held so shutdown can close its connection pool, and so the management API can
         report tier and call statistics without reaching into the command object.
+        """
+
+        self.passive = passive
+        """Optional :class:`soapbot.core.observer.PassiveObserver`.
+
+        Kept so the panel can show how many messages were read without being answered.
+        A passive mode with no counter is indistinguishable from one that never ran.
         """
 
         self.locale = locale or settings.default_locale
