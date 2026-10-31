@@ -138,14 +138,28 @@ class Settings(BaseSettings):
     and any configured adapter for no benefit.
     """
 
+    # ---- latency ----
+    history_turns: int = 16
+    """How many archived messages are replayed into the prompt.
+
+    Lowered from 40 after measuring: a long window pushed the transcript past the token
+    budget, so the compressor folded history — a second model call — before the reply
+    could start. Sixteen turns plus the rolling summary keeps the referents that matter
+    and takes a network round trip off the hot path.
+    """
+
+    max_prompt_tokens: int = 6000
+    """Hard ceiling for the prompt. Raised only if the provider's context allows it."""
+
     # ---- streaming ----
-    stream_reply: bool = False
+    stream_reply: bool = True
     """Deliver a reply sentence by sentence while the model is still producing it.
 
-    Off by default. Turning it on changes what a group receives from one message to
-    several, which is a visible behaviour change — an operator should choose it, not
-    discover it. It also requires the adapter to declare ``PROGRESSIVE``; an adapter
-    that cannot send twice degrades to the single-message path on its own.
+    On by default because the alternative is the operator waiting for the *whole* reply
+    before the first word appears, which is what "太慢" actually measures. It changes
+    what a group receives from one message to several, so an adapter that cannot send
+    twice degrades to the single-message path on its own; a deployment that wants one
+    message sets ``SOAPBOT_STREAM_REPLY=false``.
     """
 
     stream_chunk_chars: int = 80

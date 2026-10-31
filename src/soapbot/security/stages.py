@@ -23,7 +23,7 @@ from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.security.audit import AuditLog, get_audit_log
 from soapbot.security.injection import (
     INJECTION_BLOCK_ON,
-    INJECTION_REFUSAL,
+    injection_refusal,
     looks_like_injection,
 )
 from soapbot.security.principal import (
@@ -201,7 +201,11 @@ class InjectionScreenStage(Stage):
         if is_privileged or len(labels) < self.block_on:
             return StageResult()
 
-        ctx.model_reply = INJECTION_REFUSAL
+        # Refuse *in the reply*, not by silence. The audit entry above already says
+        # what matched; the reply says the same thing to the group, so "it ignored me"
+        # and "it refused me" stop looking identical from the outside. The labels are
+        # our pattern names, never the quarantined text.
+        ctx.model_reply = injection_refusal(ctx.locale, labels)
         ctx.extras["skip_model"] = True
         ctx.extras["injection_blocked"] = True
         return StageResult()

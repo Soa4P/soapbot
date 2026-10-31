@@ -115,6 +115,38 @@ class PersonaStore:
     def delete(self, persona_id: str) -> bool:
         return self._personas.pop(persona_id, None) is not None
 
+    # ---------------------------------------------------------------- persistence
+    @property
+    def directory(self) -> Path | None:
+        return self._directory
+
+    def path_for(self, persona_id: str) -> Path | None:
+        """Where a card with this id is (or would be) stored.
+
+        ``None`` when the store was built without a directory — a test store, or one
+        assembled by hand. Callers that write must treat that as "not writable" rather
+        than inventing a path.
+        """
+        if self._directory is None:
+            return None
+        return self._directory / f"{persona_id}.md"
+
+    def save(self, persona: Persona) -> Path:
+        """Write the card to disk and into the live store.
+
+        Disk first, memory second: if the write fails the running bot keeps behaving as
+        it did, instead of serving a card that will vanish on the next restart.
+        """
+        path = self.path_for(persona.id)
+        if path is None:
+            raise RuntimeError("persona store has no directory to write to")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        from soapbot.core.config_write import write_atomic
+
+        write_atomic(path, dump_persona_file(persona))
+        self._personas[persona.id] = persona
+        return path
+
     # ---------------------------------------------------------------- binding
     @property
     def binding(self) -> PersonaBinding:
@@ -155,6 +187,42 @@ class PersonaStore:
             if p.enabled:
                 return p, "first_available"
         return None, "none"
+
+
+def dump_persona_file(persona: Persona) -> str:
+    """Render ``persona`` as a Markdown card with YAML front matter.
+
+    Markdown rather than YAML-on-its-own because the prompt is prose and belongs in the
+    body, where an editor can show it without escaping. Round-trips through
+    :func:`load_persona_file`: every field the loader reads is written here, and
+    ``extra`` is carried through untouched so a hand-written key the panel does not
+    know about survives a save from the panel.
+    """
+    meta: dict[str, Any] = {
+        "id": persona.id,
+        "name": persona.name,
+        "style": persona.style,
+        "wake_words": list(persona.wake_words),
+        "banned_words": list(persona.banned_words),
+        "max_reply_chars": persona.max_reply_chars,
+        "enabled": persona.enabled,
+        "version": persona.version,
+    }
+    if persona.temperature is not None:
+        meta["temperature"] = persona.temperature
+    if persona.locale:
+        meta["locale"] = persona.locale
+    if persona.examples:
+        meta["examples"] = list(persona.examples)
+    for key, value in (persona.extra or {}).items():
+        if key not in meta and key not in _KNOWN_KEYS:
+            meta[key] = value
+
+    front = yaml.safe_dump(
+        meta, allow_unicode=True, sort_keys=False, default_flow_style=False
+    ).strip()
+    body = (persona.system_prompt or "").strip()
+    return f"---\n{front}\n---\n\n{body}\n"
 
 
 def load_persona_file(path: Path) -> Persona:

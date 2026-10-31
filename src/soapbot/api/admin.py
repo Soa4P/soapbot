@@ -17,9 +17,14 @@ not in version control and the review did not happen. A diff shown before the wr
 plus an audit entry naming the changed fields, is the first version of that review
 that actually occurs.
 
-Personas remain unwritable here. Persona cards are Markdown with front matter, and a
-form that renders them as fields would silently drop the prose between the front
-matter and the body — worse than leaving the section read-only.
+Persona cards *are* writable, and the objection above — "a form that renders them as
+fields would silently drop the prose between the front matter and the body" — is
+answered by not rendering them as fields. The card is edited as the file it is: the
+prompt is a textarea holding the body verbatim, the front matter is a small set of
+inputs, and the save path re-serialises with :func:`soapbot.ai.persona.dump_persona_file`
+so unknown front-matter keys survive. The alternative was what actually shipped: a
+"persona card" feature whose only editor was a text editor over SSH, on a box the
+operator reaches through this panel.
 
 Why knowledge *is* writable
 ---------------------------
@@ -292,6 +297,146 @@ async def list_personas(_: dict = Depends(require_api_auth)) -> dict:
             "groups": dict(binding.groups),
             "users": dict(binding.users),
         },
+    }
+
+
+class PersonaWrite(BaseModel):
+    """One persona card, as the panel's editor holds it.
+
+    ``system_prompt`` is the Markdown body verbatim — not a summary, not a preview.
+    ``id`` is validated against ``_DOC_ID_RE`` before it can become a filename.
+    """
+
+    id: str = Field(min_length=1, max_length=64)
+    name: str = ""
+    system_prompt: str = ""
+    style: str = ""
+    wake_words: list[str] = Field(default_factory=list)
+    banned_words: list[str] = Field(default_factory=list)
+    max_reply_chars: int = Field(default=500, ge=0, le=8000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    enabled: bool = True
+    locale: str = ""
+
+
+def _require_persona_write(auth: dict[str, Any], request: Request) -> Role:
+    role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
+    if role.rank < minimum.rank:
+        get_audit_log().record(
+            kind="authz",
+            action="persona_write",
+            outcome="deny",
+            role=role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=t("api.role_required", request_locale(request), role=minimum.value),
+        )
+    return role
+
+
+@router.get("/personas/{persona_id}")
+async def read_persona(persona_id: str, _: dict = Depends(require_api_auth)) -> dict:
+    """The full card, body included.
+
+    The list endpoint truncates the prompt to keep the table light; an editor cannot
+    work from a truncated prompt, and saving one back would destroy the rest of it.
+    """
+    runtime = _runtime()
+    if runtime.personas is None:
+        raise HTTPException(status_code=503, detail="persona store is not initialised")
+    persona = runtime.personas.get(persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail=f"no persona {persona_id!r}")
+    return {
+        "id": persona.id,
+        "name": persona.name,
+        "system_prompt": persona.system_prompt,
+        "style": persona.style,
+        "wake_words": list(persona.wake_words),
+        "banned_words": list(persona.banned_words),
+        "max_reply_chars": persona.max_reply_chars,
+        "temperature": persona.temperature,
+        "enabled": persona.enabled,
+        "locale": persona.locale,
+        "version": persona.version,
+        "file": str(runtime.personas.path_for(persona.id) or ""),
+    }
+
+
+@router.post("/personas")
+async def write_persona(
+    payload: PersonaWrite,
+    request: Request,
+    auth: dict = Depends(require_api_auth),
+) -> dict:
+    """Create or replace a card, then apply it to the running bot immediately.
+
+    Unlike the ``.env`` settings, this needs no restart: the persona store is the object
+    the pipeline reads on every message, so updating it *is* the apply. Saying
+    "restart required" here would be a lie that costs the operator a restart.
+    """
+    from soapbot.ai.persona import Persona
+
+    role = _require_persona_write(auth, request)
+    locale = request_locale(request)
+
+    pid = payload.id.strip()
+    if not _DOC_ID_RE.match(pid):
+        raise HTTPException(status_code=400, detail=t("api.personaIdInvalid", locale))
+
+    runtime = _runtime()
+    store = runtime.personas
+    if store is None:
+        raise HTTPException(status_code=503, detail="persona store is not initialised")
+
+    existing = store.get(pid)
+    persona = Persona(
+        id=pid,
+        name=payload.name.strip() or pid,
+        system_prompt=payload.system_prompt.strip(),
+        style=payload.style.strip(),
+        banned_words=[w.strip() for w in payload.banned_words if w.strip()],
+        wake_words=[w.strip() for w in payload.wake_words if w.strip()],
+        max_reply_chars=payload.max_reply_chars,
+        temperature=payload.temperature,
+        enabled=payload.enabled,
+        locale=payload.locale.strip(),
+        # Keep the version counter moving so a cached prompt can be invalidated, and
+        # keep any front-matter key this form does not know about.
+        version=(existing.version + 1) if existing else 1,
+        extra=dict(existing.extra) if existing else {},
+    )
+
+    try:
+        path = store.save(persona)
+    except OSError as exc:
+        get_audit_log().record(
+            kind="config",
+            action="persona_write",
+            outcome="deny",
+            role=role.value,
+            detail=f"write_failed:{exc.__class__.__name__}",
+        )
+        raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
+
+    get_audit_log().record(
+        kind="config",
+        action="persona_write",
+        outcome="allow",
+        role=role.value,
+        detail=f"id={pid} chars={len(persona.system_prompt)}",
+    )
+    return {
+        "ok": True,
+        "id": pid,
+        "file": str(path),
+        "version": persona.version,
+        # The store the pipeline reads was updated in place, so the next message uses
+        # this card. No restart, and the panel can say so.
+        "applied": True,
     }
 
 

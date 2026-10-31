@@ -53,6 +53,12 @@ WRITABLE: dict[str, str] = {
     "voice_enabled": "SOAPBOT_VOICE_ENABLED",
     "voice_tts_enabled": "SOAPBOT_VOICE_TTS_ENABLED",
     "voice_tts_voice": "SOAPBOT_VOICE_TTS_VOICE",
+    # Latency knobs. They are here because "the bot is slow" is an operator's
+    # observation, not a code change: the fix should be a field on the settings page,
+    # not a rebuild.
+    "stream_reply": "SOAPBOT_STREAM_REPLY",
+    "history_turns": "SOAPBOT_HISTORY_TURNS",
+    "max_prompt_tokens": "SOAPBOT_MAX_PROMPT_TOKENS",
 }
 
 #: Keys are checked against this before anything is formatted into the file.
