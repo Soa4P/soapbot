@@ -100,6 +100,23 @@ def test_without_docker_the_status_says_so_instead_of_raising(monkeypatch) -> No
     assert napcat.start_container() == {"ok": False, "error": "no-docker"}
 
 
+def test_docker_is_installed_only_where_the_package_name_is_known() -> None:
+    """Naming a wrong package turns "install Docker" into an error three steps later.
+
+    `None` is a legitimate answer: the installer then tells the operator to do it, instead
+    of guessing at a distribution it has never seen.
+    """
+    assert napcat.install_docker_command("ubuntu") == [
+        "apt-get",
+        "install",
+        "-y",
+        "docker.io",
+    ]
+    assert napcat.install_docker_command("Debian")[0] == "apt-get"
+    assert napcat.install_docker_command("fedora")[:2] == ["dnf", "install"]
+    assert napcat.install_docker_command("gentoo") is None
+
+
 def test_the_panel_routes_live_where_the_client_looks_for_them() -> None:
     """A renamed path is a 404 in a browser and a green test suite otherwise."""
     import soapbot.api.napcat as napcat_api

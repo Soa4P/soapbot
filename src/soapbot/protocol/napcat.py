@@ -58,6 +58,23 @@ STATUS_TIMEOUT = 20.0
 HTTP_TIMEOUT = 8.0
 
 
+def install_docker_command(distro: str) -> list[str] | None:
+    """How to install Docker on this distro, or ``None`` when we have no business guessing.
+
+    Only the two families that are actually supported are named. A wrong package name on an
+    unfamiliar distribution is worse than saying "install it yourself": the error arrives
+    three steps later, from a package manager, in a language about repositories.
+    """
+    name = distro.lower()
+    if name in {"ubuntu", "debian", "pop", "linuxmint", "raspbian"}:
+        # `docker.io` from the distribution, not Docker's own repository: one apt command,
+        # no curl|sh, no third-party key added to a server somebody else operates.
+        return ["apt-get", "install", "-y", "docker.io"]
+    if name in {"fedora", "rhel", "centos", "rocky", "almalinux"}:
+        return ["dnf", "install", "-y", "docker"]
+    return None
+
+
 def docker_available() -> bool:
     """Is there a Docker *daemon* to talk to (not just a CLI on PATH)?"""
     if not shutil.which("docker"):
