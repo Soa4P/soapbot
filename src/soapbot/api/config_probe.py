@@ -170,6 +170,36 @@ async def test_provider(
     return result
 
 
+def _models_candidates(base_url: str, key: str) -> list[tuple[str, dict[str, str]]]:
+    """Which URLs to ask for a model list, in order, with the auth each one expects."""
+    base = base_url.rstrip("/")
+    bearer = {"Authorization": f"Bearer {key}"} if key else {}
+    out: list[tuple[str, dict[str, str]]] = []
+    if "generativelanguage.googleapis.com" in base:
+        # Google's OpenAI-compatible layer answers chat but not /models; its native
+        # endpoint wants its own header.
+        out.append(
+            (
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                {"x-goog-api-key": key} if key else {},
+            )
+        )
+    out.append((f"{base}/models", bearer))
+    if base.endswith("/v1"):
+        out.append((base[: -len("/v1")] + "/models", bearer))
+    else:
+        out.append((f"{base}/v1/models", bearer))
+    # Deduplicate while keeping order: a base that already ends in /v1 must not be asked
+    # the same URL twice, and Anthropic/BigModel bases would otherwise repeat theirs.
+    seen: set[str] = set()
+    unique: list[tuple[str, dict[str, str]]] = []
+    for url, headers in out:
+        if url not in seen:
+            seen.add(url)
+            unique.append((url, headers))
+    return unique
+
+
 @router.post("/providers/models")
 async def list_provider_models(
     payload: ProviderModelsRequest,
@@ -196,19 +226,40 @@ async def list_provider_models(
     if problem:
         return {"ok": False, "models": [], "error": problem}
 
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
-    url = base_url.rstrip("/") + "/models"
-    try:
-        async with httpx.AsyncClient(timeout=payload.timeout) as client:
-            response = await client.get(url, headers=headers)
-    except Exception as exc:
-        return {"ok": False, "models": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
+    # The base URL people type is not always the one /models lives under. Measured with no
+    # credential against every provider we preset:
+    #   api.deepseek.com/models            401   (both shapes exist)
+    #   api.deepseek.com/v1/models         401
+    #   open.bigmodel.cn/api/paas/v4/models 401
+    #   api.moonshot.cn/v1/models          401
+    #   api.x.ai/v1/models                 401
+    #   api.anthropic.com/v1/models        401
+    #   api.xiaomimimo.com/v1/models       401
+    #   api.openai.com/v1/models           403
+    #   .../v1beta/openai/models           404   ← Gemini's compat layer has no /models
+    #   .../v1beta/models                  403   ← its native one does
+    # So: try the plain shape, then the other /v1 shape, and for Gemini its native path.
+    # 401/403 means "right door, locked" and stops the search; only 404 moves on.
+    candidates = _models_candidates(base_url, key)
+    response = None
+    used = candidates[0][0]
+    async with httpx.AsyncClient(timeout=payload.timeout) as client:
+        for candidate, candidate_headers in candidates:
+            try:
+                attempt = await client.get(candidate, headers=candidate_headers)
+            except Exception as exc:
+                return {"ok": False, "models": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
+            response, used = attempt, candidate
+            if attempt.status_code != 404:
+                break
 
     if response.status_code >= 400:
         return {
             "ok": False,
             "models": [],
             "status_code": response.status_code,
+            # Which of the candidate URLs answered: without it, a 404 is unattributable.
+            "url": used,
             "error": f"HTTP {response.status_code}",
         }
     try:
@@ -223,7 +274,12 @@ async def list_provider_models(
         elif isinstance(entry, str):
             models.append(entry)
     _audit(_caller_label(request), "allow", "provider_models", [f"n={len(models)}"])
-    return {"ok": True, "models": models[:200], "status_code": response.status_code}
+    return {
+        "ok": True,
+        "models": models[:200],
+        "status_code": response.status_code,
+        "url": used,
+    }
 
 
 # ---------------------------------------------------------------------- adapters
