@@ -24,6 +24,7 @@ and log a QQ account in on the protocol side. Stopping there is the honest answe
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -427,6 +428,67 @@ WantedBy=multi-user.target
     )
 
 
+def _distro_id() -> str:
+    """`ID` from os-release: the one field every distribution fills in consistently."""
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if line.startswith("ID="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def provision_napcat(root: Path, python: Path) -> str:
+    """Install Docker if needed, then start the protocol end — the root-half of the job.
+
+    This lives in the installer, not behind a panel button, because the panel runs as an
+    unprivileged account (that is the point of the service user): it cannot install
+    packages, and a button that silently needs root would be the same lie as "saved" for a
+    read-only directory.
+    """
+    from soapbot.protocol import napcat
+
+    say("napcat", "preparing a protocol end (NapCat in Docker)")
+
+    if os.name == "nt":
+        return (
+            "Windows: Docker is not the path here — NapCat installs as a QQ plugin host.\n"
+            "      Install it from https://napcat.napneko.icu, log the bot's QQ in, then use\n"
+            "      page 07 → Scan this machine. Automatic download is not implemented yet."
+        )
+
+    if os.geteuid() != 0:
+        die("installing Docker needs root: re-run this script with sudo")
+
+    if not napcat.docker_available():
+        distro = _distro_id()
+        command = napcat.install_docker_command(distro)
+        if command is None:
+            die(f"do not know how to install Docker on '{distro or 'unknown'}'; install it and re-run")
+        say("napcat", f"installing Docker ({' '.join(command)})")
+        if command[0] == "apt-get":
+            run("apt-get", "update", "-qq")
+        run(*command)
+        run("systemctl", "enable", "--now", "docker")
+
+    result = napcat.start_container()
+    if not result.get("ok"):
+        die(f"could not start the NapCat container: {result}")
+
+    say("napcat", "waiting for NapCat (the first run downloads about 1.6 GB)")
+    ready = asyncio.run(napcat.wait_until_ready(300.0))
+    if not ready.get("ok"):
+        return (
+            "NapCat started but its WebUI did not answer in five minutes.\n"
+            "      Check: docker logs soapbot-napcat"
+        )
+    return (
+        "NapCat is running on loopback. Open page 07 in the panel: the login QR is already\n"
+        "      there, scan it with mobile QQ, then press 'Connect' on the adapter row."
+    )
+
+
 def check_only(root: Path, port: int) -> int:
     """`--check`: audit an existing install without changing it."""
     python = python_in(root)
@@ -455,6 +517,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-service", action="store_true", help="never touch the supervisor")
     parser.add_argument("--no-start", action="store_true", help="do not launch it now")
     parser.add_argument("--check", action="store_true", help="audit an install instead")
+    parser.add_argument(
+        "--with-napcat",
+        action="store_true",
+        help="also install Docker if needed and start NapCat (Linux; needs root)",
+    )
     parser.add_argument(
         "--unit",
         default="soapbot",
@@ -485,6 +552,10 @@ def main(argv: list[str] | None = None) -> int:
     python = ensure_venv(root, args.extra)
     ensure_ui(root)
     env_path = ensure_env(root, python, args.host, args.port)
+
+    napcat_note = ""
+    if args.with_napcat:
+        napcat_note = provision_napcat(root, python)
 
     supervisor = (
         "Supervisor registration skipped (--no-service)."
@@ -522,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  data  : {root / 'data'}   config: {effective_config_dir(root, python)}")
     print(f"  env   : {env_path}")
     print(f"  supervisor: {supervisor}")
+    if napcat_note:
+        print(f"  protocol end: {napcat_note}")
     if args.host in {"127.0.0.1", "localhost"}:
         print(
             f"  remote view: ssh -L {args.port}:127.0.0.1:{args.port} <user>@<this-host> "

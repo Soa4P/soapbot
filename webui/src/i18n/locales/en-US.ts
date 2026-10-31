@@ -558,7 +558,7 @@ export default {
   'napcat.hint':
     'QQ does not connect to this panel directly; it needs a protocol end (NapCat) in between. On a host with Docker the button below starts it and shows the login QR — scan it with your phone and the login is done.',
   'napcat.noDocker':
-    'No Docker on this host: install NapCat yourself, then use "Open NapCat WebUI" to scan the QR in its own window, and come back to "Scan this machine" below.',
+    'No Docker on this host, and the panel cannot install it (it runs unprivileged). On the server run: sudo python3 scripts/bootstrap.py --with-napcat — it installs Docker, starts NapCat and the QR appears here. If NapCat is already installed by hand, use "Open NapCat WebUI" to scan, then "Scan this machine" below.',
   'napcat.absent': 'not started yet',
   'napcat.starting': 'starting (the first run downloads the image, which takes a few minutes)',
   'napcat.running': 'running, waiting for the QR scan',
