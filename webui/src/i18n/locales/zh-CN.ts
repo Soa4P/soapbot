@@ -598,7 +598,7 @@ export default {
   'napcat.restart': '重启面板',
   'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
   'napcat.restartManual':
-    '这个进程不是由 systemd 或容器托管的，无法自己重启：请在服务器上执行 systemctl restart soapbot（或 docker restart <容器名>）。',
+    '这个进程不是由 systemd 或容器托管的，无法自己重启。请在服务器上执行：systemctl restart soapbot（Linux）、docker restart <容器名>（容器）、或 schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（Windows 计划任务）。',
   'napcat.qrNotReady': '二维码还没准备好：等它启动完再点一次。',
 
   // ------------------------------------------------------------ 扫描本机协议端
