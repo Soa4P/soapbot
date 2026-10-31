@@ -47,6 +47,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -87,6 +88,20 @@ class ProviderProbeRequest(BaseModel):
     id: str = ""
     base_url: str = Field(..., min_length=1, max_length=2048)
     timeout: float = Field(default=15.0, gt=0, le=60)
+
+
+class ProviderModelsRequest(BaseModel):
+    """Listing models *does* send the key — the one probe here that does.
+
+    `/models` answers without a credential on some providers and with 401 on others, so
+    asking "which model ids do you offer" is impossible without authenticating. That makes
+    this an explicit, separate action rather than something the Test button does silently:
+    the operator presses "list models" knowing the key is about to be sent to that address.
+    """
+
+    base_url: str = Field(..., min_length=1, max_length=2048)
+    api_key: str = ""
+    timeout: float = Field(default=20.0, gt=0, le=60)
 
 
 class AdapterProbeRequest(BaseModel):
@@ -153,6 +168,62 @@ async def test_provider(
     # Field names only. The audit log is exported to people who may not see the config.
     _audit(_caller_label(request), "allow" if result.get("ok") else "deny", "probe_provider", [])
     return result
+
+
+@router.post("/providers/models")
+async def list_provider_models(
+    payload: ProviderModelsRequest,
+    request: Request,
+    auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """The model ids this endpoint actually offers, so nobody has to guess a name.
+
+    Model names are the most volatile part of every provider (DeepSeek renamed its models,
+    MiMo retired a whole series), so the honest answer to "which model do I type" is the
+    list the provider returns — not a constant baked into this panel.
+    """
+    _require_permission(auth, request, Permission.MANAGE_CONFIG)
+    base_url = _check_scheme(payload.base_url, _HTTP_SCHEMES, field="base_url")
+    _enforce_rate(auth, request)
+
+    key = payload.api_key.strip()
+    problem = ""
+    if key.startswith("env:"):
+        try:
+            key = resolve_secret(key, field_name="providers[?].api_key")
+        except ConfigError as exc:
+            key, problem = "", str(exc)
+    if problem:
+        return {"ok": False, "models": [], "error": problem}
+
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    url = base_url.rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=payload.timeout) as client:
+            response = await client.get(url, headers=headers)
+    except Exception as exc:
+        return {"ok": False, "models": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
+
+    if response.status_code >= 400:
+        return {
+            "ok": False,
+            "models": [],
+            "status_code": response.status_code,
+            "error": f"HTTP {response.status_code}",
+        }
+    try:
+        body = response.json()
+    except ValueError:
+        return {"ok": False, "models": [], "error": "响应不是 JSON"}
+    entries = body.get("data") if isinstance(body, dict) else None
+    models: list[str] = []
+    for entry in entries or []:
+        if isinstance(entry, dict) and entry.get("id"):
+            models.append(str(entry["id"]))
+        elif isinstance(entry, str):
+            models.append(entry)
+    _audit(_caller_label(request), "allow", "provider_models", [f"n={len(models)}"])
+    return {"ok": True, "models": models[:200], "status_code": response.status_code}
 
 
 # ---------------------------------------------------------------------- adapters

@@ -1,1 +1,0 @@
-import{K as l,y as u,A as c,r as s,S as i}from"./index-FiepQeG1.js";function v(o){const t=s(null),a=s(""),e=s(!1);async function r(){e.value=!0;try{t.value=await o(),a.value=""}catch(n){a.value=n instanceof c?n.message:String(n)}finally{e.value=!1}}return l(r),u(i,r),{data:t,error:a,loading:e,reload:r}}export{v as u};
