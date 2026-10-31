@@ -46,6 +46,14 @@ if not exist "src\soapbot\webui\dist\index.html" (
         echo [!] no npm found - the panel will still serve the API, but the UI will be blank.
         echo     Install Node.js 20+ from nodejs.org and run this again to get the interface.
     )
+    rem A failed build otherwise looks exactly like a working one until the browser opens on
+    rem a blank page. Checking the artefact, not the exit code, is the honest test.
+    if not exist "src\soapbot\webui\dist\index.html" (
+        echo.
+        echo [x] the panel could not be built - see the npm output above.
+        echo     The API still works, but there is no interface to open yet.
+        pause
+    )
 )
 
 if not exist ".env" (

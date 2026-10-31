@@ -218,6 +218,14 @@ async function copyTarget(draft: Draft, index: number): Promise<void> {
   }
 }
 
+/** The paste-into-NapCat line only means something for OneBot. A QQ-official adapter is
+ * configured with an app id and secret, and showing it a `ws://` address to paste is worse
+ * than showing nothing: it sends someone looking for a field inside NapCat that does not
+ * exist. */
+function isOneBot(draft: Draft): boolean {
+  return (draft.kind || 'onebot11').toLowerCase().startsWith('onebot')
+}
+
 function onModeChange(draft: Draft): void {
   if (draft.mode === 'reverse' && !draft.host && !draft.port) {
     draft.host = '127.0.0.1'
@@ -361,7 +369,7 @@ onMounted(load)
                program. AstrBot's answer to "representative config" is a template with
                working defaults; the part it still leaves to the operator is which host
                NapCat should dial, so that is computed here instead. -->
-          <tr class="target-row">
+          <tr v-if="isOneBot(draft)" class="target-row">
             <td colspan="9">
               <span class="muted">
                 {{ draft.mode === 'reverse'
