@@ -587,7 +587,11 @@ export default {
   'napcat.stop': '停止',
   'napcat.showQr': '显示登录二维码',
   'napcat.openWebui': '打开 NapCat WebUI',
-  'napcat.qrHint': '用手机 QQ 扫码，扫完这里会自动变成「已登录」。',
+  'napcat.qrHint':
+    '用手机 QQ 扫码（这张码约 2 分钟会过期，过期自动换新的）。扫码时 QQ 若提示「异地登录」——因为服务器的出口 IP 在境外机房——确认是本人即可继续。',
+  'napcat.tokenLabel': 'NapCat WebUI 的 Token（已自动读取，打开 WebUI 会自动带上）：',
+  'napcat.tokenCopy': '复制',
+  'napcat.tokenCopied': '已复制',
   'napcat.foundLocal': '检测到本机已有 NapCat（它的 WebUI 在监听），不需要 Docker。',
   'napcat.hintLocal':
     '这台机器上已经跑着 NapCat（多半是你自己装的）。点「显示登录二维码」，用手机 QQ 扫一下就完成登录；扫完卡片会变成「已登录」，再点「自动连上 QQ」。',

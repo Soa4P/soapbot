@@ -570,6 +570,9 @@ export default {
   'napcat.stop': 'Stop',
   'napcat.showQr': 'Show login QR',
   'napcat.openWebui': 'Open NapCat WebUI',
+  'napcat.tokenLabel': "NapCat WebUI token (read automatically; the button opens with it attached):",
+  'napcat.tokenCopy': 'Copy',
+  'napcat.tokenCopied': 'Copied',
   'napcat.qrHint': 'Scan it with mobile QQ; this card switches to "logged in" by itself.',
   'napcat.foundLocal': 'A NapCat is already running here (its WebUI is listening) — no Docker needed.',
   'napcat.hintLocal':

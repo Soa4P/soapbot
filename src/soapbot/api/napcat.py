@@ -19,6 +19,7 @@ whole panel is, and it refuses to touch a container name it does not own.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from typing import Any
@@ -80,6 +81,14 @@ async def status(
                 "account": probe.get("account", ""),
                 "phase": "onebot",
             }
+    # NapCat's own WebUI is token-protected, and the panel already knows where that token
+    # lives — handing it over here is the difference between "press a button" and "go read
+    # a log to find a secret". It is the operator's own NapCat on their own host, and the
+    # route already requires MANAGE_CONFIG.
+    webui_token = ""
+    with contextlib.suppress(Exception):
+        webui_token = await asyncio.to_thread(napcat.webui_token)
+
     return {
         **state,
         "starting": _start_task is not None and not _start_task.done(),
@@ -89,6 +98,7 @@ async def status(
         # A hand-installed NapCat is not ours, but it is right there: the page has to say so
         # instead of talking about Docker on a host that never needed it.
         "webui_reachable": await asyncio.to_thread(napcat.webui_reachable),
+        "webui_token": webui_token,
         "logged_in": login.get("logged_in", False),
         "account": login.get("account", ""),
         "phase": login.get("phase", ""),
