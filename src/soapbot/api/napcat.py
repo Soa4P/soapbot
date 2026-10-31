@@ -118,7 +118,10 @@ async def qr(
     """
     _require_permission(auth, request, Permission.MANAGE_CONFIG)
     _enforce_rate(auth, request)
-    result = await napcat.qr_code()
+    # A short wait covers the common "clicked Start, then clicked Show QR" case; a long one
+    # would hold an HTTP request for the better part of a minute, which every proxy in
+    # between eventually cuts. The card polls, so late answers are still delivered.
+    result = await napcat.qr_code(wait_seconds=5.0)
     if not result.get("ok"):
         # 409 rather than 500: "not ready yet" is the normal state two seconds after start.
         raise HTTPException(status_code=409, detail=result.get("error", "no-qrcode"))

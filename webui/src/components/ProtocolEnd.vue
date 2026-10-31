@@ -46,6 +46,18 @@ async function refresh(): Promise<void> {
   try {
     state.value = await api.napcatStatus()
     error.value = ''
+    // Fetch the QR as soon as the panel can, instead of waiting to be asked: the operator
+    // pressed "start" and the next thing they need is the picture. 409s are ignored — that
+    // is "not booted yet", and the next poll tries again.
+    if (state.value.status === 'running' && !state.value.logged_in && !qrSvg.value) {
+      try {
+        const body = await api.napcatQr()
+        if (body.url) qrSvg.value = renderQr(body.url)
+      } catch {
+        /* keep polling */
+      }
+    }
+    if (state.value.logged_in) qrSvg.value = ''
   } catch (err) {
     error.value = (err as Error).message
   }
