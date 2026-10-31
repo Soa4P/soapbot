@@ -42,21 +42,31 @@ function renderQr(url: string): string {
   return qr.createSvgTag({ cellSize: 4, margin: 2 })
 }
 
+/** NapCat's login QR lives for about two minutes. A picture that silently expires is how
+ * "扫不上" happens — so it is re-fetched on a timer while the account is not logged in. */
+const QR_TTL_MS = 60_000
+let qrFetchedAt = 0
+
 async function refresh(): Promise<void> {
   try {
     state.value = await api.napcatStatus()
     error.value = ''
     // Fetch the QR as soon as the panel can, instead of waiting to be asked: the operator
     // pressed "start" and the next thing they need is the picture. 409s are ignored — that
-    // is "not booted yet", and the next poll tries again.
-    if (
+    // is "not booted yet", and the next poll tries again. Once shown, it is re-fetched on
+    // the TTL above: a stale QR scanned with a phone fails, and that failure looks like a
+    // broken bot rather than an expired picture.
+    const waitingForScan =
       (state.value.status === 'running' || state.value.webui_reachable) &&
-      !state.value.logged_in &&
-      !qrSvg.value
-    ) {
+      !state.value.logged_in
+    const stale = Date.now() - qrFetchedAt > QR_TTL_MS
+    if (waitingForScan && (stale || !qrSvg.value)) {
       try {
         const body = await api.napcatQr()
-        if (body.url) qrSvg.value = renderQr(body.url)
+        if (body.url) {
+          qrSvg.value = renderQr(body.url)
+          qrFetchedAt = Date.now()
+        }
       } catch {
         /* keep polling */
       }
@@ -101,7 +111,8 @@ async function showQr(): Promise<void> {
   try {
     const body = await api.napcatQr()
     qrSvg.value = body.url ? renderQr(body.url) : ''
-    if (!qrSvg.value) error.value = t('napcat.qrNotReady')
+    if (qrSvg.value) qrFetchedAt = Date.now()
+    else error.value = t('napcat.qrNotReady')
   } catch {
     // 409 is the normal "not ready yet"; saying so beats an error banner.
     error.value = t('napcat.qrNotReady')
@@ -147,9 +158,31 @@ async function restart(): Promise<void> {
   }
 }
 
+/** Open NapCat's WebUI *with its token*: without it the page is a login form asking for a
+ * secret that lives in a log the operator has never read. */
+const tokenCopied = ref(false)
+
+async function copyToken(): Promise<void> {
+  const token = state.value?.webui_token ?? ''
+  if (!token) return
+  try {
+    await navigator.clipboard.writeText(token)
+    tokenCopied.value = true
+    window.setTimeout(() => {
+      tokenCopied.value = false
+    }, 2000)
+  } catch {
+    /* clipboard needs a secure context; the token is on screen to select manually */
+  }
+}
+
 function openWebui(): void {
-  const url = state.value?.webui_url
-  if (url) window.open(url, '_blank', 'noopener')
+  const current = state.value
+  if (!current) return
+  const url = current.webui_token
+    ? `${current.webui_url}/webui?token=${encodeURIComponent(current.webui_token)}`
+    : current.webui_url
+  window.open(url, '_blank', 'noopener')
 }
 
 const canManage = computed(() => state.value?.docker === true)
@@ -230,6 +263,16 @@ onBeforeUnmount(() => {
     <!-- Generated locally from NapCat's login URL, so no third party ever sees the token. -->
     <div v-if="qrSvg" class="napcat__qr" v-html="qrSvg" />
     <p v-if="qrSvg" class="muted">{{ t('napcat.qrHint') }}</p>
+
+    <!-- NapCat's WebUI wants a token on first open; making the operator read a startup log
+         for it is exactly the "go read the docs" move this card exists to prevent. -->
+    <div v-if="foundLocally && state?.webui_token" class="napcat__token">
+      <span class="hint">{{ t('napcat.tokenLabel') }}</span>
+      <code class="napcat__url">{{ state.webui_token }}</code>
+      <button class="btn ghost" type="button" @click="copyToken">
+        {{ tokenCopied ? t('napcat.tokenCopied') : t('napcat.tokenCopy') }}
+      </button>
+    </div>
     <p v-if="connectNote" class="muted">{{ connectNote }}</p>
     <p v-if="error" class="muted">{{ error }}</p>
   </section>
