@@ -12,6 +12,7 @@ import {
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DiffEditor from '@/components/DiffEditor.vue'
 import Adapters from '@/components/Adapters.vue'
+import ProtocolEnd from '@/components/ProtocolEnd.vue'
 import McpServers from '@/components/McpServers.vue'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
@@ -456,6 +457,9 @@ async function applyChanges(): Promise<void> {
   </section>
 
   <!-- After providers: the same three-step write flow, different rules. -->
+  <!-- Before the adapter table: the table's hardest field is the address, and this card
+       exists so the operator never has to know it. -->
+  <ProtocolEnd />
   <Adapters />
 <McpServers />
 

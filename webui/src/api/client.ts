@@ -153,6 +153,15 @@ export const api = {
    * on the port instead — `in_use` means something is already listening (usually the
    * good outcome), `free` means it is not listening yet.
    */
+  /** State of the managed protocol end (NapCat in Docker), if this host can run one. */
+  napcatStatus: () => request<NapcatStatus>('/api/protocol/napcat/status'),
+  napcatStart: () => request<{ ok: boolean; starting?: boolean; error?: string }>('/api/protocol/napcat/start', {
+    method: 'POST',
+  }),
+  napcatStop: () => request<{ ok: boolean }>('/api/protocol/napcat/stop', { method: 'POST' }),
+  /** The QR **URL** (not an image — that is what NapCat returns). 409 = not ready yet. */
+  napcatQr: () => request<{ ok: boolean; url: string }>('/api/protocol/napcat/qr'),
+
   /**
    * Look for a protocol end on this machine (loopback only, fixed candidate ports).
    * Writes nothing; returns what answered so the operator does not have to know a port.
@@ -466,6 +475,19 @@ export interface AdapterProbeResult extends ProbeResult {
   state: 'handshake_ok' | 'unauthorized' | 'not_onebot' | 'unreachable' | 'free' | 'in_use' | 'error'
   detail?: string
   retcode?: number | null
+}
+
+/** What the panel can do about the protocol end on this host. */
+export interface NapcatStatus {
+  docker: boolean
+  exists: boolean
+  status: 'no-docker' | 'absent' | 'running' | 'exited' | 'created' | 'unknown'
+  starting: boolean
+  image: string
+  ws_url: string
+  webui_url: string
+  logged_in: boolean
+  account: string
 }
 
 /** One candidate local port and what answered on it. */
