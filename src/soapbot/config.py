@@ -89,6 +89,24 @@ class Settings(BaseSettings):
     the meaning of a file an operator has since edited.
     """
 
+    napcat_home: Path | None = None
+    """Where a hand-installed NapCat lives (Windows: the folder holding ``napcat.bat``).
+
+    Only used to find that install's own ``webui.json`` so the panel can show its login QR.
+    The container path the panel starts itself needs no setting.
+    """
+
+    napcat_webui_token: str = ""
+    """NapCat WebUI token, if it was set by hand or lives somewhere unusual.
+
+    Takes precedence over discovery, because guessing a path is fine until it is not — and
+    the failure ("no QR") looks identical either way.
+    """
+
+    napcat_ws_port: int = 3001
+    """Port the protocol end listens on. The panel binds this when it starts the container
+    itself, and connects to it when someone else started NapCat."""
+
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 

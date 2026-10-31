@@ -124,19 +124,32 @@ def config_dir() -> Path:
 
 
 def webui_token() -> str:
-    """NapCat writes its WebUI token here on first start.
+    """The NapCat WebUI token, from an explicit setting or from NapCat's own config.
 
-    Read from the mounted volume rather than kept in a setting of our own: one source of
-    truth, and an operator who changed it in NapCat's own WebUI does not have to change it
-    twice. Absent or unreadable simply means "not ready yet" — the caller waits.
+    Order matters: a token someone typed wins over a guess, and the container path we mount
+    ourselves comes last because a hand-installed NapCat is a different layout — measured on
+    Windows: ``<home>\\napcat\\config\\webui.json``, one level deeper than the Linux container's
+    ``/app/napcat/config/webui.json``.
     """
-    path = config_dir() / "webui.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    token = payload.get("token")
-    return str(token) if token else ""
+    if settings.napcat_webui_token:
+        return settings.napcat_webui_token
+
+    candidates: list[Path] = [config_dir() / "webui.json"]
+    if settings.napcat_home is not None:
+        candidates += [
+            settings.napcat_home / "config" / "webui.json",
+            settings.napcat_home / "napcat" / "config" / "webui.json",
+        ]
+
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        token = payload.get("token")
+        if token:
+            return str(token)
+    return ""
 
 
 def start_container() -> dict[str, Any]:
@@ -176,7 +189,9 @@ def start_container() -> dict[str, Any]:
         "--label",
         "soapbot.protocol=napcat",
         "-p",
-        f"127.0.0.1:{WS_PORT}:{WS_PORT}",
+        # Inside the container NapCat always listens on 3001; the host side is ours to pick,
+        # which is what makes two instances (or an existing NapCat) coexist.
+        f"127.0.0.1:{settings.napcat_ws_port}:{WS_PORT}",
         "-p",
         f"127.0.0.1:{WEBUI_PORT}:{WEBUI_PORT}",
         "-v",
@@ -342,7 +357,7 @@ async def connect_adapter() -> dict[str, Any]:
     """
     from soapbot.core import config_write
 
-    probe = await probe_onebot()
+    probe = await probe_onebot(settings.napcat_ws_port)
     if not probe.get("ok"):
         return {"ok": False, "error": "not-logged-in", "detail": probe.get("error", "")}
 
@@ -352,7 +367,7 @@ async def connect_adapter() -> dict[str, Any]:
         "kind": "onebot11",
         "mode": "forward",
         "enabled": True,
-        "ws_url": f"ws://127.0.0.1:{WS_PORT}",
+        "ws_url": f"ws://127.0.0.1:{settings.napcat_ws_port}",
         "account_id": probe.get("account", ""),
     }
     patched, changed = config_write.apply_adapter_patch(document, [entry])

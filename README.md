@@ -397,6 +397,8 @@ soapbot/
 | `VOICE_TTS_ENABLED` / `VOICE_TTS_VOICE` | `false` / `zh-CN-XiaoxiaoNeural` | 回复转语音。需要 `pip install -e ".[voice]"` |
 | `VOICE_ALLOW_HOSTS` | 空 | 允许下载音频的内网主机，逗号分隔。**同机部署 NapCat 必须配**，见下 |
 | `VOICE_MAX_BYTES` / `VOICE_LANGUAGE` | `8388608` / `zh` | 单条音频上限与转写语言提示 |
+| `NAPCAT_WS_PORT` | `3001` | 协议端 OneBot WebSocket 端口。面板自己起容器时绑这个端口，扫描/连上时也用它 |
+| `NAPCAT_HOME` / `NAPCAT_WEBUI_TOKEN` | 空 | 手工安装的 NapCat 才需要：前者指向它的目录（从中找 `webui.json`），后者直接给 token；容器方案的路径自动发现 |
 | `DEFAULT_LOCALE` | `zh-CN` | 机器人**对群里说话**的语言（拒绝文案、语音标签）。不影响面板，面板按浏览器语言走；人格卡可用 `locale` 逐群覆盖 |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | `LOG_JSON=false` 便于人读终端 |
 
