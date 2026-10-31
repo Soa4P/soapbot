@@ -67,7 +67,11 @@ async def status(
     _require_permission(auth, request, Permission.MANAGE_CONFIG)
     state = await asyncio.to_thread(napcat.container_status)
     login: dict[str, Any] = {"ok": False, "logged_in": False, "account": "", "phase": ""}
-    if state.get("status") == "running":
+    # Ask NapCat itself whenever its WebUI answers — not only when *our* container runs.
+    # A hand-installed NapCat that has just been scanned in is logged in, and the panel said
+    # otherwise for exactly as long as it took to configure an OneBot server it never needed.
+    reachable = await asyncio.to_thread(napcat.webui_reachable)
+    if state.get("status") == "running" or reachable:
         login = await napcat.login_state()
     # A hand-installed NapCat has no container and no WebUI token we know, but its OneBot
     # port answers — and that is the same evidence the adapter will get. Without this the

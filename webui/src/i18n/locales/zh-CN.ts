@@ -599,6 +599,8 @@ export default {
   'napcat.connected': '已把接入写进配置（QQ {account}）。重启面板后生效。',
   'napcat.alreadyConnected': '配置里已经有这条接入了，不用重复写。',
   'napcat.connectNotReady': '还没检测到已登录的 QQ：先扫码。',
+  'napcat.onebotServerMissing':
+    '已登录，但 NapCat 里没开 OneBot 服务器（3001 没人监听）。我已经把这条配置写进 NapCat 了——重启一次 NapCat（schtasks /End /TN NapCat && schtasks /Run /TN NapCat）它就会开起来，再点「自动连上 QQ」即可。',
   'napcat.restart': '重启面板',
   'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
   'napcat.restartManual':
