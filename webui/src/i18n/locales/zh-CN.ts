@@ -510,6 +510,9 @@ export default {
   'shell.getToken': '获取令牌',
   'shell.login': '登录',
   'shell.apiUnreachable': '无法访问 API：{error}。服务可能未启动，或端口被占用。',
+  'shell.apiRestarting':
+    '面板正在重启或暂时不可用（{error}）。升级/安装会重启服务，通常几秒后自动恢复；若一直这样，看 data/panel.log。',
+  'api.timeout': '请求超时（{seconds} 秒无响应）：服务可能正在重启，刷新重试。',
   'shell.unauthenticated': '当前会话未认证。远程访问必须先在右上角登录，否则所有管理接口都会返回 401。',
   'login.title': '用一次性令牌换取访问令牌',
   'login.detail': '令牌在首次启动时写入 data/init_token.txt；如果设置了 SOAPBOT_INIT_TOKEN，则用该值。',
