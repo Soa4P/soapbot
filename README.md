@@ -52,10 +52,17 @@ dedup → guard → whitelist → wake → strip → sanitize
 
 ## 快速开始
 
+**没部署过任何东西？只要三步：**
+
+1. 装好它（下面任选一行）→ 2. 双击/运行起面板 → 3. 在面板第 07 页填「模型 Key」和「QQ 接入」，
+两行各点一次「测试」，两个都变绿后去 QQ 里发一句话。
+
+第 3 步面板会直接把该粘的地址给你（含复制按钮），不需要先去读任何配置格式。
+
 要求：Python **3.12+**。前端构建需要 Node 20+（仅当你修改面板时才需要）。
 
 ```bash
-# 1. 安装
+# 1. 安装（Windows 也可以直接双击 start-panel.bat，它会自己建 venv、装依赖、开浏览器）
 python -m venv .venv
 # Linux / macOS
 .venv/bin/python -m pip install -e ".[dev]"
@@ -67,12 +74,15 @@ python -m venv .venv
 ```
 
 ```bash
-# 2. 配置（两个文件出厂都是空的，必须填）
-cp .env.example .env
-$EDITOR config/providers.yaml   # 至少一个模型端点，否则机器人不会回复
-$EDITOR config/adapters.yaml    # 至少一个协议端，否则收不到任何消息
-# 两个文件里都有注释掉的示例，取消注释并改成你的值。
+# 2. 配置：不需要手改文件
+#    起面板 → 第 07 页填 Provider（模型）与 adapters（QQ 接入），都有「测试」按钮；
+#    服务器没有浏览器时用交互式向导：
+python -m soapbot.cli setup
 ```
+
+> `config/` 里的是**模板**：首次启动会播种到 `data/config`，之后面板编辑的是 `data/config` 那一份，
+> 所以 `git pull` 不会把你的配置改回去。模板出厂是空的（一个引用未设置环境变量的模板会让全新安装
+> 直接起不来），填不填由你在面板里决定。
 
 ### 3. 看界面（Windows 双击即可）
 

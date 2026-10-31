@@ -633,6 +633,15 @@ export default {
 
   // ------------------------------------------------------- first-run checklist
   'setup.title': 'First-run checks',
+  'setup.stepsTitle': 'Three steps (works even if you have never deployed anything)',
+  'setup.step1':
+    "① Get a model key: DeepSeek's is at platform.deepseek.com/api_keys and a few dollars is plenty. Qwen, OpenAI or a local Ollama also work.",
+  'setup.step2':
+    "② Install NapCat and log the bot's own QQ account in (napcat.napneko.icu). Then open a WebSocket server in its network settings — the address is the default one:",
+  'setup.step3':
+    '③ Back on page 07, press Test on the Provider row and on the adapter row: "reachable" and "handshake ok, OneBot answered" mean it works. Then send the bot a message in QQ.',
+  'setup.copy': 'Copy',
+  'setup.copied': 'Copied',
   'setup.hint': 'This card disappears once everything passes. Each row links straight to what needs fixing.',
   'setup.dismiss': 'Do not show again',
   'setup.ok': 'pass',
