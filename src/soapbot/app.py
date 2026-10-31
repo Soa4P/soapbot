@@ -172,9 +172,8 @@ async def _start_runtime() -> None:
     from soapbot.core.scheduler import RuntimeScheduler
     from soapbot.memory.db import get_database
 
-    # The runtime config directory starts empty on a fresh volume; the shipped files are
-    # a template. Seeding before parsing is what makes the first start behave exactly
-    # like a configured one -- and what lets the panel save afterwards.
+    # Already seeded in `lifespan`, before the runtime switch — kept here only because this
+    # function can be reached by tests directly. It is idempotent.
     seed_config_dir(settings.config_dir, settings.config_template_dir)
 
     # Before any config is parsed: `api_key: env:NAME` reads os.environ, and in a
@@ -320,6 +319,15 @@ async def lifespan(app: FastAPI):
     _STARTUP_ERRORS.clear()
 
     _init_auth()
+
+    # Seed regardless of the runtime switch. The panel edits providers/adapters whether or
+    # not the bot itself is running, and on a fresh Windows install with
+    # SOAPBOT_ENABLE_RUNTIME=false the config directory used to not exist at all — the page
+    # then reported "not writable" and the first save had nowhere to go. Seeding only from
+    # inside _start_runtime made the config directory a side effect of the bot starting.
+    from soapbot.core.config_seed import seed_config_dir
+
+    seed_config_dir(settings.config_dir, settings.config_template_dir)
 
     if settings.enable_runtime:
         await _start_runtime()
