@@ -586,6 +586,8 @@ export default {
   'napcat.restartManual':
     'This process is not supervised by systemd or a container, so it cannot restart itself. On the host run: systemctl restart soapbot (Linux), docker restart <name> (container), or schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (Windows scheduled task).',
   'napcat.qrNotReady': 'The QR is not ready yet — try again once it has finished starting.',
+  'napcat.loginFailed':
+    "NapCat's WebUI answers but refused the login — its process is likely stuck. Restart NapCat on the host (schtasks /End /TN NapCat && schtasks /Run /TN NapCat), then try again in a few seconds.",
 
   // ------------------------------------------------------ find the local protocol end
   'scan.button': 'Scan this machine',

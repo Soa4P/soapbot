@@ -113,9 +113,13 @@ async function showQr(): Promise<void> {
     qrSvg.value = body.url ? renderQr(body.url) : ''
     if (qrSvg.value) qrFetchedAt = Date.now()
     else error.value = t('napcat.qrNotReady')
-  } catch {
-    // 409 is the normal "not ready yet"; saying so beats an error banner.
-    error.value = t('napcat.qrNotReady')
+  } catch (err) {
+    // 409 carries a machine token (webui-login-failed vs webui-not-ready) in ApiError.status
+    // detail — map it to a sentence the operator can act on instead of a bare "409".
+    const reason = (err as { message?: string }).message ?? ''
+    error.value = reason.includes('webui-login-failed')
+      ? t('napcat.loginFailed')
+      : t('napcat.qrNotReady')
   } finally {
     busy.value = false
   }

@@ -289,6 +289,11 @@ async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
         with contextlib.suppress(httpx.HTTPError, OSError):
             credential = await login_token()
     if not credential:
+        # Distinguish "still booting" from "booting finished but the login exchange failed".
+        # The latter is the state that reads as "准备不好" forever: the WebUI answers, the
+        # token is there, and still no credential — a stale NapCat process, fixed by restart.
+        if webui_reachable():
+            return {"ok": False, "error": "webui-login-failed"}
         return {"ok": False, "error": "webui-not-ready"}
 
     try:

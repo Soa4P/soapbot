@@ -191,6 +191,8 @@ async def qr(
     result = await napcat.qr_code(wait_seconds=5.0)
     if not result.get("ok"):
         # 409 rather than 500: "not ready yet" is the normal state two seconds after start.
+        # The detail is a machine token the UI maps to a sentence, so the person sees "the
+        # WebUI answered but the login was refused — restart NapCat", not "409".
         raise HTTPException(status_code=409, detail=result.get("error", "no-qrcode"))
     _audit(_caller_label(request), "allow", "napcat_qr", [])
     return result

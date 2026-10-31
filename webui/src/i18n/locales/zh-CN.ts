@@ -604,6 +604,8 @@ export default {
   'napcat.restartManual':
     '这个进程不是由 systemd 或容器托管的，无法自己重启。请在服务器上执行：systemctl restart soapbot（Linux）、docker restart <容器名>（容器）、或 schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（Windows 计划任务）。',
   'napcat.qrNotReady': '二维码还没准备好：等它启动完再点一次。',
+  'napcat.loginFailed':
+    'NapCat 的 WebUI 有响应、但登录请求被它拒了——多半是它的进程卡住了。去服务器重启 NapCat（schtasks /End /TN NapCat && schtasks /Run /TN NapCat），几秒后回来再点一次。',
 
   // ------------------------------------------------------------ 扫描本机协议端
   'scan.button': '扫描本机协议端',
