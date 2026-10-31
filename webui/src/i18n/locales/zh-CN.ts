@@ -688,7 +688,17 @@ export default {
   'overview.runtimeOffHint':
     '这是安装时的一个设置：`SOAPBOT_ENABLE_RUNTIME=false`。面板能用、能改配置、能取二维码，但不会去连 QQ、也不会回消息。要让它真的干活：把 `.env` 里这一行改成 `true`，重启服务；然后第 07 页填 Provider 与 QQ 接入。',
 
+  'config.modelsList': '列出模型',
+  'config.modelsBusy': '查询中…',
+  'config.modelsEmpty': '这个端点没有返回模型列表',
+  'config.modelsFailed': '拿不到模型列表：检查地址与 Key',
   'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
+  'config.presetKey.glm': 'bigmodel.cn（智谱开放平台）',
+  'config.presetKey.kimi': 'platform.moonshot.cn（Kimi 开放平台）',
+  'config.presetKey.grok': 'console.x.ai',
+  'config.presetKey.gemini': 'aistudio.google.com/apikey',
+  'config.presetKey.claude': 'console.anthropic.com（走 OpenAI 兼容层）',
+  'config.presetKey.mimo': 'platform.xiaomimimo.com（小米 MiMo 开放平台）',
   'config.presetKey.qwen': 'bailian.console.aliyun.com（阿里云百炼）',
   'config.presetKey.openai': 'platform.openai.com/api-keys',
   'config.presetKey.ollama': '本地不用 Key，随便填非空值即可',

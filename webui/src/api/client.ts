@@ -149,6 +149,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   /**
+   * The model ids the endpoint really offers. Unlike the Test button this **does** send the
+   * key, which is why it is a separate, explicit action.
+   */
+  configProviderModels: (body: { base_url: string; api_key?: string }) =>
+    request<{ ok: boolean; models: string[]; error?: string; status_code?: number }>(
+      '/api/config/providers/models',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  /**
    * `mode: 'reverse'` cannot be probed from here: the peer dials us. The server reports
    * on the port instead — `in_use` means something is already listening (usually the
    * good outcome), `free` means it is not listening yet.

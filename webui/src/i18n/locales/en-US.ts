@@ -679,7 +679,17 @@ export default {
   'overview.runtimeOffHint':
     'That is a setting from install time: `SOAPBOT_ENABLE_RUNTIME=false`. The panel works, edits config and can show the login QR, but it will not connect to QQ or answer messages. To make it work: set that line to `true` in `.env`, restart the service, then fill in the Provider and QQ adapter on page 07.',
 
+  'config.modelsList': 'List models',
+  'config.modelsBusy': 'asking…',
+  'config.modelsEmpty': 'the endpoint returned no model list',
+  'config.modelsFailed': 'cannot list models — check the address and key',
   'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
+  'config.presetKey.glm': 'bigmodel.cn (Zhipu)',
+  'config.presetKey.kimi': 'platform.moonshot.cn',
+  'config.presetKey.grok': 'console.x.ai',
+  'config.presetKey.gemini': 'aistudio.google.com/apikey',
+  'config.presetKey.claude': 'console.anthropic.com (OpenAI-compatible layer)',
+  'config.presetKey.mimo': 'platform.xiaomimimo.com',
   'config.presetKey.qwen': 'bailian.console.aliyun.com',
   'config.presetKey.openai': 'platform.openai.com/api-keys',
   'config.presetKey.ollama': 'no key needed locally — any non-empty value will do',

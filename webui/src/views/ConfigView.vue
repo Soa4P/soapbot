@@ -121,10 +121,40 @@ const PRESETS: Preset[] = [
   { key: 'deepseek', label: 'DeepSeek', kind: 'openai_compat', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-flash' },
   { key: 'qwen', label: 'Qwen', kind: 'openai_compat', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
   { key: 'openai', label: 'OpenAI', kind: 'openai_compat', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { key: 'glm', label: 'GLM', kind: 'openai_compat', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.5' },
+  { key: 'kimi', label: 'Kimi', kind: 'openai_compat', base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { key: 'grok', label: 'Grok', kind: 'openai_compat', base_url: 'https://api.x.ai/v1', model: 'grok-2-latest' },
+  { key: 'gemini', label: 'Gemini', kind: 'openai_compat', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' },
+  { key: 'claude', label: 'Claude', kind: 'openai_compat', base_url: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-5' },
+  { key: 'mimo', label: 'MiMo', kind: 'openai_compat', base_url: 'https://api.xiaomimimo.com/v1', model: 'MiMo-V2.6' },
   { key: 'ollama', label: 'Ollama', kind: 'openai_compat', base_url: 'http://127.0.0.1:11434/v1', model: 'llama3.1' },
 ]
 
 const lastPreset = ref<Preset | null>(null)
+const modelOptions = ref<Record<number, string[]>>({})
+const modelBusy = ref<Record<number, boolean>>({})
+const modelError = ref<Record<number, string>>({})
+
+/** Ask the provider for its real model ids. Sends the key — hence a deliberate click. */
+async function listModels(row: { base_url: string; api_key: string }, index: number): Promise<void> {
+  modelBusy.value = { ...modelBusy.value, [index]: true }
+  modelError.value = { ...modelError.value, [index]: '' }
+  try {
+    const body = await api.configProviderModels({ base_url: row.base_url, api_key: row.api_key })
+    if (body.ok) {
+      modelOptions.value = { ...modelOptions.value, [index]: body.models }
+      if (!body.models.length) {
+        modelError.value = { ...modelError.value, [index]: t('config.modelsEmpty') }
+      }
+    } else {
+      modelError.value = { ...modelError.value, [index]: body.error ?? t('config.modelsFailed') }
+    }
+  } catch (error) {
+    modelError.value = { ...modelError.value, [index]: (error as Error).message }
+  } finally {
+    modelBusy.value = { ...modelBusy.value, [index]: false }
+  }
+}
 
 function addPreset(preset: Preset): void {
   const id = `provider-${drafts.value.length + 1}`
@@ -408,8 +438,24 @@ async function applyChanges(): Promise<void> {
                   style="min-width: 120px"
                   placeholder="deepseek-flash"
                   :aria-label="t('common.model')"
+                  :list="`models-${index}`"
                   @input="markEdited(row.id)"
                 />
+                <datalist :id="`models-${index}`">
+                  <option v-for="name in modelOptions[index] ?? []" :key="name" :value="name" />
+                </datalist>
+                <button
+                  class="btn ghost"
+                  type="button"
+                  style="margin-top: 4px"
+                  :disabled="modelBusy[index] || !row.base_url"
+                  @click="listModels({ base_url: row.base_url ?? '', api_key: row.api_key ?? '' }, index)"
+                >
+                  {{ modelBusy[index] ? t('config.modelsBusy') : t('config.modelsList') }}
+                </button>
+                <span v-if="modelError[index]" class="hint" style="margin-left: 6px">
+                  {{ modelError[index] }}
+                </span>
               </td>
               <td>
                 <!-- type="text" not "password": the value shown is already a mask or an
