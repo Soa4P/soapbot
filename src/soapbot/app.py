@@ -58,6 +58,7 @@ from soapbot.api.bilibili import router as bilibili_router
 from soapbot.api.config_adapters import router as config_adapters_router
 from soapbot.api.config_probe import router as config_probe_router
 from soapbot.api.config_write import router as config_write_router
+from soapbot.api.napcat import router as napcat_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
 from soapbot.api.protocol import router as protocol_router
@@ -449,6 +450,8 @@ def create_app() -> FastAPI:
     # "Which protocol end is already running here" — the question a person asks right
     # before they are asked to type a WebSocket URL.
     app.include_router(protocol_router)
+    # Starting the protocol end and showing its QR: the step after "which port is it on".
+    app.include_router(napcat_router)
     app.include_router(pipeline_router)
     app.include_router(settings_router)
 

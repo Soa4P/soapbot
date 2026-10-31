@@ -553,6 +553,23 @@ export default {
   'adapters.previewFailed': 'preview failed: {reason}',
   'adapters.writeFailed': 'write failed: {reason}',
 
+  // ------------------------------------------------------ protocol end (NapCat)
+  'napcat.title': 'Step 1: get QQ online',
+  'napcat.hint':
+    'QQ does not connect to this panel directly; it needs a protocol end (NapCat) in between. On a host with Docker the button below starts it and shows the login QR — scan it with your phone and the login is done.',
+  'napcat.noDocker':
+    'No Docker on this host: install NapCat yourself, then use "Open NapCat WebUI" to scan the QR in its own window, and come back to "Scan this machine" below.',
+  'napcat.absent': 'not started yet',
+  'napcat.starting': 'starting (the first run downloads the image, which takes a few minutes)',
+  'napcat.running': 'running, waiting for the QR scan',
+  'napcat.loggedIn': 'QQ {account} is logged in',
+  'napcat.start': 'Start NapCat',
+  'napcat.stop': 'Stop',
+  'napcat.showQr': 'Show login QR',
+  'napcat.openWebui': 'Open NapCat WebUI',
+  'napcat.qrHint': 'Scan it with mobile QQ; this card switches to "logged in" by itself.',
+  'napcat.qrNotReady': 'The QR is not ready yet — try again once it has finished starting.',
+
   // ------------------------------------------------------ find the local protocol end
   'scan.button': 'Scan this machine',
   'scan.scanning': 'Scanning…',

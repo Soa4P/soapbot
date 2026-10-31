@@ -570,6 +570,23 @@ export default {
   'adapters.previewFailed': '预览失败：{reason}',
   'adapters.writeFailed': '写入失败：{reason}',
 
+  // ------------------------------------------------------------ 协议端（NapCat）
+  'napcat.title': '第一步：让 QQ 上线',
+  'napcat.hint':
+    'QQ 不是直接连到这里的，中间需要一个协议端（NapCat）。这台机器有 Docker 时，下面的按钮会替你启动它并把登录二维码显示出来，用手机 QQ 扫一下就完成登录。',
+  'napcat.noDocker':
+    '这台机器没有 Docker：请自己安装 NapCat，装好后点「打开 NapCat WebUI」在它自己的界面里扫码登录，然后回来点下面的「扫描本机协议端」。',
+  'napcat.absent': '还没有启动',
+  'napcat.starting': '正在启动（首次要下载镜像，可能要几分钟）',
+  'napcat.running': '已启动，等待扫码登录',
+  'napcat.loggedIn': '已登录 QQ {account}',
+  'napcat.start': '启动 NapCat',
+  'napcat.stop': '停止',
+  'napcat.showQr': '显示登录二维码',
+  'napcat.openWebui': '打开 NapCat WebUI',
+  'napcat.qrHint': '用手机 QQ 扫码，扫完这里会自动变成「已登录」。',
+  'napcat.qrNotReady': '二维码还没准备好：等它启动完再点一次。',
+
   // ------------------------------------------------------------ 扫描本机协议端
   'scan.button': '扫描本机协议端',
   'scan.scanning': '扫描中…',
