@@ -51,14 +51,20 @@ async function refresh(): Promise<void> {
   try {
     state.value = await api.napcatStatus()
     error.value = ''
+    const loggedIn = state.value.logged_in
+    // OneBot answering is the end of the QR step: NapCat only opens that port once a QQ
+    // account is scanned in. Leaving the picture up after a successful scan is how the card
+    // keeps saying "scan me" at someone who already did — the panel now names the account.
+    if (loggedIn) {
+      qrSvg.value = ''
+      return
+    }
     // Fetch the QR as soon as the panel can, instead of waiting to be asked: the operator
     // pressed "start" and the next thing they need is the picture. 409s are ignored — that
     // is "not booted yet", and the next poll tries again. Once shown, it is re-fetched on
     // the TTL above: a stale QR scanned with a phone fails, and that failure looks like a
     // broken bot rather than an expired picture.
-    const waitingForScan =
-      (state.value.status === 'running' || state.value.webui_reachable) &&
-      !state.value.logged_in
+    const waitingForScan = state.value.status === 'running' || state.value.webui_reachable
     const stale = Date.now() - qrFetchedAt > QR_TTL_MS
     if (waitingForScan && (stale || !qrSvg.value)) {
       try {
@@ -71,7 +77,6 @@ async function refresh(): Promise<void> {
         /* keep polling */
       }
     }
-    if (state.value.logged_in) qrSvg.value = ''
   } catch (err) {
     error.value = (err as Error).message
   }

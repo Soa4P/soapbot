@@ -524,6 +524,8 @@ export interface NapcatStatus {
   webui_url: string
   /** NapCat's own WebUI token, read from its config — so the operator never digs in a log. */
   webui_token: string
+  /** Access token configured on the OneBot WS server; empty means "none", which is the norm. */
+  access_token: string
   /** A NapCat installed by hand is listening on its WebUI even though we started none. */
   webui_reachable: boolean
   logged_in: boolean

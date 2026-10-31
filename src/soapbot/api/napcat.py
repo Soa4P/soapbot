@@ -92,6 +92,13 @@ async def status(
     webui_token = ""
     with contextlib.suppress(Exception):
         webui_token = await asyncio.to_thread(napcat.webui_token)
+    # The token the OneBot server was configured with (usually none). The adapter form needs
+    # it, and "read it out of a JSON file yourself" is not an answer.
+    access_token = ""
+    with contextlib.suppress(Exception):
+        access_token = await asyncio.to_thread(
+            napcat.onebot_access_token, str(login.get("account") or "")
+        )
 
     return {
         **state,
@@ -103,6 +110,7 @@ async def status(
         # instead of talking about Docker on a host that never needed it.
         "webui_reachable": await asyncio.to_thread(napcat.webui_reachable),
         "webui_token": webui_token,
+        "access_token": access_token,
         "logged_in": login.get("logged_in", False),
         "account": login.get("account", ""),
         "phase": login.get("phase", ""),

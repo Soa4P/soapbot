@@ -8,7 +8,7 @@
  * adapter silently ignores — the options bag is free-form, so a wrong name produces a
  * saved file that looks right and a connection that never opens.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { api, type AdapterProbeResult, type ScanEntry } from '@/api/client'
 import ProbeBadge from '@/components/ProbeBadge.vue'
@@ -243,6 +243,8 @@ function onModeChange(draft: Draft): void {
 const scanResults = ref<ScanEntry[]>([])
 const scanning = ref(false)
 const scanError = ref('')
+/** What the running protocol end says its own access token is (usually none). */
+const endToken = ref('')
 
 async function scanLocal(): Promise<void> {
   scanning.value = true
@@ -267,11 +269,34 @@ function useFound(entry: ScanEntry): void {
     mode: 'forward',
     ws_url: entry.ws_url || `ws://127.0.0.1:${entry.port}`,
     account_id: entry.account || '',
+    // The token column otherwise asks the operator to invent a secret. It is whatever the
+    // protocol end was configured with, and the backend reads that from its own config.
+    access_token: endToken.value,
   })
   message(t('scan.added', { port: String(entry.port) }))
 }
 
-onMounted(load)
+const tokenHint = computed(() =>
+  endToken.value
+    ? t('adapters.hint.tokenKnown', { token: endToken.value })
+    : t('adapters.hint.tokenEmpty')
+)
+
+/** The token column asks for a secret the operator has no way of knowing; the protocol end
+ * on this host already has one (usually none), so read it instead of asking. Non-fatal:
+ * without a local end the column simply stays empty and can be typed by hand. */
+async function readEndToken(): Promise<void> {
+  try {
+    endToken.value = (await api.napcatStatus()).access_token
+  } catch {
+    endToken.value = ''
+  }
+}
+
+onMounted(() => {
+  void load()
+  void readEndToken()
+})
 </script>
 
 <template>
@@ -415,7 +440,8 @@ onMounted(load)
             </td>
             <td>
               <input v-model="draft.access_token" class="adapter-field" />
-              <span class="field-hint">{{ t('adapters.hint.token') }}</span>
+              <!-- "两边必须一致" tells nobody what the value is; this row does. -->
+              <span class="field-hint">{{ tokenHint }}</span>
             </td>
             <td><input v-model="draft.enabled" type="checkbox" class="adapter-check" /></td>
             <td>
