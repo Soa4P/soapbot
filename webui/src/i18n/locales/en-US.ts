@@ -684,6 +684,8 @@ export default {
 
   'config.modelsList': 'List models',
   'config.modelsSendsKey': '(this one sends the key to the provider, which is what verifies it)',
+  'config.modelsKeyShort':
+    'The key you pasted is only {n} characters (a DeepSeek key is 35: sk- plus 32), so it is probably cut off.',
   'config.modelsBusy': 'asking…',
   'config.modelsEmpty': 'the endpoint returned no model list',
   'config.modelsKeyRejected':

@@ -153,6 +153,12 @@ async function listModels(row: { base_url: string; api_key: string }, index: num
       let text = body.error ?? t('config.modelsFailed')
       if (status === 401 || status === 403) {
         text = t('config.modelsKeyRejected')
+        // A key that is obviously too short is the single most common cause, and the field
+        // shows it: say it instead of letting the operator argue with the provider.
+        const raw = (row.api_key ?? '').trim()
+        if (raw && !raw.startsWith('env:') && raw.length < 32) {
+          text += ' ' + t('config.modelsKeyShort', { n: raw.length })
+        }
       } else if (status === 404) {
         text = t('config.modelsBadPath')
       } else if (status) {
