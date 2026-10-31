@@ -14,6 +14,9 @@ const route = useRoute()
 
 const health = ref<{ status: string; version: string; uptime_seconds: number } | null>(null)
 const healthError = ref('')
+/** 502/503/504 during an install or upgrade is a restart, not a broken deployment —
+ * the banner should say which, because the two need different reactions. */
+const healthStatus = ref(0)
 let timer: number | undefined
 
 /**
@@ -74,6 +77,7 @@ const authPill = computed(() => {
 async function loadHealth(): Promise<void> {
   try {
     const response = await fetch('/api/health')
+    healthStatus.value = response.status
     if (!response.ok) throw new Error(String(response.status))
     health.value = await response.json()
     healthError.value = ''
@@ -149,7 +153,11 @@ onBeforeUnmount(() => {
 
       <div class="page">
         <div v-if="healthError" class="error-banner" role="alert">
-          {{ t('shell.apiUnreachable', { error: healthError }) }}
+          {{
+            [502, 503, 504].includes(healthStatus)
+              ? t('shell.apiRestarting', { error: healthError })
+              : t('shell.apiUnreachable', { error: healthError })
+          }}
         </div>
         <div v-else-if="!auth.authenticated" class="warn-banner" role="status">
           {{ t('shell.unauthenticated') }}

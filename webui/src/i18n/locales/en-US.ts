@@ -493,6 +493,9 @@ export default {
   'shell.getToken': 'Get a token',
   'shell.login': 'Sign in',
   'shell.apiUnreachable': 'Cannot reach the API: {error}. The service may not be running, or the port is taken.',
+  'shell.apiRestarting':
+    'The panel is restarting or briefly unavailable ({error}). Installs and upgrades restart it; it usually recovers within seconds — if not, check data/panel.log.',
+  'api.timeout': 'Request timed out after {seconds}s — the service may be restarting; refresh and retry.',
   'shell.unauthenticated': 'This session is not authenticated. Remote access must sign in at the top right, or every admin endpoint returns 401.',
   'login.title': 'Exchange a one-time token for an access token',
   'login.detail': 'The token is written to data/init_token.txt on first start; if SOAPBOT_INIT_TOKEN is set, that value is used instead.',

@@ -12,7 +12,11 @@
  *    empty page would make an expired session look like an empty system.
  */
 
-import { locale } from '@/i18n'
+import { locale, t } from '@/i18n'
+
+/** Long enough for a slow provider probe (the server gives up at 15–20 s), short enough
+ * that a restarting panel does not leave a button spinning. */
+const REQUEST_TIMEOUT_MS = 45_000
 
 const TOKEN_KEY = 'soapbot.token'
 export const UNAUTHORIZED_EVENT = 'soapbot:unauthorized'
@@ -63,13 +67,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json')
   }
 
+  // Every request is bounded. Without this a probe button spins forever when the server
+  // is restarting, and "测试中…" never resolves into an answer — which is exactly how a
+  // transient 502 during a deploy looked like a broken panel.
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
   let response: Response
   try {
-    response = await fetch(path, { ...init, headers })
+    response = await fetch(path, { ...init, headers, signal: init.signal ?? controller.signal })
   } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new ApiError(0, t('api.timeout', { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) }))
+    }
     // fetch only rejects on transport failure, and the message it gives ("Failed to
     // fetch") is useless to an operator looking at a blank panel.
     throw new ApiError(0, `无法连接到服务（${(err as Error).message}）`)
+  } finally {
+    window.clearTimeout(timer)
   }
 
   if (response.status === 401) {
