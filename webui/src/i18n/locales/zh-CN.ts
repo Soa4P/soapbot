@@ -691,6 +691,10 @@ export default {
   'config.modelsList': '列出模型',
   'config.modelsBusy': '查询中…',
   'config.modelsEmpty': '这个端点没有返回模型列表',
+  'config.modelsKeyRejected':
+    '401/403：Key 被这家服务商拒绝了。检查 Key 是否完整、是不是这个服务商的（DeepSeek 的 Key 以 sk- 开头；智谱是 id.secret 形式），以及余额是否够。',
+  'config.modelsBadPath': '404：地址不对。API 地址通常以 /v1 结尾（Gemini 是 /v1beta/openai，Claude 是 /v1）。',
+  'config.modelsStatus': '服务商返回 {status}：先点「测试」确认地址可达，再检查 Key 与账号状态。',
   'config.modelsFailed': '拿不到模型列表：检查地址与 Key',
   'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
   'config.presetKey.glm': 'bigmodel.cn（智谱开放平台）',
