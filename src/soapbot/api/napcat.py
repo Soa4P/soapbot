@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from soapbot.api.auth import require_api_auth
 from soapbot.api.config_probe import _enforce_rate
 from soapbot.api.config_write import _audit, _caller_label, _require_permission
+from soapbot.config import settings
 from soapbot.protocol import napcat
 from soapbot.security.principal import Permission
 
@@ -83,8 +84,11 @@ async def status(
         **state,
         "starting": _start_task is not None and not _start_task.done(),
         "image": napcat.IMAGE,
-        "ws_url": f"ws://127.0.0.1:{napcat.WS_PORT}",
+        "ws_url": f"ws://127.0.0.1:{settings.napcat_ws_port}",
         "webui_url": f"http://127.0.0.1:{napcat.WEBUI_PORT}",
+        # A hand-installed NapCat is not ours, but it is right there: the page has to say so
+        # instead of talking about Docker on a host that never needed it.
+        "webui_reachable": await asyncio.to_thread(napcat.webui_reachable),
         "logged_in": login.get("logged_in", False),
         "account": login.get("account", ""),
         "phase": login.get("phase", ""),

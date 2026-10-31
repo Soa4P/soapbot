@@ -49,7 +49,11 @@ async function refresh(): Promise<void> {
     // Fetch the QR as soon as the panel can, instead of waiting to be asked: the operator
     // pressed "start" and the next thing they need is the picture. 409s are ignored — that
     // is "not booted yet", and the next poll tries again.
-    if (state.value.status === 'running' && !state.value.logged_in && !qrSvg.value) {
+    if (
+      (state.value.status === 'running' || state.value.webui_reachable) &&
+      !state.value.logged_in &&
+      !qrSvg.value
+    ) {
       try {
         const body = await api.napcatQr()
         if (body.url) qrSvg.value = renderQr(body.url)
@@ -149,16 +153,19 @@ function openWebui(): void {
 }
 
 const canManage = computed(() => state.value?.docker === true)
+/** A NapCat that is already running (installed by hand, no Docker anywhere) is the common
+ * case on Windows — the card must not talk about Docker when the protocol end is right
+ * there waiting for a scan. */
+const foundLocally = computed(() => state.value?.webui_reachable === true)
+
 const statusText = computed(() => {
   const current = state.value
   if (!current) return ''
+  if (current.logged_in) return t('napcat.loggedIn', { account: current.account || '?' })
+  if (foundLocally.value) return t('napcat.foundLocal')
   if (!current.docker) return t('napcat.noDocker')
   if (current.starting || current.status === 'created') return t('napcat.starting')
-  if (current.status === 'running') {
-    return current.logged_in
-      ? t('napcat.loggedIn', { account: current.account || '?' })
-      : t('napcat.running')
-  }
+  if (current.status === 'running') return t('napcat.running')
   return t('napcat.absent')
 })
 
@@ -178,7 +185,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="panel">
     <h2>{{ t('napcat.title') }}</h2>
-    <p class="muted">{{ t('napcat.hint') }}</p>
+    <p class="muted">{{ foundLocally ? t('napcat.hintLocal') : t('napcat.hint') }}</p>
 
     <p class="napcat__state">
       <span class="tag" :class="state?.logged_in ? 'ok' : canManage ? 'warn' : 'idle'">
@@ -197,7 +204,7 @@ onBeforeUnmount(() => {
       >
         {{ state?.starting ? t('napcat.starting') : t('napcat.start') }}
       </button>
-      <button v-if="canManage" class="btn" type="button" @click="showQr">
+      <button v-if="canManage || foundLocally" class="btn" type="button" @click="showQr">
         {{ t('napcat.showQr') }}
       </button>
       <button v-if="canManage && state?.status === 'running'" class="btn ghost" type="button" @click="stop">
