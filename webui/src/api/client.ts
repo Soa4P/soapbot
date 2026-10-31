@@ -120,6 +120,17 @@ export const api = {
   adapters: () => request<any>('/api/adapters'),
   providers: () => request<any>('/api/providers'),
   personas: () => request<any>('/api/personas'),
+
+  /** The full card, body included. The list endpoint truncates the prompt, and saving
+   * a truncated prompt back would destroy the rest of it. */
+  persona: (id: string) => request<PersonaCard>(`/api/personas/${encodeURIComponent(id)}`),
+
+  /** Create or replace a card. Applied to the running bot immediately — no restart. */
+  writePersona: (payload: PersonaCard) =>
+    request<{ ok: boolean; id: string; file: string; version: number; applied: boolean }>(
+      '/api/personas',
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
   access: () => request<any>('/api/access'),
   logs: (params: { limit?: number; level?: string; contains?: string } = {}) => {
     const query = new URLSearchParams()
@@ -482,6 +493,23 @@ export interface ProviderEntry {
   priority?: number
   enabled?: boolean
   [key: string]: unknown
+}
+
+/** One persona card. `system_prompt` is the Markdown body verbatim — the editor shows
+ * it in a textarea rather than as a set of fields, because the prose is the card. */
+export interface PersonaCard {
+  id: string
+  name: string
+  system_prompt: string
+  style: string
+  wake_words: string[]
+  banned_words: string[]
+  max_reply_chars: number
+  temperature: number | null
+  enabled: boolean
+  locale: string
+  version?: number
+  file?: string
 }
 
 export interface ProvidersDocument {

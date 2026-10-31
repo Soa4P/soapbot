@@ -327,14 +327,29 @@ def build_runtime(
         if memory is not None:
 
             async def history_provider(session_key: str):  # type: ignore[misc]
-                return await memory.history(session_key, limit=40)
+                # 40 turns was the point where every group that talks at all paid for a
+                # summariser call on *every* reply: the transcript crossed the token
+                # budget, so the compressor folded history before the model was even
+                # asked. A shorter window plus the rolling summary keeps the referents
+                # that matter and removes the second network round trip from the hot
+                # path. Passive mode made this worse, not better: every un-addressed
+                # group message is now in the transcript too.
+                return await memory.history(session_key, limit=settings.history_turns)
 
         engine = AIEngine(
             router=provider_router,
             personas=persona_store,
             compressor=compressor
             or ContextCompressor(
-                CompressionConfig(max_prompt_tokens=6000, reserve_for_reply=1200)
+                CompressionConfig(
+                    max_prompt_tokens=settings.max_prompt_tokens,
+                    reserve_for_reply=1200,
+                    # Folding is a *second* model call. It is worth paying once in a
+                    # long conversation, not on every message of an ordinary one, so
+                    # the recent window is kept wide enough that most replies never
+                    # reach it.
+                    keep_recent_turns=max(4, settings.history_turns // 2),
+                )
             ),
             descriptions=DescriptionCache(),
             history_provider=history_provider,

@@ -131,19 +131,29 @@ INJECTION_BLOCK_ON = 2
 #: tests and by callers with no locale at hand. Callers that know the message's locale
 #: must go through :func:`injection_refusal` instead — a hard-coded Chinese refusal in
 #: a group that speaks English is the visible half of "the translation is unfinished".
-INJECTION_REFUSAL = "这个话题我没法接，换个说法吧。"
+INJECTION_REFUSAL = "这条触犯了规则，已记录，无法回答。"
 
 
-def injection_refusal(locale: str = "") -> str:
+def injection_refusal(locale: str = "", labels: list[str] | None = None) -> str:
     """The refusal text for ``locale``, falling back to the default language.
 
     A function rather than a constant because the answer depends on who is being
     refused. Both entry points (typed message, transcribed speech) call this, so they
     cannot drift into two different answers to the same attempt.
+
+    ``labels`` names what was matched. It is appended so the operator reading the group
+    can tell *why* a message was refused without opening the audit log — and so a
+    false positive is visible as one ("matched: role_override") instead of looking like
+    the bot being randomly rude. The labels are our own pattern names, never the
+    message text, so nothing from the quarantined content is echoed back.
     """
     from soapbot.i18n import t
 
-    return t("injection.refusal", locale)
+    base = t("injection.refusal", locale)
+    if not labels:
+        return base
+    unique = list(dict.fromkeys(labels))[:3]
+    return f"{base}\n（命中规则：{'、'.join(unique)}）"
 
 
 def looks_like_injection(text: str) -> tuple[bool, list[str]]:

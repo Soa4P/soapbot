@@ -186,7 +186,7 @@ class ModelStage(Stage):
         if blocked_transcript:
             # Same shape as the screen stage: refuse in the reply, do not call the
             # model, and do not halt — the refusal still has to reach the group.
-            ctx.model_reply = injection_refusal(ctx.locale)
+            ctx.model_reply = injection_refusal(ctx.locale, ctx.extras.get("injection_labels"))
             ctx.extras["skip_model"] = True
             ctx.extras["injection_blocked"] = True
             return StageResult()
