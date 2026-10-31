@@ -571,6 +571,9 @@ export default {
   'napcat.showQr': 'Show login QR',
   'napcat.openWebui': 'Open NapCat WebUI',
   'napcat.qrHint': 'Scan it with mobile QQ; this card switches to "logged in" by itself.',
+  'napcat.foundLocal': 'A NapCat is already running here (its WebUI is listening) — no Docker needed.',
+  'napcat.hintLocal':
+    'NapCat is already running on this machine (probably one you installed). Press "Show login QR" and scan it with mobile QQ; the card then turns into "logged in" and you press "Connect QQ".',
   'napcat.connect': 'Connect QQ',
   'napcat.connected': 'Adapter written (QQ {account}). Restart the panel to pick it up.',
   'napcat.alreadyConnected': 'The adapter is already configured — nothing to write.',

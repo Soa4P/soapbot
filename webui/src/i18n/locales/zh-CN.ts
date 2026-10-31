@@ -588,6 +588,9 @@ export default {
   'napcat.showQr': '显示登录二维码',
   'napcat.openWebui': '打开 NapCat WebUI',
   'napcat.qrHint': '用手机 QQ 扫码，扫完这里会自动变成「已登录」。',
+  'napcat.foundLocal': '检测到本机已有 NapCat（它的 WebUI 在监听），不需要 Docker。',
+  'napcat.hintLocal':
+    '这台机器上已经跑着 NapCat（多半是你自己装的）。点「显示登录二维码」，用手机 QQ 扫一下就完成登录；扫完卡片会变成「已登录」，再点「自动连上 QQ」。',
   'napcat.connect': '自动连上 QQ',
   'napcat.connected': '已把接入写进配置（QQ {account}）。重启面板后生效。',
   'napcat.alreadyConnected': '配置里已经有这条接入了，不用重复写。',

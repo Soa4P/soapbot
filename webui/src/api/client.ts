@@ -522,8 +522,11 @@ export interface NapcatStatus {
   image: string
   ws_url: string
   webui_url: string
+  /** A NapCat installed by hand is listening on its WebUI even though we started none. */
+  webui_reachable: boolean
   logged_in: boolean
   account: string
+  phase: string
 }
 
 /** One candidate local port and what answered on it. */

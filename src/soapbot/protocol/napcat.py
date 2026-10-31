@@ -102,6 +102,20 @@ def _docker(*args: str, timeout: float = STATUS_TIMEOUT) -> subprocess.Completed
     )
 
 
+def webui_reachable(port: int = WEBUI_PORT, timeout: float = 2.0) -> bool:
+    """Is a NapCat WebUI answering on this host?
+
+    The panel has to be able to tell "there is no protocol end here" from "there is one,
+    installed by hand, and it is waiting for a scan". Without this the Configure page led
+    with the Docker advice on a machine that already had NapCat running.
+    """
+    try:
+        response = httpx.get(f"http://127.0.0.1:{port}/", timeout=timeout, trust_env=False)
+    except Exception:
+        return False
+    return response.status_code < 500
+
+
 def container_status() -> dict[str, Any]:
     """``exists`` and ``status`` for our container, without assuming Docker is there."""
     if not docker_available():
