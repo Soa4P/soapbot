@@ -60,6 +60,7 @@ from soapbot.api.config_probe import router as config_probe_router
 from soapbot.api.config_write import router as config_write_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
+from soapbot.api.protocol import router as protocol_router
 from soapbot.api.security import router as security_router
 from soapbot.api.settings import router as settings_router
 from soapbot.config import settings
@@ -445,6 +446,9 @@ def create_app() -> FastAPI:
     # Next to the config routes: the test buttons take the same draft payload the diff
     # endpoints take, and an operator debugging a save wants both on one page.
     app.include_router(config_probe_router)
+    # "Which protocol end is already running here" — the question a person asks right
+    # before they are asked to type a WebSocket URL.
+    app.include_router(protocol_router)
     app.include_router(pipeline_router)
     app.include_router(settings_router)
 
