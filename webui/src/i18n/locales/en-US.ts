@@ -682,6 +682,12 @@ export default {
   'config.modelsList': 'List models',
   'config.modelsBusy': 'asking…',
   'config.modelsEmpty': 'the endpoint returned no model list',
+  'config.modelsKeyRejected':
+    '401/403: the provider rejected the key. Check it is complete, belongs to this provider (DeepSeek keys start with sk-), and that the account has credit.',
+  'config.modelsBadPath':
+    '404: wrong address. API base URLs usually end in /v1 (Gemini uses /v1beta/openai, Claude /v1).',
+  'config.modelsStatus':
+    'the provider answered {status}: press Test to confirm the address is reachable, then check the key and the account.',
   'config.modelsFailed': 'cannot list models — check the address and key',
   'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
   'config.presetKey.glm': 'bigmodel.cn (Zhipu)',

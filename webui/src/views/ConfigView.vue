@@ -147,7 +147,18 @@ async function listModels(row: { base_url: string; api_key: string }, index: num
         modelError.value = { ...modelError.value, [index]: t('config.modelsEmpty') }
       }
     } else {
-      modelError.value = { ...modelError.value, [index]: body.error ?? t('config.modelsFailed') }
+      // A bare "HTTP 401" is what made the button feel useless. The status is the answer:
+      // it separates "wrong key" from "wrong address" from "this provider has no /models".
+      const status = body.status_code ?? 0
+      let text = body.error ?? t('config.modelsFailed')
+      if (status === 401 || status === 403) {
+        text = t('config.modelsKeyRejected')
+      } else if (status === 404) {
+        text = t('config.modelsBadPath')
+      } else if (status) {
+        text = t('config.modelsStatus', { status })
+      }
+      modelError.value = { ...modelError.value, [index]: text }
     }
   } catch (error) {
     modelError.value = { ...modelError.value, [index]: (error as Error).message }
