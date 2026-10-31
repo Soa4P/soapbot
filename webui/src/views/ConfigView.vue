@@ -464,6 +464,10 @@ async function applyChanges(): Promise<void> {
                 >
                   {{ modelBusy[index] ? t('config.modelsBusy') : t('config.modelsList') }}
                 </button>
+                <!-- Says which of the two buttons sends the credential. Without this the
+                     pair reads as contradictory: Test says "alive", this one says the key
+                     was rejected. -->
+                <span class="hint" style="margin-left: 6px">{{ t('config.modelsSendsKey') }}</span>
                 <span v-if="modelError[index]" class="hint" style="margin-left: 6px">
                   {{ modelError[index] }}
                 </span>

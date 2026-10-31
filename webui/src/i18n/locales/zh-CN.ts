@@ -689,10 +689,11 @@ export default {
     '这是安装时的一个设置：`SOAPBOT_ENABLE_RUNTIME=false`。面板能用、能改配置、能取二维码，但不会去连 QQ、也不会回消息。要让它真的干活：把 `.env` 里这一行改成 `true`，重启服务；然后第 07 页填 Provider 与 QQ 接入。',
 
   'config.modelsList': '列出模型',
+  'config.modelsSendsKey': '（这一下会把 Key 发给服务商，用来验证 Key 是否有效）',
   'config.modelsBusy': '查询中…',
   'config.modelsEmpty': '这个端点没有返回模型列表',
   'config.modelsKeyRejected':
-    '401/403：Key 被这家服务商拒绝了。检查 Key 是否完整、是不是这个服务商的（DeepSeek 的 Key 以 sk- 开头；智谱是 id.secret 形式），以及余额是否够。',
+    '401/403：Key 被这家服务商拒绝了——和「测试」里那个 401 是同一件事（那边只探地址，所以它说「端点活着」，意思是服务器在、只是拒绝了这次请求）。DeepSeek 的 Key 以 sk- 开头，智谱是 id.secret 形式；顺便确认余额。',
   'config.modelsBadPath': '404：地址不对。API 地址通常以 /v1 结尾（Gemini 是 /v1beta/openai，Claude 是 /v1）。',
   'config.modelsStatus': '服务商返回 {status}：先点「测试」确认地址可达，再检查 Key 与账号状态。',
   'config.modelsFailed': '拿不到模型列表：检查地址与 Key',
