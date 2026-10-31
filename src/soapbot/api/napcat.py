@@ -111,7 +111,6 @@ async def status(
         "webui_reachable": await asyncio.to_thread(napcat.webui_reachable),
         "webui_token": webui_token,
         "access_token": access_token,
-        "access_token": access_token,
         "logged_in": login.get("logged_in", False),
         "account": login.get("account", ""),
         "phase": login.get("phase", ""),
