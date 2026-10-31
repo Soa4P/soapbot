@@ -366,19 +366,33 @@ async def probe_onebot(port: int = WS_PORT, timeout: float = 3.0) -> dict[str, A
             max_size=1024 * 1024,
         ) as ws:
             await ws.send(json.dumps({"action": "get_login_info", "params": {}, "echo": "auto"}))
-            raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            # The first frame after connecting is the server's own `meta_event/lifecycle`
+            # greeting, not the answer. Taking it as the answer is how a connected QQ reads
+            # as `ok` with an empty account — and the adapter then gets written blank.
+            deadline = asyncio.get_running_loop().time() + timeout
+            payload: dict[str, Any] = {}
+            while asyncio.get_running_loop().time() < deadline:
+                raw = await asyncio.wait_for(
+                    ws.recv(), timeout=max(0.5, deadline - asyncio.get_running_loop().time())
+                )
+                try:
+                    frame = json.loads(raw)
+                except ValueError:
+                    return {"ok": False, "error": "not-json"}
+                if not isinstance(frame, dict) or frame.get("post_type"):
+                    continue
+                payload = frame
+                break
     except Exception as exc:  # websockets raises a wide family: refused, timeout, protocol
         return {"ok": False, "error": type(exc).__name__}
-    try:
-        payload = json.loads(raw)
-    except ValueError:
-        return {"ok": False, "error": "not-json"}
+    if not payload:
+        return {"ok": False, "error": "no-reply"}
     if payload.get("retcode") not in (0, "0", None):
         return {"ok": False, "error": "refused"}
     data = payload.get("data") or {}
     return {
         "ok": True,
-        "account": str(data.get("user_id") or ""),
+        "account": str(data.get("user_id") or data.get("self_id") or ""),
         "nickname": str(data.get("nickname") or ""),
     }
 
