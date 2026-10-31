@@ -1,4 +1,4 @@
-﻿# Browser-automation scratch. `playwright-cli` writes snapshots and screenshots here
+# Browser-automation scratch. `playwright-cli` writes snapshots and screenshots here
 # during panel verification; they are session artifacts, not sources.
 .playwright-cli/
 
@@ -59,3 +59,6 @@ Thumbs.db
 # Scratch file used to pass a multi-line commit message on Windows, where PowerShell
 # mangles a quoted message containing straight quotes into a path error.
 .git-commit-msg.tmp
+
+# Throwaway drivers written while testing a host (never part of the project).
+.tmp-*
