@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from soapbot.core.message import EventType, MessageScene
+from soapbot.core.message import EventType, MessageScene, SegmentType
 from soapbot.core.pipeline import PipelineContext
 
 logger = logging.getLogger(__name__)
@@ -70,21 +70,36 @@ class PassiveObserver:
         # read. A blacklisted user, a refused private chat, or an anonymous peer is not
         # context, it is traffic the operator asked us to drop — remembering it would
         # quietly undo the block.
-        if ctx.halt_reason not in {"not_woken"}:
+        #
+        # ``empty_input`` is here because of how the stages are ordered: a sticker or a
+        # bare image carries no text, so ``WakeStage`` never sees a wake word and the
+        # message halts as ``not_woken`` — but ``StripWakeWordStage`` runs after the
+        # wake gate and the model stage reports the empty text as ``empty_input``. Both
+        # names describe the same message, and a group's images are exactly the context
+        # passive mode is for.
+        if ctx.halt_reason not in {"not_woken", "empty_input"}:
             return
 
         if event.scene is not MessageScene.GROUP:
             return
 
-        text = event.text.strip()
-        if len(text) < self.min_chars:
+        # ``event.text`` renders an image as the literal "[图片]", so it is never empty
+        # for a picture and the length gate below would reject a bare image as "too
+        # short". Measure the words the sender actually typed instead.
+        words = "".join(
+            str(seg.data.get("text", ""))
+            for seg in event.segments
+            if seg.type is SegmentType.TEXT
+        ).strip()
+        images = event.images
+        if len(words) < self.min_chars and not images:
             return
 
         try:
             await self.memory.archive_message(
                 session_key=event.session_key,
                 role="user",
-                content=text,
+                content=event.text.strip() or f"[{len(images)} 张图片]",
                 adapter=event.adapter,
                 scene=str(event.scene),
                 group_id=event.group_id,
