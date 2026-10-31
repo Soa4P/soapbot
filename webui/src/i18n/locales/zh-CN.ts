@@ -585,6 +585,14 @@ export default {
   'napcat.showQr': '显示登录二维码',
   'napcat.openWebui': '打开 NapCat WebUI',
   'napcat.qrHint': '用手机 QQ 扫码，扫完这里会自动变成「已登录」。',
+  'napcat.connect': '自动连上 QQ',
+  'napcat.connected': '已把接入写进配置（QQ {account}）。重启面板后生效。',
+  'napcat.alreadyConnected': '配置里已经有这条接入了，不用重复写。',
+  'napcat.connectNotReady': '还没检测到已登录的 QQ：先扫码。',
+  'napcat.restart': '重启面板',
+  'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
+  'napcat.restartManual':
+    '这个进程不是由 systemd 或容器托管的，无法自己重启：请在服务器上执行 systemctl restart soapbot（或 docker restart <容器名>）。',
   'napcat.qrNotReady': '二维码还没准备好：等它启动完再点一次。',
 
   // ------------------------------------------------------------ 扫描本机协议端
