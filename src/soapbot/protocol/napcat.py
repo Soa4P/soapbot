@@ -395,6 +395,36 @@ def _napcat_config_dirs() -> list[Path]:
     return dirs
 
 
+def onebot_access_token(account: str = "", port: int | None = None) -> str:
+    """The ``token`` our OneBot server was configured with (``""`` means none).
+
+    The adapter table asks for an access token and the form renders an empty box, which reads
+    "you must invent a secret" — when the honest answer is "whatever NapCat's entry says",
+    and usually that is nothing. Reading it from the same file we write keeps the two ends
+    from ever disagreeing.
+    """
+    target_port = port or settings.napcat_ws_port
+    for base in _napcat_config_dirs():
+        try:
+            names = list(base.glob("onebot11_*.json"))
+        except OSError:
+            continue
+        for path in names:
+            if account and account not in path.name:
+                continue
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            servers = (document.get("network") or {}).get("websocketServers") or []
+            for entry in servers:
+                if not isinstance(entry, dict) or entry.get("port") != target_port:
+                    continue
+                token = entry.get("token")
+                return str(token) if token else ""
+    return ""
+
+
 def ensure_onebot_server(account: str, port: int | None = None) -> dict[str, Any]:
     """Give NapCat a loopback OneBot WebSocket server, because a fresh install has none.
 

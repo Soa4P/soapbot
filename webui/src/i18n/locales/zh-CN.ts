@@ -661,6 +661,10 @@ export default {
   'adapters.hint.host': 'reverse 时用：本服务监听的地址。127.0.0.1 = 只收本机连接；0.0.0.0 = 也收其他机器',
   'adapters.hint.port': 'reverse 时用：本服务监听的端口，NapCat 的「WebSocket 客户端」连的就是它',
   'adapters.hint.token': '两边必须完全一致；两边都留空 = 不校验 token',
+  'adapters.hint.tokenKnown':
+    '这台机器上的 NapCat 这条 OneBot 服务器设的 token 是「{token}」，已自动填好；保持两边一致即可。',
+  'adapters.hint.tokenEmpty':
+    '这台机器上的 NapCat 这条 OneBot 服务器没设 token（留空即可，留空 = 不校验）。要设 token 就在 NapCat 和这里填同一个值。',
 
   // -------------------------------------------------- 对面（NapCat）要填的那一行
   'adapters.targetLabelForward': 'NapCat 的「WebSocket 服务器」要开成：',
