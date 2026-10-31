@@ -645,6 +645,16 @@ export default {
 
   // ---------------------------------------------------------- 首次运行检查
   'setup.title': '首次运行检查',
+  // 三段话是给「什么都没部署过」的人看的：先说手要怎么动，再说哪几项还是红的。
+  'setup.stepsTitle': '三步走（没部署过也照样能做）',
+  'setup.step1':
+    '① 弄一把模型 Key：DeepSeek 的在 platform.deepseek.com/api_keys 申请，充几块钱就够；想用通义/OpenAI/本地 Ollama 也行。',
+  'setup.step2':
+    '② 装 NapCat 并登录机器人自己的 QQ（napcat.napneko.icu）。装完在它的「网络配置」里开一个 WebSocket 服务器，地址就是默认的这个：',
+  'setup.step3':
+    '③ 回第 07 页，Provider 和接入两行各点一次「测试」：一个显示「可达」，另一个显示「已握手，OneBot 有应答」，然后去 QQ 里发一句话。',
+  'setup.copy': '复制',
+  'setup.copied': '已复制',
   'setup.hint': '五项都通过后这张卡会自己消失。每一项都能直接跳到要改的地方。',
   'setup.dismiss': '不再显示',
   'setup.ok': '通过',

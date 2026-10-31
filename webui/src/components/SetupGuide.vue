@@ -123,6 +123,33 @@ const items = computed<Item[]>(() => [
   },
 ])
 
+/* ------------------------------------------------------------------ the beginner path */
+/*
+ * The checklist answers "what is still missing". Someone who has never deployed anything
+ * needs a different question answered — "what do I do, in order, with my hands" — and the
+ * two are not the same list: the checklist has five rows, three of which only make sense
+ * once the first two are done.
+ *
+ * `ws://127.0.0.1:3001` is the value NapCat's own "WebSocket server" listens on by default,
+ * which makes forward mode the only address a beginner can use without changing anything
+ * in NapCat. It is here, copyable, instead of buried in a table row on another page.
+ */
+const NAPCAT_DEFAULT = 'ws://127.0.0.1:3001'
+const copied = ref(false)
+
+async function copyAddress(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(NAPCAT_DEFAULT)
+    copied.value = true
+    window.setTimeout(() => {
+      copied.value = false
+    }, 2000)
+  } catch {
+    // Clipboard needs a secure context; the text is on screen and selectable either way.
+    copied.value = false
+  }
+}
+
 const failed = computed(() => items.value.filter((item) => !item.ok).length)
 const passed = computed(() => items.value.length - failed.value)
 
@@ -143,6 +170,26 @@ const visible = computed(() => !dismissed.value && failed.value > 0)
     </div>
     <div class="panel__body">
       <p class="hint" style="margin: 0 0 10px">{{ t('setup.hint') }}</p>
+
+      <!-- Before the checklist, because a checklist tells you what is wrong and this tells
+           you what to do with your hands. The address is copyable here so a first-time
+           operator does not have to find it in a table on another page. -->
+      <div class="steps">
+        <h3>{{ t('setup.stepsTitle') }}</h3>
+        <ol>
+          <li>{{ t('setup.step1') }}</li>
+          <li>
+            {{ t('setup.step2') }}
+            <span class="steps__addr">
+              <code>{{ NAPCAT_DEFAULT }}</code>
+              <button class="btn ghost" type="button" @click="copyAddress">
+                {{ copied ? t('setup.copied') : t('setup.copy') }}
+              </button>
+            </span>
+          </li>
+          <li>{{ t('setup.step3') }}</li>
+        </ol>
+      </div>
       <ul class="setup">
         <li v-for="item in items" :key="item.key" class="setup__item">
           <span class="pill" :class="item.ok ? 'ok' : 'bad'">
@@ -194,6 +241,35 @@ const visible = computed(() => !dismissed.value && failed.value > 0)
 
 .setup__label {
   font-size: 13px;
+}
+
+.steps {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px 14px;
+  margin: 0 0 12px;
+}
+.steps h3 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+.steps ol {
+  margin: 4px 0 0 20px;
+  padding: 0;
+}
+.steps li {
+  margin: 6px 0;
+}
+.steps__addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+}
+.steps__addr code {
+  font-family: var(--mono);
+  user-select: all;
 }
 
 /* The path and the count are the actionable part; keep them from pushing the button
