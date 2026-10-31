@@ -14,6 +14,7 @@ rather than invented, because two of the three were wrong when guessed:
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,60 @@ def test_docker_is_installed_only_where_the_package_name_is_known() -> None:
     assert napcat.install_docker_command("Debian")[0] == "apt-get"
     assert napcat.install_docker_command("fedora")[:2] == ["dnf", "install"]
     assert napcat.install_docker_command("gentoo") is None
+
+
+def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
+    """Measured against a live NapCat: the first frame is its `meta_event/lifecycle`
+    greeting. Treating it as the answer made a connected QQ look logged in with an empty
+    account, and the adapter then got written blank."""
+
+    frames = [
+        json.dumps(
+            {
+                "time": 1,
+                "self_id": 2268360864,
+                "post_type": "meta_event",
+                "meta_event_type": "lifecycle",
+                "sub_type": "connect",
+            }
+        ),
+        json.dumps(
+            {
+                "status": "ok",
+                "retcode": 0,
+                "data": {"user_id": 2268360864, "nickname": "Deceaspe"},
+                "echo": "auto",
+            }
+        ),
+    ]
+
+    class _FakeWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def send(self, _message: str) -> None:
+            return None
+
+        async def recv(self) -> str:
+            return frames.pop(0)
+
+    def fake_connect(_url: str, **_kwargs):
+        return _FakeWebSocket()
+
+    # `connect` is imported inside the function, so patch it where it is looked up.
+    from websockets.asyncio import client as ws_client
+
+    monkeypatch.setattr(ws_client, "connect", fake_connect)
+
+    import asyncio
+
+    result = asyncio.run(napcat.probe_onebot())
+    assert result["ok"] is True
+    assert result["account"] == "2268360864"
+    assert result["nickname"] == "Deceaspe"
 
 
 def test_connecting_writes_the_adapter_it_just_probed(monkeypatch, tmp_path: Path) -> None:
