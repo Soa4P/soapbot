@@ -24,6 +24,7 @@ the container it ships changes too, and this module only has to keep matching it
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -93,6 +94,12 @@ def container_status() -> dict[str, Any]:
     return {"docker": True, "exists": True, "status": found.stdout.strip() or "unknown"}
 
 
+def _owns_container() -> bool:
+    """Was this container created by us? Checks the label, not the name."""
+    found = _docker("inspect", "-f", '{{ index .Config.Labels "soapbot.protocol" }}', CONTAINER)
+    return found.returncode == 0 and found.stdout.strip() == "napcat"
+
+
 def config_dir() -> Path:
     """Where NapCat's own config lives, on the host side of the bind mount."""
     return settings.data_dir / "napcat" / "config"
@@ -125,6 +132,10 @@ def start_container() -> dict[str, Any]:
         return {"ok": False, "error": "no-docker"}
 
     state = container_status()
+    if state["exists"] and not _owns_container():
+        # Same lesson as the systemd unit: a container with this name may belong to an
+        # earlier deployment. Starting it would run somebody's QQ session under our ports.
+        return {"ok": False, "error": "container-name-taken"}
     if state["exists"] and state["status"] == "running":
         return {"ok": True, "started": False, "status": "running"}
     if state["exists"]:
@@ -143,6 +154,9 @@ def start_container() -> dict[str, Any]:
         CONTAINER,
         "--restart",
         "unless-stopped",
+        # Marks it as ours, so a later start never adopts a container someone else made.
+        "--label",
+        "soapbot.protocol=napcat",
         "-p",
         f"127.0.0.1:{WS_PORT}:{WS_PORT}",
         "-p",
@@ -208,16 +222,29 @@ async def login_token() -> str:
     return ""
 
 
-async def qr_code() -> dict[str, Any]:
+async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
     """The login QR **URL**, not an image.
 
     Measured against the running container: ``GetQQLoginQrcode`` returns
     ``{"data": {"qrcode": "https://txz.qq.com/p?k=…"}}`` — the WebUI draws that URL into a
     QR in the browser. Assuming a base64 PNG produced an empty screen and a 68-character
     "image"; returning the URL and letting the panel render it is both correct and smaller.
+
+    ``wait_seconds`` exists because the honest sequence is "press Start, press Show QR" and
+    the container needs the better part of a minute before its WebUI answers. Returning 409
+    instantly turned that normal race into an error the operator had to retry by hand.
     """
-    try:
+    credential = ""
+    with contextlib.suppress(httpx.HTTPError, OSError):
         credential = await login_token()
+    if not credential and wait_seconds > 0:
+        await wait_until_ready(wait_seconds)
+        with contextlib.suppress(httpx.HTTPError, OSError):
+            credential = await login_token()
+    if not credential:
+        return {"ok": False, "error": "webui-not-ready"}
+
+    try:
         payload = await _webui_post(
             "/api/QQLogin/GetQQLoginQrcode", {"qrcode": True}, token=credential
         )
