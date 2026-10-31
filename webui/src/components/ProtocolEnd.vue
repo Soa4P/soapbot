@@ -141,8 +141,17 @@ async function connect(): Promise<void> {
       // Already correct: nothing to restart, nothing to explain.
       connectNote.value = t('napcat.alreadyConnected')
     }
-  } catch {
-    connectNote.value = t('napcat.connectNotReady')
+  } catch (err) {
+    // The common wall after a scan: NapCat is logged in but has no OneBot server to connect
+    // to. The backend writes that config; the person needs to know a restart applies it.
+    const reason = (err as { message?: string }).message ?? ''
+    connectNote.value = reason.includes('onebot-server-missing')
+      ? t('napcat.onebotServerMissing')
+      : t('napcat.connectNotReady')
+    if (reason.includes('onebot-server-missing')) {
+      needsRestart.value = true
+      await refresh()
+    }
   } finally {
     busy.value = false
   }
