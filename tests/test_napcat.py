@@ -120,6 +120,26 @@ def test_login_state_reports_who_is_online(monkeypatch) -> None:
     assert state["nickname"] == "Deceaspe"
 
 
+def test_access_token_is_read_from_the_server_we_wrote(tmp_path, monkeypatch) -> None:
+    """The adapter table must not ask the operator for a secret the panel already knows."""
+    import json
+
+    config = tmp_path / "napcat" / "config"
+    config.mkdir(parents=True)
+    (config / "onebot11_2268360864.json").write_text(
+        json.dumps({"network": {"websocketServers": [{"port": 3001, "token": "s3cret"}]}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(napcat, "config_dir", lambda: config)
+    monkeypatch.setattr(napcat.settings, "napcat_home", None)
+    monkeypatch.setattr(
+        napcat, "_napcat_config_dirs", lambda: [path for path in [config] if path.is_dir()]
+    )
+
+    assert napcat.onebot_access_token("2268360864", port=3001) == "s3cret"
+    assert napcat.onebot_access_token("2268360864", port=3999) == ""
+
+
 def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, monkeypatch) -> None:
     """Measured on the Windows box: scanned in, avatar visible, every network array empty.
 
@@ -130,6 +150,9 @@ def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, mon
 
     config = tmp_path / "napcat" / "config"
     config.mkdir(parents=True)
+    monkeypatch.setattr(
+        napcat, "_napcat_config_dirs", lambda: [path for path in [config] if path.is_dir()]
+    )
     path = config / "onebot11_2268360864.json"
     path.write_text(json.dumps({"network": {"websocketServers": []}}), encoding="utf-8")
     monkeypatch.setattr(napcat, "config_dir", lambda: config)

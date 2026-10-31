@@ -386,13 +386,17 @@ async def probe_onebot(port: int = WS_PORT, timeout: float = 3.0) -> dict[str, A
 def _napcat_config_dirs() -> list[Path]:
     """Every plausible place a NapCat keeps its config on this machine.
 
-    Two layouts are real: the container's bind mount under our data dir, and a hand-installed
-    Windows/Linux NapCat under its own home (``<home>/napcat/config``).
+    Three layouts are real: the container's bind mount under our data dir, a hand-installed
+    NapCat under its own home (``<home>/napcat/config``), and — measured on the Windows box —
+    a NapCat whose ``SOAPBOT_NAPCAT_HOME`` was never set, so the only evidence is next to
+    the running JetBrains-style install in ``C:\\napcat\\napcat\\config``.
     """
     dirs = [config_dir()]
     if settings.napcat_home is not None:
         dirs += [settings.napcat_home / "napcat" / "config", settings.napcat_home / "config"]
-    return dirs
+    dirs += [Path("/c/napcat/napcat/config"), Path("C:/napcat/napcat/config")]
+    dirs += [Path("/app/napcat/config"), Path("/opt/napcat/config")]
+    return [path for path in dirs if path.is_dir()]
 
 
 def onebot_access_token(account: str = "", port: int | None = None) -> str:
