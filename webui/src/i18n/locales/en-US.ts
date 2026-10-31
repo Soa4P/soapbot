@@ -679,6 +679,21 @@ export default {
   'overview.runtimeOffHint':
     'That is a setting from install time: `SOAPBOT_ENABLE_RUNTIME=false`. The panel works, edits config and can show the login QR, but it will not connect to QQ or answer messages. To make it work: set that line to `true` in `.env`, restart the service, then fill in the Provider and QQ adapter on page 07.',
 
+  'config.presetKey.deepseek': 'platform.deepseek.com/api_keys',
+  'config.presetKey.qwen': 'bailian.console.aliyun.com',
+  'config.presetKey.openai': 'platform.openai.com/api-keys',
+  'config.presetKey.ollama': 'no key needed locally — any non-empty value will do',
+  'config.presetLabel': 'Fill it in for me (only the key is left):',
+  'config.presetHint':
+    'Get the key at {site}; the model is preset to {model} — any id listed by its /v1/models works. Press Test to check reachability, then Preview changes → Write.',
+  'config.hint.id': 'ID: any name you like; it appears in logs and on this page.',
+  'config.hint.baseUrl':
+    'Base URL: the service address, usually ending in /v1. DeepSeek is https://api.deepseek.com/v1; a local Ollama is http://127.0.0.1:11434/v1. Dropping /v1 is the usual cause of a 404.',
+  'config.hint.model':
+    'Model: the id the provider lists — not an alias, not a display name. deepseek-flash for DeepSeek, qwen-plus for Qwen.',
+  'config.hint.key':
+    'API Key: paste the string, or write env:VAR_NAME to keep it in .env. The Test button never sends the key.',
+
   'setup.title': 'First-run checks',
   'setup.stepsTitle': 'Three steps (works even if you have never deployed anything)',
   'setup.step1':
@@ -694,10 +709,10 @@ export default {
   'setup.ok': 'pass',
   'setup.todo': 'to do',
   'setup.go': 'Fix it',
-  'setup.providers': 'Provider configured',
+  'setup.providers': 'Provider (model)',
   'setup.providersOk': '{n} provider(s) available for model calls.',
   'setup.providersMissing': 'No provider: the model stage is disabled, so the bot cannot reply at all.',
-  'setup.adapters': 'QQ adapter configured',
+  'setup.adapters': 'QQ adapter',
   'setup.adaptersOk': '{n} adapter(s) written to the config.',
   'setup.adaptersMissing': 'No adapter: the service runs, but no QQ message can reach it.',
   'setup.online': 'Adapter online',
