@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import {
   api,
   type DiffResult,
+  type PersonaCard,
   type ProbeResult,
   type ProviderEntry,
   type ProvidersDocument,
@@ -28,10 +29,12 @@ import { useAsync } from '@/lib/useAsync'
  * read, diff, apply — so the operator sees the exact lines that will change and confirms
  * them, and the change is written to the audit log. A file edited over SSH had neither.
  *
- * The personas section stays read-only in this pass. Persona cards are Markdown with
- * front matter, and a form that renders them as fields would silently drop the prose
- * between the front matter and the body — a worse outcome than leaving the section
- * informative but not editable.
+ * The personas section is editable, and the objection that kept it read-only ("a form
+ * that renders cards as fields would drop the prose body") is answered by not rendering
+ * them as fields: the prompt is a textarea holding the body verbatim, the front matter
+ * is a handful of inputs, and the server re-serialises with one function that
+ * round-trips every key the loader reads. A card edited over SSH was the only editor
+ * this feature had.
  */
 const providers = useAsync(() => api.providers())
 const personas = useAsync(() => api.personas())
@@ -44,6 +47,97 @@ const binding = computed<any>(() => personas.data.value?.binding ?? {})
 const expanded = ref('')
 function toggle(id: string): void {
   expanded.value = expanded.value === id ? '' : id
+}
+
+/* ------------------------------------------------------------- persona editor */
+
+/** The card being edited. `null` means the editor is closed. */
+const card = ref<PersonaCard | null>(null)
+const cardLoading = ref(false)
+const cardBusy = ref(false)
+const cardError = ref('')
+const cardNote = ref('')
+
+function blankCard(): PersonaCard {
+  return {
+    id: '',
+    name: '',
+    system_prompt: '',
+    style: '',
+    wake_words: [],
+    banned_words: [],
+    max_reply_chars: 500,
+    temperature: null,
+    enabled: true,
+    locale: '',
+  }
+}
+
+/** Lists are edited as comma-separated text: a chip editor for two rarely-used fields
+ * is more UI than the fields are worth, and the server trims and de-duplicates. */
+const wakeText = ref('')
+const bannedText = ref('')
+
+function splitList(text: string): string[] {
+  return text
+    .split(/[,，、\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+async function openCard(id: string): Promise<void> {
+  cardError.value = ''
+  cardNote.value = ''
+  cardLoading.value = true
+  try {
+    // Always re-read: the list endpoint truncates the prompt, and editing a truncated
+    // prompt would save the truncation back over the real card.
+    const full = await api.persona(id)
+    card.value = full
+    wakeText.value = (full.wake_words ?? []).join(', ')
+    bannedText.value = (full.banned_words ?? []).join(', ')
+  } catch (error) {
+    cardError.value = (error as Error).message
+  } finally {
+    cardLoading.value = false
+  }
+}
+
+function newCard(): void {
+  card.value = blankCard()
+  wakeText.value = ''
+  bannedText.value = ''
+  cardError.value = ''
+  cardNote.value = ''
+}
+
+function closeCard(): void {
+  card.value = null
+  cardError.value = ''
+  cardNote.value = ''
+}
+
+async function saveCard(): Promise<void> {
+  if (!card.value) return
+  cardBusy.value = true
+  cardError.value = ''
+  cardNote.value = ''
+  try {
+    const body = await api.writePersona({
+      ...card.value,
+      wake_words: splitList(wakeText.value),
+      banned_words: splitList(bannedText.value),
+    })
+    cardNote.value = t('config.personaSaved', { file: body.file })
+    await personas.reload()
+    // Keep the editor open on what was actually written, so the operator can keep
+    // editing without reopening and wondering whether it took.
+    card.value = { ...card.value, version: body.version }
+  } catch (error) {
+    cardError.value = (error as Error).message
+  } finally {
+    cardBusy.value = false
+  }
 }
 
 function statFor(id: string): any {
@@ -616,6 +710,10 @@ async function applyChanges(): Promise<void> {
     <div class="panel__head">
       <h2>{{ t('overview.personas') }}</h2>
       <span class="hint">{{ t('config.personaHint') }}</span>
+      <span class="strip__spacer" />
+      <button class="btn ghost" type="button" @click="newCard">
+        {{ t('config.personaNew') }}
+      </button>
     </div>
     <div class="panel__body flush">
       <div v-if="!personaRows.length" class="empty">
@@ -632,6 +730,7 @@ async function applyChanges(): Promise<void> {
               <th scope="col">{{ t('config.wakeWords') }}</th>
               <th scope="col" class="num">{{ t('config.maxChars') }}</th>
               <th scope="col" class="num">{{ t('config.temperature') }}</th>
+              <th scope="col"><span class="visually-hidden">{{ t('config.personaEdit') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -655,9 +754,14 @@ async function applyChanges(): Promise<void> {
                 <td>{{ row.wake_words.join(' / ') || '—' }}</td>
                 <td class="num">{{ row.max_reply_chars || t('config.default') }}</td>
                 <td class="num">{{ row.temperature ?? t('config.default') }}</td>
+                <td>
+                  <button class="btn ghost" type="button" @click.stop="openCard(row.id)">
+                    {{ t('config.personaEdit') }}
+                  </button>
+                </td>
               </tr>
               <tr v-if="expanded === row.id">
-                <td colspan="6" style="background: var(--surface-3)">
+                <td colspan="7" style="background: var(--surface-3)">
                   <div class="hint" style="margin-bottom: 6px">
                     {{ row.system_prompt_truncated
                       ? t('config.systemPromptTruncated')
@@ -679,6 +783,82 @@ async function applyChanges(): Promise<void> {
             </template>
           </tbody>
         </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- The editor edits the *card*, not a form-shaped approximation of it: the prompt is
+       a textarea holding the Markdown body verbatim. -->
+  <section v-if="card" class="panel">
+    <div class="panel__head">
+      <h2>{{ card.id ? t('config.personaEditTitle', { id: card.id }) : t('config.personaNewTitle') }}</h2>
+      <span class="strip__spacer" />
+      <button class="btn ghost" type="button" @click="closeCard">{{ t('common.cancel') }}</button>
+    </div>
+    <div class="panel__body">
+      <div v-if="cardLoading" class="hint">{{ t('common.loading') }}</div>
+      <div v-else class="grid cols-2">
+        <label class="field-label">
+          <span class="eyebrow">id</span>
+          <input v-model="card.id" class="field" :disabled="!!card.version" placeholder="grumpy" />
+          <span class="hint">{{ t('config.personaIdHint') }}</span>
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('common.name') }}</span>
+          <input v-model="card.name" class="field" :placeholder="t('config.personaNamePlaceholder')" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.style') }}</span>
+          <input v-model="card.style" class="field" :placeholder="t('config.personaStylePlaceholder')" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.wakeWords') }}</span>
+          <input v-model="wakeText" class="field" :placeholder="t('config.personaListPlaceholder')" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.bannedWords') }}</span>
+          <input v-model="bannedText" class="field" :placeholder="t('config.personaListPlaceholder')" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.maxChars') }}</span>
+          <input v-model.number="card.max_reply_chars" class="field" type="number" min="0" max="8000" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.temperature') }}</span>
+          <input v-model.number="card.temperature" class="field" type="number" step="0.1" min="0" max="2" />
+        </label>
+        <label class="field-label">
+          <span class="eyebrow">{{ t('config.locale') }}</span>
+          <select v-model="card.locale" class="field">
+            <option value="">{{ t('config.default') }}</option>
+            <option value="zh-CN">zh-CN</option>
+            <option value="en-US">en-US</option>
+          </select>
+        </label>
+        <label class="field-label" style="flex-direction: row; align-items: center; gap: 8px">
+          <input v-model="card.enabled" type="checkbox" />
+          <span>{{ t('config.personaEnabled') }}</span>
+        </label>
+      </div>
+
+      <label class="field-label" style="margin-top: 12px">
+        <span class="eyebrow">{{ t('config.systemPrompt') }}</span>
+        <textarea
+          v-model="card.system_prompt"
+          class="field"
+          rows="14"
+          style="font-family: var(--mono); font-size: 12px; line-height: 1.6; resize: vertical"
+          :placeholder="t('config.personaPromptPlaceholder')"
+        />
+        <span class="hint">{{ t('config.personaPromptHint') }}</span>
+      </label>
+
+      <div class="row" style="margin-top: 12px">
+        <button class="btn" type="button" :disabled="cardBusy || !card.id" @click="saveCard">
+          {{ cardBusy ? t('config.saving') : t('config.personaSave') }}
+        </button>
+        <span v-if="cardNote" class="hint" style="color: var(--ok)">{{ cardNote }}</span>
+        <span v-if="cardError" class="hint" style="color: var(--danger)">{{ cardError }}</span>
       </div>
     </div>
   </section>

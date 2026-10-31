@@ -392,7 +392,9 @@ soapbot/
 | `ALLOW_UNTRUSTED_PLUGINS` | `false` | 允许 `trust: untrusted` 插件持有敏感能力 |
 | `ENABLE_RUNTIME` | `true` | 关掉则只提供 HTTP API |
 | `ENABLE_BUDGET` / `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
-| `STREAM_REPLY` | `false` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11） |
+| `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |
+| `HISTORY_TURNS` | `16` | 回放进提示词的历史条数。调大会让上下文更容易超出预算，从而在每次回复前多一次摘要调用 |
+| `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |
 | `VOICE_ENABLED` | `false` | 入站语音转写。需要 Provider 声明 `transcribe` 槽位 |
 | `VOICE_TTS_ENABLED` / `VOICE_TTS_VOICE` | `false` / `zh-CN-XiaoxiaoNeural` | 回复转语音。需要 `pip install -e ".[voice]"` |
 | `VOICE_ALLOW_HOSTS` | 空 | 允许下载音频的内网主机，逗号分隔。**同机部署 NapCat 必须配**，见下 |

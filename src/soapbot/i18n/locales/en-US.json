@@ -1,5 +1,5 @@
 {
-    "injection.refusal": "I can't go there — could you put that another way?",
+    "injection.refusal": "This one broke the rules. Logged, and I cannot answer it.",
     "llm.apology_retry": "Sorry, that answer came out wrong. Let me put it differently.",
     "voice.placeholder": "[voice]",
     "voice.transcript": "[voice transcript] {text}",
@@ -9,6 +9,7 @@
     "api.doc_id_invalid": "doc_id may contain only letters, digits, underscores and hyphens",
     "api.content_empty": "Nothing to store: the content was empty",
     "api.write_failed": "Write failed; the file was left unchanged.",
+    "api.personaIdInvalid": "A persona id may contain only letters, digits, underscore and hyphen (it becomes a file name).",
     "api.authorityLastOwner": "At least one owner must remain, or nobody can edit permissions again.",
     "api.trace_too_long": "trace id is too long",
     "api.trace_not_found": "trace is no longer in the buffer (later messages may have pushed it out)",

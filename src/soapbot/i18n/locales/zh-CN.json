@@ -1,5 +1,5 @@
 {
-    "injection.refusal": "这个话题我没法接，换个说法吧。",
+    "injection.refusal": "这条触犯了规则，已记录，无法回答。",
     "llm.apology_retry": "抱歉，刚才的回答有问题，我重新组织一下。",
     "voice.placeholder": "[语音]",
     "voice.transcript": "[语音转写] {text}",
@@ -9,6 +9,7 @@
     "api.doc_id_invalid": "doc_id 只能包含字母、数字、下划线和短横线",
     "api.content_empty": "内容为空，未写入任何片段",
     "api.write_failed": "写入失败，文件未被修改。",
+    "api.personaIdInvalid": "人格卡 id 只能包含字母、数字、下划线和短横线（它会成为文件名）。",
     "api.authorityLastOwner": "至少要保留一个 owner，否则没有人能再改权限。",
     "api.trace_too_long": "trace id 过长",
     "api.trace_not_found": "trace 不在缓冲区中（可能已被后续消息挤出）",

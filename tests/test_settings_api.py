@@ -47,6 +47,9 @@ def test_read_reports_values_and_capabilities(client: TestClient) -> None:
     body = client.get("/api/settings").json()
     assert body["writable"] == [
         "default_locale",
+        "history_turns",
+        "max_prompt_tokens",
+        "stream_reply",
         "voice_enabled",
         "voice_tts_enabled",
         "voice_tts_voice",

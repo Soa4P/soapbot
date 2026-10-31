@@ -455,7 +455,10 @@ async def test_a_spoken_injection_is_quarantined_like_typed_text() -> None:
     result = await stage.run(ctx)
 
     assert ctx.extras.get("injection_blocked") is True
-    assert ctx.model_reply == INJECTION_REFUSAL
+    # The refusal now names what matched, so the group can see *why* it was refused
+    # instead of reading silence as "the bot ignored me".
+    assert ctx.model_reply.startswith(INJECTION_REFUSAL)
+    assert "命中规则" in ctx.model_reply
     assert ctx.extras["voice"]["blocked"] == 1
     # Not a halt: the refusal still has to reach the group.
     assert result.halt is False
