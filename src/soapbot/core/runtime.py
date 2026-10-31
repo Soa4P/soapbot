@@ -174,6 +174,25 @@ class BotRuntime:
             await self._on_notice(event)
             return
 
+        # A crashed message used to leave no trace at all: it returned before
+        # publishing, so the panel's "failed" bar could never move and the one
+        # trace an operator most needs to see — the one that blew up — was the
+        # only one missing. ``dispatch`` records it before returning.
+        await self.dispatch(event)
+
+    async def dispatch(self, event: IncomingMessage) -> PipelineContext | None:
+        """Run one message through the pipeline and its observers. Returns the context.
+
+        Split out of ``_on_event`` so a caller that already has an event — a test, the
+        CLI's dry-run, the panel's "try this message" box — gets the same path the
+        adapter does, including the bus publish. Calling ``pipeline.run`` directly
+        skips the publish, and every observer (traces, passive mode) silently does
+        nothing: exactly the failure mode where a feature looks wired and never runs.
+        """
+        adapter = self.adapters.get(event.adapter)
+        if adapter is None:
+            logger.warning("event from unknown adapter %s", event.adapter)
+            return None
         async with self.locks.get(event.session_key):
             ctx = PipelineContext(event=event, adapter=adapter, locale=self.locale)
             try:
@@ -181,22 +200,15 @@ class BotRuntime:
             except Exception:
                 self.metrics["failed"] += 1
                 logger.exception("pipeline crashed trace=%s", event.trace_id)
-                # A crashed message used to leave no trace at all: it returned before
-                # publishing, so the panel's "failed" bar could never move and the one
-                # trace an operator most needs to see — the one that blew up — was the
-                # only one missing. Record it, then stop.
                 if self.traces is not None:
                     self.traces.note_failure(ctx)
-                return
-
-            # Counters are bumped before publishing so an observer that reads
-            # metrics after seeing the sent message finds them consistent.
+                return ctx
             if ctx.halted:
                 self.metrics["halted"] += 1
             else:
                 self.metrics["handled"] += 1
-
             await self.bus.publish("message.processed", ctx)
+            return ctx
 
     async def _on_notice(self, event: IncomingMessage) -> None:
         """Fan a platform notice out to plugin hooks.
