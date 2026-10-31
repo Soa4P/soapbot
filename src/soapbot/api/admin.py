@@ -412,7 +412,9 @@ async def write_persona(
 
     try:
         path = store.save(persona)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
+        # RuntimeError is "this store has nowhere to write" — a wiring fault, not a
+        # client error, but it must not escape as a bare 500 with no audit trail.
         get_audit_log().record(
             kind="config",
             action="persona_write",

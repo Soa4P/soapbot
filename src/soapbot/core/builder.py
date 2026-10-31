@@ -65,12 +65,20 @@ logger = logging.getLogger(__name__)
 
 
 def build_persona_store(directory: Path | None = None) -> PersonaStore:
+    """Load the cards, creating the directory if it is missing.
+
+    Creating it rather than warning about it is what makes the panel's editor work on a
+    fresh install. ``load_directory`` is also what records the directory on the store,
+    and a store without one cannot save — so the old ``if target.exists()`` branch did
+    not merely skip the load, it produced a store that refused every write with
+    "persona store has no directory to write to". A first-run box has no cards and no
+    directory, which is exactly when an operator wants to write the first one.
+    """
     store = PersonaStore()
     target = directory or (settings.config_dir / "personas")
-    if target.exists():
-        store.load_directory(target)
-    else:
-        logger.warning("persona directory not found: %s", target)
+    store.load_directory(target)
+    if not store.all():
+        logger.info("no persona cards yet in %s; the panel can create the first one", target)
     return store
 
 
