@@ -680,10 +680,11 @@ export default {
     'That is a setting from install time: `SOAPBOT_ENABLE_RUNTIME=false`. The panel works, edits config and can show the login QR, but it will not connect to QQ or answer messages. To make it work: set that line to `true` in `.env`, restart the service, then fill in the Provider and QQ adapter on page 07.',
 
   'config.modelsList': 'List models',
+  'config.modelsSendsKey': '(this one sends the key to the provider, which is what verifies it)',
   'config.modelsBusy': 'asking…',
   'config.modelsEmpty': 'the endpoint returned no model list',
   'config.modelsKeyRejected':
-    '401/403: the provider rejected the key. Check it is complete, belongs to this provider (DeepSeek keys start with sk-), and that the account has credit.',
+    '401/403: the provider rejected the key — the same 401 Test shows, except Test only checks the address, which is why it still says "reachable". DeepSeek keys start with sk-; check the key and the account balance.',
   'config.modelsBadPath':
     '404: wrong address. API base URLs usually end in /v1 (Gemini uses /v1beta/openai, Claude /v1).',
   'config.modelsStatus':
