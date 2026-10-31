@@ -263,6 +263,18 @@ export const api = {
     request<any>(`/api/security/audit?limit=${limit}&kind=${encodeURIComponent(kind)}`),
   denials: (limit = 100) => request<any>(`/api/security/denials?limit=${limit}`),
 
+  /** Replace the QQ allow-lists. Owner-only on the server; the response carries the
+   * normalized lists back so the form shows what was actually written. */
+  writeAuthority: (payload: { owners: string[]; admins: string[]; members: string[] }) =>
+    request<{
+      ok: boolean
+      restart_required: boolean
+      owners: string[]
+      admins: string[]
+      members: string[]
+      inherited_owner: string
+    }>('/api/security/authority', { method: 'POST', body: JSON.stringify(payload) }),
+
   memorySessions: (limit = 50) => request<any>(`/api/memory/sessions?limit=${limit}`),
   memoryTimeline: (sessionKey: string, limit = 50) =>
     request<any>(

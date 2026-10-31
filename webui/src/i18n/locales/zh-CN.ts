@@ -286,6 +286,18 @@ export default {
   'security.permission': '权限',
   'security.minRole': '最低角色',
   'security.rolesAndLists': '角色与授权名单',
+  'security.add': '添加',
+  'security.saving': '保存中…',
+  'security.save': '保存名单',
+  'security.qqPlaceholder': '输入 QQ 号，如 123456789',
+  'security.qqAria': '要授权的 QQ 号',
+  'security.roleAria': '要授予的角色',
+  'security.qqInvalid': '请输入纯数字的 QQ 号。',
+  'security.lastOwnerGuard': '至少要保留一个 owner，否则没有人能再改权限。',
+  'security.authoritySaved': '已写入 .env。重启面板后生效：schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（或你的启动方式）。',
+  'security.authorityHint':
+    '改动会写进服务端的 .env（SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS），保存后需重启面板生效；first_run_owner 里的 owner 会被自动保留，防止把自己锁在门外。',
+  'security.removeAria': '把 {id} 从 {role} 中移除',
   'security.allowListHint': '名单只来自服务端配置。下面的开关决定是否信任协议端在消息里声明的角色：',
   'security.trustWarn': '开启时协议端可以在消息里声明角色 —— 仅在完全可信的传输上才应开启。',
 
