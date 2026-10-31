@@ -694,6 +694,7 @@ export default {
   'config.modelsList': '列出模型',
   'config.modelsSendsKey': '（这一下会把 Key 发给服务商，用来验证 Key 是否有效）',
   'config.modelsKeyShort': '你填的 Key 只有 {n} 个字符（DeepSeek 的是 35 个：sk- 加 32 位），很可能没复制完整。',
+  'config.keyChars': '已填 {n} 个字符（DeepSeek 的 Key 是 35 个；env:变量名 不是 Key 本身）',
   'config.modelsBusy': '查询中…',
   'config.modelsEmpty': '这个端点没有返回模型列表',
   'config.modelsKeyRejected':

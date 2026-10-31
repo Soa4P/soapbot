@@ -481,16 +481,22 @@ async function applyChanges(): Promise<void> {
               <td>
                 <!-- type="text" not "password": the value shown is already a mask or an
                      env: reference, and hiding it would stop the operator from seeing
-                     which variable this provider is wired to. -->
+                     which variable this provider is wired to.
+                     Wide, with a character count underneath: a 35-character key rendered in
+                     a 140px box looks identical to a 20-character one, and that ambiguity
+                     is what turned a paste problem into an argument about the provider. -->
                 <input
                   class="field"
-                  style="min-width: 140px"
+                  style="min-width: 220px"
                   :value="row.api_key"
                   aria-label="API Key"
                   spellcheck="false"
                   placeholder="sk-... / env:DEEPSEEK_API_KEY"
                   @input="onSecretInput(row, $event)"
                 />
+                <span class="hint" style="display: block; margin-top: 3px">
+                  {{ t('config.keyChars', { n: (row.api_key ?? '').length }) }}
+                </span>
               </td>
               <td class="num">
                 <input
