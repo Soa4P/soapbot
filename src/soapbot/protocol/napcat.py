@@ -325,11 +325,27 @@ async def login_state() -> dict[str, Any]:
     data = payload.get("data") or {}
     if not isinstance(data, dict):
         return {"ok": True, "logged_in": False, "phase": ""}
+    logged_in = bool(data.get("isLogin"))
+
+    # CheckLoginStatus says *whether*, not *who* — the account is on the login-info route.
+    # Without it the panel can only say "logged in", and the operator has to open another
+    # window to learn which of their QQ numbers just went online.
+    account = ""
+    nickname = ""
+    if logged_in:
+        with contextlib.suppress(httpx.HTTPError, OSError):
+            info = await _webui_post("/api/QQLogin/GetQQLoginInfo", {}, token=credential)
+            info_data = info.get("data") or {}
+            if isinstance(info_data, dict):
+                account = str(info_data.get("uin") or "")
+                nickname = str(info_data.get("nick") or "")
+
     return {
         "ok": True,
-        "logged_in": bool(data.get("isLogin")),
+        "logged_in": logged_in,
         "phase": str(data.get("loginPhase") or ""),
-        "account": str(data.get("uin") or ""),
+        "account": account,
+        "nickname": nickname,
     }
 
 
@@ -367,6 +383,66 @@ async def probe_onebot(port: int = WS_PORT, timeout: float = 3.0) -> dict[str, A
     }
 
 
+def _napcat_config_dirs() -> list[Path]:
+    """Every plausible place a NapCat keeps its config on this machine.
+
+    Two layouts are real: the container's bind mount under our data dir, and a hand-installed
+    Windows/Linux NapCat under its own home (``<home>/napcat/config``).
+    """
+    dirs = [config_dir()]
+    if settings.napcat_home is not None:
+        dirs += [settings.napcat_home / "napcat" / "config", settings.napcat_home / "config"]
+    return dirs
+
+
+def ensure_onebot_server(account: str, port: int | None = None) -> dict[str, Any]:
+    """Give NapCat a loopback OneBot WebSocket server, because a fresh install has none.
+
+    Measured on a hand-installed NapCat after a successful scan: ``onebot11_<uin>.json`` had
+    every network array empty, so nothing listened on 3001 and the panel — which defines
+    "logged in" as "the OneBot port answers" — reported false while the QQ avatar was right
+    there in NapCat's own WebUI. Writing the entry is the missing half of "connect".
+    """
+    target_port = port or settings.napcat_ws_port
+    for base in _napcat_config_dirs():
+        path = base / f"onebot11_{account}.json"
+        if not path.exists():
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"ok": False, "error": "unreadable", "path": str(path)}
+        network = document.setdefault("network", {})
+        servers = network.setdefault("websocketServers", [])
+        if not isinstance(servers, list):
+            return {"ok": False, "error": "unexpected-shape", "path": str(path)}
+        entry = {
+            "name": "soapbot",
+            "enable": True,
+            "host": "127.0.0.1",
+            "port": target_port,
+            "messagePostFormat": "array",
+            "reportSelfMessage": False,
+            "token": "",
+            "debug": False,
+            "heartInterval": 30000,
+        }
+        for index, existing in enumerate(servers):
+            if isinstance(existing, dict) and (
+                existing.get("name") == "soapbot" or existing.get("port") == target_port
+            ):
+                if existing.get("enable") and existing.get("port") == target_port:
+                    return {"ok": True, "changed": False, "path": str(path)}
+                servers[index] = {**existing, **entry}
+                break
+        else:
+            servers.append(entry)
+        path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("wrote OneBot WS server %s into %s", target_port, path)
+        return {"ok": True, "changed": True, "path": str(path)}
+    return {"ok": False, "error": "config-not-found"}
+
+
 async def connect_adapter() -> dict[str, Any]:
     """Write the adapter that matches the protocol end we started.
 
@@ -378,7 +454,21 @@ async def connect_adapter() -> dict[str, Any]:
 
     probe = await probe_onebot(settings.napcat_ws_port)
     if not probe.get("ok"):
-        return {"ok": False, "error": "not-logged-in", "detail": probe.get("error", "")}
+        # Not listening yet — either the account is not scanned in, or (very commonly) it is
+        # scanned in but NapCat was never told to open a OneBot server. Ask the WebUI which
+        # it is, and write the server entry when that is the missing piece.
+        state = await login_state()
+        if not state.get("logged_in"):
+            return {"ok": False, "error": "not-logged-in", "detail": probe.get("error", "")}
+        written = ensure_onebot_server(str(state.get("account") or ""))
+        return {
+            "ok": False,
+            "error": "onebot-server-missing",
+            "detail": written,
+            "account": state.get("account", ""),
+            "nickname": state.get("nickname", ""),
+            "needs_restart": bool(written.get("changed")),
+        }
 
     path = settings.adapters_file
     document = config_write.read_document(path)

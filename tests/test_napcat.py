@@ -90,7 +90,72 @@ def test_login_state_carries_the_phase_when_not_logged_in(monkeypatch) -> None:
     import asyncio
 
     state = asyncio.run(napcat.login_state())
-    assert state == {"ok": True, "logged_in": False, "phase": "waiting_qrcode", "account": ""}
+    assert state == {
+        "ok": True,
+        "logged_in": False,
+        "phase": "waiting_qrcode",
+        "account": "",
+        "nickname": "",
+    }
+
+
+def test_login_state_reports_who_is_online(monkeypatch) -> None:
+    """The account is on a different route than the flag — the card has to show which QQ."""
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        if path == "/api/auth/login":
+            return {"code": 0, "data": {"Credential": "c"}}
+        if path == "/api/QQLogin/GetQQLoginInfo":
+            return {"code": 0, "data": {"uin": "2268360864", "nick": "Deceaspe", "online": True}}
+        return {"code": 0, "data": {"isLogin": True, "loginPhase": "ready"}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    state = asyncio.run(napcat.login_state())
+    assert state["logged_in"] is True
+    assert state["account"] == "2268360864"
+    assert state["nickname"] == "Deceaspe"
+
+
+def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, monkeypatch) -> None:
+    """Measured on the Windows box: scanned in, avatar visible, every network array empty.
+
+    The adapter has nothing to connect to, so the config entry is the missing half of
+    "connect" — and it must be idempotent, or every click rewrites the file.
+    """
+    import json
+
+    config = tmp_path / "napcat" / "config"
+    config.mkdir(parents=True)
+    path = config / "onebot11_2268360864.json"
+    path.write_text(json.dumps({"network": {"websocketServers": []}}), encoding="utf-8")
+    monkeypatch.setattr(napcat, "config_dir", lambda: config)
+    monkeypatch.setattr(napcat.settings, "napcat_home", None)
+
+    first = napcat.ensure_onebot_server("2268360864", port=3001)
+    assert first["ok"] is True and first["changed"] is True
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    servers = document["network"]["websocketServers"]
+    assert servers == [
+        {
+            "name": "soapbot",
+            "enable": True,
+            "host": "127.0.0.1",
+            "port": 3001,
+            "messagePostFormat": "array",
+            "reportSelfMessage": False,
+            "token": "",
+            "debug": False,
+            "heartInterval": 30000,
+        }
+    ]
+
+    second = napcat.ensure_onebot_server("2268360864", port=3001)
+    assert second["ok"] is True and second["changed"] is False
 
 
 def test_without_docker_the_status_says_so_instead_of_raising(monkeypatch) -> None:
