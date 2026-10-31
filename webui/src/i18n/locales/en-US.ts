@@ -650,6 +650,10 @@ export default {
   'adapters.hint.port':
     'reverse only: port this service listens on — this is what the "WebSocket client" in NapCat connects to',
   'adapters.hint.token': 'must match on both sides; empty on both = no token check',
+  'adapters.hint.tokenKnown':
+    "The NapCat on this host uses \"{token}\" for this OneBot server; it is filled in already — just keep both sides equal.",
+  'adapters.hint.tokenEmpty':
+    'The NapCat on this host sets no token for this OneBot server (leave it empty = no check). If you add one, type the same value on both sides.',
 
   // ---------------------------------------------- the line to paste on the other side
   'adapters.targetLabelForward': 'Open this as the "WebSocket server" inside NapCat:',
