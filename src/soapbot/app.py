@@ -487,7 +487,11 @@ def _mount_webui(app: FastAPI) -> None:
                 # Unknown API route: a JSON 404, not an HTML page. Returning the SPA
                 # shell here would make a typo'd endpoint look like it succeeded.
                 raise HTTPException(status_code=404, detail="Not Found")
-            return FileResponse(index)
+            # The shell names hashed assets, so caching it is how a rebuilt panel keeps
+            # showing the previous bundle: the browser reuses an old index.html that points
+            # at files which no longer exist, and the page renders empty or half-updated.
+            # That is the difference between "I shipped it" and "the operator sees it".
+            return FileResponse(index, headers={"Cache-Control": "no-store"})
 
         logger.info("serving WebUI from %s", _WEBUI_DIST)
         return
