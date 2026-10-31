@@ -581,7 +581,7 @@ export default {
   'napcat.restart': 'Restart panel',
   'napcat.restarting': 'Restarting… the page will come back in a few seconds.',
   'napcat.restartManual':
-    'This process is not supervised by systemd or a container, so it cannot restart itself: run systemctl restart soapbot (or docker restart <name>) on the host.',
+    'This process is not supervised by systemd or a container, so it cannot restart itself. On the host run: systemctl restart soapbot (Linux), docker restart <name> (container), or schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (Windows scheduled task).',
   'napcat.qrNotReady': 'The QR is not ready yet — try again once it has finished starting.',
 
   // ------------------------------------------------------ find the local protocol end
