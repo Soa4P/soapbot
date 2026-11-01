@@ -32,6 +32,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select, text
 
+from soapbot.config import settings
 from soapbot.memory.db import (
     Database,
     KnowledgeRow,
@@ -44,6 +45,27 @@ from soapbot.memory.db import (
 logger = logging.getLogger(__name__)
 
 RRF_K = 60
+
+
+def _embed_input(text: str) -> str:
+    """Bound what is sent to the embedding provider.
+
+    Two reasons, and the second is the one that bites. Cost: providers bill by token, and
+    a pasted document embedded in full is a bill nobody approved. Behaviour: models have
+    a context limit and the outcome of exceeding it differs by provider — some truncate,
+    some error, some silently return a vector of a different dimension. Truncating here
+    makes the behaviour ours and identical everywhere, and matching truncation is applied
+    to the query so a stored vector and a query vector are comparable.
+    """
+    # Honoured exactly when positive, rather than floored at some "sensible" minimum: an
+    # operator who sets 50 because that is what their provider measures in is entitled to
+    # 50. Only a non-positive value is treated as unset, since truncating to zero would
+    # silently embed an empty string.
+    limit = settings.max_embedding_chars if settings.max_embedding_chars > 0 else 2000
+    if len(text) <= limit:
+        return text
+    logger.debug("truncating embedding input from %d to %d chars", len(text), limit)
+    return text[:limit]
 
 
 class MemoryLayer(StrEnum):
@@ -232,7 +254,7 @@ class MemoryStore:
         vector: list[float] = []
         if embed and self._embedder is not None:
             try:
-                vectors = await self._embedder.embed([content])
+                vectors = await self._embedder.embed([_embed_input(content)])
                 vector = vectors[0] if vectors else []
             except Exception as exc:
                 # A memory without an embedding is still useful via BM25, so this
@@ -423,6 +445,13 @@ class MemoryStore:
         if not query.strip():
             return RecallResult(query=query)
 
+        # ``limit`` reaches here from callers, and a recalled item costs prompt tokens on
+        # every later turn. Clamped rather than trusted: the ceiling is what bounds the
+        # cost of a poisoned or simply busy scope, and it is the only place the number is
+        # enforced (a caller could otherwise ask for 10_000 and get a prompt nobody can
+        # afford).
+        limit = max(1, min(limit, settings.max_recall_items))
+
         vector_hits = await self._vector_search(query, scope=scope, limit=limit * 3, layers=layers)
         keyword_hits = await self._keyword_search(query, scope=scope, limit=limit * 3, layers=layers)
 
@@ -468,7 +497,7 @@ class MemoryStore:
         if self._embedder is None:
             return []
         try:
-            vectors = await self._embedder.embed([query])
+            vectors = await self._embedder.embed([_embed_input(query)])
         except Exception as exc:
             logger.warning("query embedding failed, keyword-only recall: %s", exc)
             return []
@@ -487,22 +516,44 @@ class MemoryStore:
         import numpy as np
 
         q = np.asarray(qvec, dtype=np.float32)
+        # A vector from a provider is external input. ``nan`` and ``inf`` propagate
+        # through the norm and the dot product, and a single NaN makes every comparison
+        # false — so ``cosine <= 0`` never fires, NaN sorts unpredictably and the whole
+        # ranking becomes meaningless rather than empty. Checked once here and once per
+        # row below, because either side can be the poisoned one.
+        if not np.all(np.isfinite(q)):
+            logger.warning("query embedding is not finite; falling back to keyword recall")
+            return []
         qn = np.linalg.norm(q)
-        if qn == 0:
+        if qn == 0 or not np.isfinite(qn):
             return []
 
         scored: list[tuple[float, MemoryRow]] = []
+        dropped = 0
         for r in rows:
             if not r.embedding or r.embedding_dim != len(qvec):
                 continue
             v = np.frombuffer(r.embedding, dtype=np.float32)
+            if not np.all(np.isfinite(v)):
+                dropped += 1
+                continue
             vn = np.linalg.norm(v)
-            if vn == 0:
+            if vn == 0 or not np.isfinite(vn):
+                dropped += 1
                 continue
             cosine = float(np.dot(q, v) / (qn * vn))
-            if cosine <= 0:
+            if not np.isfinite(cosine) or cosine <= 0:
+                dropped += 1
                 continue
             scored.append((cosine, r))
+
+        if dropped:
+            # Reported rather than silent: a row with a broken vector keeps taking up
+            # space and never matches anything, which looks like "memory does not work"
+            # and is impossible to diagnose from the outside.
+            logger.warning(
+                "skipped %d memory row(s) with unusable embeddings scope=%s", dropped, scope
+            )
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [

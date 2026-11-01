@@ -148,6 +148,24 @@ class Settings(BaseSettings):
     and takes a network round trip off the hot path.
     """
 
+    max_embedding_chars: int = 2000
+    """Longest text sent to the embedding provider, in characters.
+
+    Providers bill by token and differ in what they do past their context limit — some
+    truncate, some error, some return a vector of another dimension. Truncating here makes
+    the behaviour ours and identical across providers. Applied to the query as well, so a
+    stored vector and a query vector stay comparable.
+    """
+
+    max_recall_items: int = 20
+    """Hard ceiling on recalled items per turn, whatever the caller asks for.
+
+    Every recalled item costs prompt tokens on *every later turn*, so this is the number
+    that bounds the cost of a busy or poisoned scope. Enforced in ``MemoryStore.recall``
+    rather than at the call sites, because a limit honoured by some callers is not a
+    limit.
+    """
+
     max_prompt_tokens: int = 6000
     """Hard ceiling for the prompt. Raised only if the provider's context allows it."""
 
