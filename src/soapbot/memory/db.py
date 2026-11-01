@@ -17,8 +17,10 @@ Design decisions worth stating:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,6 +45,13 @@ from sqlalchemy.pool import NullPool
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
+
+#: How long SQLite waits for a competing writer before giving up, in seconds.
+#:
+#: Five seconds is generous for a bot whose writes are single-row inserts, and it is
+#: the difference between "the second writer retries and succeeds" and "the second
+#: writer raises immediately". Applied per connection — see ``Database.__init__``.
+_BUSY_TIMEOUT_S = 5.0
 
 
 class Base(DeclarativeBase):
@@ -195,9 +204,36 @@ class Database:
         # A fresh connection per checkout plus WAL (readers don't block the
         # writer) makes concurrent pipeline writes and WebUI reads safe.
         self.engine: AsyncEngine = create_async_engine(
-            url, echo=False, future=True, poolclass=NullPool
+            url,
+            echo=False,
+            future=True,
+            poolclass=NullPool,
+            # ``busy_timeout`` and ``journal_mode`` are *per connection* pragmas, and
+            # ``init()`` only ever ran them on one connection. With NullPool every
+            # checkout is a brand-new connection, so the timeout was back to SQLite's
+            # default of zero and a second writer failed instantly with
+            # "database is locked" — which is exactly what passive mode produced, since
+            # it archives on the same path the answering write runs on. Setting them on
+            # connect applies them to every connection, which is what the comment above
+            # already claimed WAL was doing.
+            connect_args={"timeout": _BUSY_TIMEOUT_S},
         )
         self._session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
+        self._write_lock = asyncio.Lock()
+        """Serialises transactions that write. See :meth:`write`."""
+
+        from sqlalchemy import event
+
+        @event.listens_for(self.engine.sync_engine, "connect")
+        def _per_connection_pragmas(dbapi_conn, _record) -> None:  # pragma: no cover
+            cursor = dbapi_conn.cursor()
+            try:
+                cursor.execute(f"PRAGMA busy_timeout={int(_BUSY_TIMEOUT_S * 1000)}")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
 
     async def init(self) -> None:
         async with self.engine.begin() as conn:
@@ -264,6 +300,27 @@ class Database:
 
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         return self._session_factory
+
+    @asynccontextmanager
+    async def write(self) -> AsyncIterator[AsyncSession]:
+        """A session whose transaction is serialised against every other writer.
+
+        SQLite admits exactly one writer. ``busy_timeout`` makes the *loser* wait, but
+        under aiosqlite that wait happens on the connection's background thread while
+        the event loop keeps starting more writers — so a burst turns into a queue of
+        threads all polling the same lock, and the ones that time out raise
+        ``database is locked``. Measured: 150 concurrent archives produced 14–17
+        failures even with ``busy_timeout=5000`` in force.
+
+        One asyncio lock in front of the write path removes the contention instead of
+        negotiating it. Writes here are single-row inserts and commits, so the lock is
+        held for microseconds; readers are untouched and still run concurrently under
+        WAL. This is the same trade SQLite itself makes internally — the difference is
+        that the wait is now an ``await`` on the event loop rather than a thread
+        spinning on a file lock.
+        """
+        async with self._write_lock, self._session_factory() as session:
+            yield session
 
     async def close(self) -> None:
         await self.engine.dispose()

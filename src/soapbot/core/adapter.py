@@ -84,6 +84,19 @@ class AdapterHealth:
     last_error: str = ""
     connected_at: float = 0.0
     reconnect_attempts: int = 0
+    last_seen_at: float = 0.0
+    """Last time the transport proved it was alive — a frame, a reply, or a heartbeat.
+
+    ``online`` alone cannot be trusted. A websocket can be half-open: the OS keeps the
+    socket ESTABLISHED because neither side sent a FIN, but nothing will ever arrive on
+    it again. Measured on a real box, a bot reported ``online = True`` for seventeen
+    hours with no socket to NapCat at all (``Get-NetTCPConnection`` showed no
+    connection to port 3001, the process was alive, the scheduler was ticking). The
+    operator's report was "适配器和 QQ 又掉了" and every health check agreed it was fine.
+
+    So ``online`` now means "we have evidence of life within the liveness window", and
+    a socket that has gone quiet is treated as dead.
+    """
     extra: dict[str, Any] = field(default_factory=dict)
 
 

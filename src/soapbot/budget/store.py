@@ -260,7 +260,7 @@ class BudgetStore:
         period = self.policy.period_key(now=ts)
         key = (idempotency_key or "").strip()[:64] or None
 
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             if key:
                 existing = await session.scalar(
                     select(SpendRequestRow).where(
@@ -420,7 +420,7 @@ class BudgetStore:
         ts = time.time() if now is None else now
         allow_self = self.policy.require_distinct_approver if allow_self is None else allow_self
 
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = await session.get(SpendRequestRow, request_id)
             if row is None or row.session_key != session_key:
                 raise RequestNotFoundError(f"没有编号为 {request_id} 的申请")
@@ -497,7 +497,7 @@ class BudgetStore:
         ts = time.time() if now is None else now
         allow_self = self.policy.require_distinct_approver if allow_self is None else allow_self
 
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = await session.get(SpendRequestRow, request_id)
             if row is None or row.session_key != session_key:
                 raise RequestNotFoundError(f"没有编号为 {request_id} 的申请")
@@ -545,7 +545,7 @@ class BudgetStore:
         ambiguous in the audit log.
         """
         ts = time.time() if now is None else now
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = await session.get(SpendRequestRow, request_id)
             if row is None or row.session_key != session_key:
                 raise RequestNotFoundError(f"没有编号为 {request_id} 的申请")
@@ -628,7 +628,7 @@ class BudgetStore:
         its quota locked until someone happens to look.
         """
         ts = time.time() if now is None else now
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             result = await session.execute(
                 update(SpendRequestRow)
                 .where(
