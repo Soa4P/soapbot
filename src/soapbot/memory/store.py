@@ -266,6 +266,26 @@ class MemoryStore:
         await _fts_index(session, table, content, row_id)
 
     async def save_summary(self, session_key: str, summary: str, folded: int) -> None:
+        """Persist a rolling summary, refusing one that asserts authority.
+
+        Same guard as :meth:`add_memory`, and for the same reason: a summary is a
+        persistence layer for whatever it contains. It is re-fed on every later turn, so a
+        planted claim in it outlives the message that carried it — which is the definition
+        of memory poisoning.
+
+        Returns nothing either way. Callers that need to know whether it was stored should
+        call :func:`soapbot.security.injection.vet_memory` first; refusing here is the last
+        line, not the only one.
+        """
+        from soapbot.security.injection import vet_memory
+
+        allowed, reason = vet_memory(summary)
+        if not allowed:
+            logger.warning(
+                "refusing to persist a summary for %s: %s", session_key, reason
+            )
+            return
+
         async with self.db.write() as session:
             session.add(
                 SummaryRow(

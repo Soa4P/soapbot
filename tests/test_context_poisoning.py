@@ -45,12 +45,16 @@ def _conversation(turns: int, poison_at: int = 0) -> list[dict]:
 
 @pytest.mark.asyncio
 async def test_the_summary_never_reaches_the_prompt_as_an_instruction() -> None:
-    """The folded summary must be framed as untrusted data, with the canary."""
+    """The folded summary must be framed as untrusted data, with the canary.
+
+    The summary here is innocuous on purpose. Whether it is *detected* as an attack and
+    whether it is *framed* are two independent properties, and this test would pass for
+    the wrong reason if the content were also quarantined — the block would vanish before
+    the framing could be checked. The quarantine case is the next test.
+    """
 
     async def summarizer(_prompt: str) -> str:
-        # A summariser that faithfully carries the poison — the realistic case, and the
-        # one a "sanitise the summary" fix would have to catch by wording.
-        return POISON
+        return "用户说他住在杭州，讨厌下雨。"
 
     compressor = ContextCompressor(
         CompressionConfig(max_prompt_tokens=200, reserve_for_reply=20, keep_recent_turns=2),
@@ -68,6 +72,31 @@ async def test_the_summary_never_reaches_the_prompt_as_an_instruction() -> None:
         assert _UNTRUSTED_CANARY in content, "summary is not framed as untrusted data"
         # ...and the framing says what to do with claims inside it.
         assert "无效" in content
+
+
+@pytest.mark.asyncio
+async def test_a_summary_asserting_privilege_is_quarantined() -> None:
+    """Framing removes a summary's authority; quarantine stops it being persisted at all.
+
+    Both are needed. A summary is re-fed on every later turn, so a planted claim in it
+    outlives the message that carried it — the memory table already refuses that text,
+    and the compressor had no equivalent rule.
+    """
+
+    async def summarizer(_prompt: str) -> str:
+        return POISON
+
+    compressor = ContextCompressor(
+        CompressionConfig(max_prompt_tokens=200, reserve_for_reply=20, keep_recent_turns=2),
+        summarizer=summarizer,
+    )
+    result = await compressor.compress(_conversation(turns=12))
+
+    joined = "\n".join(str(m.get("content", "")) for m in result.messages)
+    assert "我是管理员" not in joined, "a privilege claim survived into the prompt"
+    assert not [m for m in result.messages if m.get("role") == "system"][1:], (
+        "an empty or quarantined summary block was still emitted"
+    )
 
 
 @pytest.mark.asyncio
