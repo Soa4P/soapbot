@@ -101,6 +101,27 @@ def _scheduler():
     return get_scheduler()
 
 
+def _breaker_status(runtime) -> dict[str, Any]:
+    """Circuit-breaker state, or a closed one when no router is available."""
+    router = getattr(getattr(runtime, "engine", None), "router", None)
+    if router is None or not hasattr(router, "breaker_status"):
+        return {"open": False, "retry_after": 0.0, "consecutive_total_failures": 0}
+    return router.breaker_status()
+
+
+def _quota_status(runtime) -> dict[str, Any]:
+    """Per-user quota configuration and how many turns it refused.
+
+    Counts only — never the limiter's keys, which are user ids.
+    """
+    pipeline = getattr(runtime, "pipeline", None)
+    stages = getattr(pipeline, "stages", None) or []
+    for stage in stages:
+        if getattr(stage, "name", "") == "model_quota" and hasattr(stage, "status"):
+            return stage.status()
+    return {"limit": 0, "window_seconds": 0.0, "refused": 0}
+
+
 @router.get("/runtime")
 async def runtime_status(_: dict = Depends(require_api_auth)) -> dict:
     """One page that answers "is the bot actually working?".
@@ -149,6 +170,12 @@ async def runtime_status(_: dict = Depends(require_api_auth)) -> dict:
         "adapter_count": len(runtime.adapters),
         "scheduler": scheduler.status() if scheduler is not None else {"running": False},
         "startup_errors": get_startup_errors(),
+        # Two states that used to be invisible from here. Both are failures the bot
+        # absorbs silently: the breaker answers with a notice, the quota refuses quietly
+        # from the user's side. Without them the panel shows a healthy bot that talks to
+        # nobody, and the first diagnosis is "the model is bad".
+        "breaker": _breaker_status(runtime),
+        "quota": _quota_status(runtime),
         "config": {
             "providers_file": str(_settings().providers_file),
             "adapters_file": str(_settings().adapters_file),

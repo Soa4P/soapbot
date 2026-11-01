@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { api } from '@/api/client'
+import { api, setToken } from '@/api/client'
 import { t } from '@/i18n'
 import { datetime, num } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 const kind = ref('')
 const audit = useAsync(() => api.audit(300, kind.value))
@@ -125,6 +128,39 @@ async function saveAuthority(): Promise<void> {
     authorityBusy.value = false
   }
 }
+
+// ------------------------------------------------------------------ 令牌生命周期
+//
+// A signed token used to be valid for its whole ttl whatever happened to it. This panel
+// is the operator's only way to see that a credential *was* killed, and to kill all of
+// them when a device is lost — without rotating the signing secret, which logs everyone
+// out and therefore never gets used.
+const revocations = useAsync(() => api.revocations())
+const tokenBusy = ref(false)
+const tokenNote = ref('')
+const tokenError = ref('')
+
+const revokedTokens = computed<any[]>(() => revocations.data.value?.tokens ?? [])
+const revokedBefore = computed(() => Number(revocations.data.value?.revoked_before ?? 0))
+
+async function revokeEveryToken(): Promise<void> {
+  tokenBusy.value = true
+  tokenNote.value = ''
+  tokenError.value = ''
+  try {
+    const result = await api.revokeAllTokens()
+    // The server hands back a replacement. Keeping it is not optional: the bootstrap
+    // token was consumed at first login, so dropping this one locks the operator out.
+    if (result.access_token) setToken(result.access_token)
+    tokenNote.value = t('security.tokensRevoked')
+    await revocations.reload()
+    await auth.refresh()
+  } catch (error) {
+    tokenError.value = (error as Error).message
+  } finally {
+    tokenBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -142,6 +178,48 @@ async function saveAuthority(): Promise<void> {
       <span class="readout__value" style="color: var(--warn)">{{ num(counts.block) }}</span>
     </div>
   </div>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('security.tokens') }}</h2>
+      <span class="strip__spacer" />
+      <button class="btn ghost" type="button" :disabled="tokenBusy" @click="revokeEveryToken">
+        {{ tokenBusy ? t('common.working') : t('security.revokeAll') }}
+      </button>
+    </div>
+    <div class="panel__body stack">
+      <p class="hint">{{ t('security.tokensHint') }}</p>
+      <p v-if="revokedBefore" class="hint">
+        {{ t('security.revokedBefore', { when: datetime(revokedBefore) }) }}
+      </p>
+      <p v-if="tokenNote" class="hint" role="status">{{ tokenNote }}</p>
+      <p v-if="tokenError" class="hint" role="alert" style="color: var(--danger)">
+        {{ tokenError }}
+      </p>
+      <table v-if="revokedTokens.length" class="data">
+        <caption class="visually-hidden">{{ t('security.tokens') }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{{ t('security.tokenId') }}</th>
+            <th scope="col">{{ t('security.expires') }}</th>
+            <th scope="col">{{ t('security.state') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in revokedTokens" :key="item.jti">
+            <td class="key mono">{{ item.jti }}</td>
+            <td>{{ datetime(item.expires_at) }}</td>
+            <td>
+              <span class="tag" :class="item.expired ? '' : 'bad'">
+                {{ item.expired ? t('security.expired') : t('security.revoked') }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="hint">{{ t('security.noRevoked') }}</p>
+    </div>
+  </section>
 
   <section class="panel">
     <div class="panel__head">

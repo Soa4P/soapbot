@@ -229,6 +229,25 @@ export const api = {
     }),
 
   plugins: () => request<any>('/api/plugins'),
+
+  // --- token lifecycle ------------------------------------------------------
+  //
+  // A signed token used to be valid for its full ttl whatever the operator did, so a
+  // leaked one meant waiting it out or rotating the signing secret (and logging every
+  // session out). These are the two narrow controls that replaced that.
+  revocations: () => request<RevocationList>('/api/auth/revocations'),
+  /** Revoke this session's own token. The caller must clear its copy afterwards. */
+  logout: () => request<{ ok: boolean; revoked: boolean }>('/api/auth/logout', { method: 'POST' }),
+  /**
+   * Revoke every token issued so far. Returns a replacement token for the caller —
+   * without one the operator logs themselves out and the bootstrap token they would
+   * need to get back in was consumed at first login.
+   */
+  revokeAllTokens: () =>
+    request<{ ok: boolean; revoked_before: number; access_token: string; expires_at: number }>(
+      '/api/auth/revoke-all',
+      { method: 'POST' },
+    ),
   /**
    * Install a plugin package. The server answers `approved: false` on purpose — the
    * caller must send the operator to the approval flow, never assume it is live.
@@ -377,6 +396,20 @@ export interface LoginResult {
   expires_in: number
   expires_at: number
   role: string
+}
+
+/** One revoked token id. The id is opaque; the token itself is never stored or returned. */
+export interface RevokedToken {
+  jti: string
+  expires_at: number
+  expired: boolean
+}
+
+export interface RevocationList {
+  /** Whole-second cut-off. Any token issued before it is refused, ids or no ids. */
+  revoked_before: number
+  count: number
+  tokens: RevokedToken[]
 }
 
 export interface StageInfo {

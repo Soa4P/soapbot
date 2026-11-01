@@ -74,6 +74,12 @@ const startedFor = computed(() => {
   return uptime(Date.now() / 1000 - started)
 })
 
+// Both of these are failures the bot absorbs silently. The breaker answers with a notice
+// and the quota refuses from the user's side, so without them the panel shows a healthy
+// bot that talks to nobody — and the first diagnosis is "the model is bad".
+const breaker = computed<any>(() => runtime.data.value?.breaker ?? {})
+const quota = computed<any>(() => runtime.data.value?.quota ?? {})
+
 const counters = computed(() => [
   { label: t('runtime.processUptime'), value: startedFor.value },
   { label: t('runtime.schedulerTicks'), value: num(scheduler.value.ticks) },
@@ -189,6 +195,45 @@ const counters = computed(() => [
         </tbody>
       </table>
       <div v-else class="empty">{{ t('runtime.noAdapters') }}</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('runtime.modelHealth') }}</h2>
+      <span class="pill" :class="breaker.open ? 'bad' : 'ok'">
+        <i class="dot" />{{ breaker.open ? t('runtime.breakerOpen') : t('common.ok') }}
+      </span>
+    </div>
+    <div class="panel__body">
+      <table class="data" :aria-label="t('runtime.modelHealth')">
+        <tbody>
+          <tr>
+            <th scope="row">{{ t('runtime.breakerState') }}</th>
+            <td>
+              <span v-if="breaker.open" class="tag bad">
+                {{ t('runtime.breakerRetry', { s: Math.ceil(breaker.retry_after ?? 0) }) }}
+              </span>
+              <span v-else class="tag">{{ t('runtime.breakerClosed') }}</span>
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">{{ t('runtime.breakerFailures') }}</th>
+            <td class="num">{{ breaker.consecutive_total_failures ?? 0 }}</td>
+          </tr>
+          <tr>
+            <th scope="row">{{ t('runtime.quotaLimit') }}</th>
+            <td class="num">
+              {{ quota.limit ?? 0 }} / {{ Math.round(quota.window_seconds ?? 0) }}s
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">{{ t('runtime.quotaRefused') }}</th>
+            <td class="num">{{ quota.refused ?? 0 }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin: 10px 0 0">{{ t('runtime.modelHealthHint') }}</p>
     </div>
   </section>
 

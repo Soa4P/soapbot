@@ -25,6 +25,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from soapbot.config import settings
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
@@ -57,6 +59,26 @@ def _manager():
     if manager is None:
         raise HTTPException(status_code=503, detail="plugin system is not initialised")
     return manager
+
+
+def _code_changed(loader, name: str, record) -> bool:
+    """Whether the plugin's source no longer matches what was approved.
+
+    Computed for the listing so the panel can warn *before* someone presses Load. The
+    enforcement lives in ``PluginLoader.load``; this is the same comparison, done earlier,
+    because an operator's first notice of tampering should not be a failed load.
+    """
+    if record is None or not getattr(record, "content_digest", ""):
+        return False
+    directory = loader.plugins_dir / name
+    if not directory.is_dir():
+        return False
+    try:
+        from soapbot.plugins.integrity import compare
+
+        return compare(directory, record.content_digest).state == "changed"
+    except OSError:  # pragma: no cover - unreadable tree
+        return False
 
 
 @router.post("/install")
@@ -143,19 +165,26 @@ async def list_plugins(request: Request) -> dict:
                     {
                         "approved_at": record.approved_at,
                         "approved_by": record.approved_by,
-                        # Digest drift: the manifest changed after approval. Not
-                        # enforced (see plugins/approvals.py) but it must be
-                        # visible, because "approved v1.0, running v1.1" is
-                        # exactly the state an operator wants to notice.
+                        # Digest drift: the manifest changed after approval. Reported
+                        # rather than enforced (see plugins/approvals.py) but it must be
+                        # visible, because "approved v1.0, running v1.1" is exactly the
+                        # state an operator wants to notice.
                         "manifest_changed": bool(
                             record.digest
                             and manifest.manifest_digest
                             and record.digest != manifest.manifest_digest
                         ),
+                        # Code drift: the *implementation* changed after approval. This one
+                        # is enforced on load (block by default), but the panel has to show
+                        # it *before* someone presses Load, or the only way to discover it
+                        # is a failed attempt with a stack trace.
+                        "code_changed": _code_changed(loader, manifest.name, record),
+                        "integrity_mode": settings.plugin_integrity_mode,
                     }
                     if record is not None
                     else None
                 ),
+                "integrity": loaded.integrity if loaded else None,
             }
         )
 
