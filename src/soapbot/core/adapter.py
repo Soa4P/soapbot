@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -31,6 +32,69 @@ from soapbot.core.message import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _max_inflight_handlers() -> int:
+    """Read the cap lazily so a test can move it without rebuilding the adapter."""
+    from soapbot.config import settings
+
+    return int(getattr(settings, "max_inflight_handlers", 0) or 0)
+
+
+def _handler_timeout_seconds() -> float:
+    from soapbot.config import settings
+
+    return float(getattr(settings, "handler_timeout_seconds", 0) or 0)
+
+
+def _busy_notice_text() -> str:
+    from soapbot.config import settings
+
+    return str(getattr(settings, "busy_notice", "") or "").strip()
+
+
+def _audit_drop(
+    adapter: str, event: IncomingMessage, *, inflight: int, limit: int
+) -> None:
+    """Dropping a message is a decision, and decisions are auditable.
+
+    Only called for events the adapter admitted far enough to dispatch — the audit
+    log is not a debug stream, and a flood of dropped traffic must not push out the
+    security events it sits next to.
+    """
+    try:
+        from soapbot.security.audit import get_audit_log
+
+        get_audit_log().record(
+            kind="rate_limit",
+            action="dispatch",
+            outcome="dropped",
+            detail=f"inflight={inflight} limit={limit} adapter={adapter}",
+            trace_id=event.trace_id,
+            # ``session`` is not a ``record`` parameter; it belongs in ``meta`` so it
+            # lands in the structured payload rather than being silently absorbed.
+            meta_session=event.session_key,
+        )
+    except Exception:  # pragma: no cover - auditing must never break dispatch
+        logger.debug("dispatch drop audit failed", exc_info=True)
+
+
+def _audit_timeout(
+    adapter: str, event: IncomingMessage, *, elapsed: float, timeout: float
+) -> None:
+    try:
+        from soapbot.security.audit import get_audit_log
+
+        get_audit_log().record(
+            kind="rate_limit",
+            action="handler",
+            outcome="timeout",
+            detail=f"elapsed={elapsed:.1f}s limit={timeout:.1f}s adapter={adapter}",
+            trace_id=event.trace_id,
+            meta_session=event.session_key,
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("handler timeout audit failed", exc_info=True)
 
 
 class Capability(StrEnum):
@@ -109,7 +173,15 @@ class Adapter(ABC):
     def __init__(self) -> None:
         self._handlers: list[EventHandler] = []
         self._handler_tasks: set[asyncio.Task[Any]] = set()
+        self._notice_tasks: set[asyncio.Task[Any]] = set()
         self.health = AdapterHealth()
+        # Counters rather than only a log line: a cap that silently drops is a cap
+        # nobody can tune, and the operator's only symptom would be unanswered
+        # messages. ``busy_notices`` is the subset of ``dropped_events`` that was a
+        # direct mention and therefore got an answer instead of vanishing.
+        self.dropped_events = 0
+        self.busy_notices = 0
+        self.handler_timeouts = 0
 
     # ---- lifecycle ----
     @abstractmethod
@@ -191,14 +263,20 @@ class Adapter(ABC):
         return _remove
 
     async def emit(self, event: IncomingMessage) -> None:
-        """Fan out an inbound event to all subscribers.
+        """Fan out an inbound event to all subscribers, bounded.
 
         CRITICAL: handlers run as *detached tasks*, never inline. The reader loop
         must stay free to receive API responses, but a handler (the pipeline) may
         call ``send()``, which waits for such a response. Awaiting handlers inline
         therefore deadlocks the adapter against itself: the reply is written to
         the socket, but nobody reads the acknowledgement that would unblock it.
-        Ordering per session is preserved downstream by ``SessionLockManager``.
+
+        The cap exists because that same property is what makes an unbounded fan-out
+        dangerous: every inbound line is a task that runs a full pipeline and may
+        reach the model provider, so a burst costs money and memory in proportion to
+        how fast strangers can type. Over the cap the event is **dropped, not
+        queued** — see ``Settings.max_inflight_handlers`` for why a queue is worse.
+        An @mention is answered with one detached notice instead of silence.
         """
         # ``REQUEST``/``META`` stay dropped: those are protocol-level handshakes the
         # adapter handles itself, and forwarding them would let a peer drive
@@ -208,6 +286,29 @@ class Adapter(ABC):
         # a notice, which made the whole capability a documented no-op.
         if event.event_type not in (EventType.MESSAGE, EventType.NOTICE):
             return
+        if not self._handlers:
+            # Nothing would run, so nothing is being dropped. Counting it would make
+            # the panel report backpressure on a runtime that is merely unsubscribed.
+            return
+
+        limit = _max_inflight_handlers()
+        inflight = sum(1 for task in self._handler_tasks if not task.done())
+        if limit > 0 and inflight >= limit:
+            self.dropped_events += 1
+            addressed = event.event_type is EventType.MESSAGE and event.addresses_me
+            logger.warning(
+                "dispatch capped adapter=%s trace=%s inflight=%d limit=%d addressed=%s",
+                self.meta.name,
+                event.trace_id,
+                inflight,
+                limit,
+                addressed,
+            )
+            _audit_drop(self.meta.name, event, inflight=inflight, limit=limit)
+            if addressed:
+                self._send_busy_notice(event)
+            return
+
         for handler in list(self._handlers):
             task = asyncio.create_task(
                 self._run_handler(handler, event),
@@ -216,9 +317,96 @@ class Adapter(ABC):
             self._handler_tasks.add(task)
             task.add_done_callback(self._handler_tasks.discard)
 
+    def _send_busy_notice(self, event: IncomingMessage) -> None:
+        """Tell an overloaded @mention that it was seen, without blocking the reader.
+
+        Detached and *not* counted against the cap: the notice is the last thing this
+        adapter should refuse to do when it is already at its limit, and it must not
+        occupy a slot that real work is waiting for. ``send()`` is awaited inside the
+        task, never here — the reader loop is the coroutine that reads send
+        acknowledgements, so awaiting it from ``emit`` deadlocks (see ``emit``).
+
+        The outgoing message is rebuilt from the event's ids alone; holding the event
+        would pin the request for as long as the socket takes to answer.
+        """
+        text = _busy_notice_text()
+        if not text:
+            return
+        target = OutgoingMessage(
+            scene=event.scene,
+            segments=[MessageSegment.text(text)],
+            group_id=event.group_id,
+            user_id=event.sender.user_id,
+        )
+        name = f"busy:{self.meta.name}:{event.trace_id}"
+
+        async def _send() -> None:
+            try:
+                receipt = await self.send(target)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Nothing to escalate to: the member already lost their answer, and a
+                # failed apology must not become the adapter's problem too.
+                logger.warning("busy notice failed adapter=%s: %s", self.meta.name, exc)
+                return
+            if not receipt.ok:
+                logger.warning(
+                    "busy notice refused adapter=%s: %s", self.meta.name, receipt.error
+                )
+
+        self.busy_notices += 1
+        task = asyncio.create_task(_send(), name=name)
+        # Held so the loop cannot collect the notice mid-flight; discarded on
+        # completion so a long run does not accumulate finished tasks.
+        self._notice_tasks.add(task)
+        task.add_done_callback(self._notice_tasks.discard)
+
     async def _run_handler(self, handler: EventHandler, event: IncomingMessage) -> None:
+        """Run one handler under a wall-clock bound.
+
+        The bound is applied here rather than around each ``await`` inside the
+        pipeline: the operator's question is "how long until this message is given
+        up on", and a dozen scattered deadlines cannot answer it.
+
+        A timeout cancels the handler and is reported, but it cannot unsend a reply
+        that already went out — a partially answered message stays partially
+        answered. That is a deliberate trade: the alternative is a stuck task holding
+        a session lock until the process restarts.
+        """
+        timeout = _handler_timeout_seconds()
+        started = time.monotonic()
+        deadline: asyncio.Timeout | None = None
+        # ``asyncio.timeout`` rather than ``wait_for`` so the deadline can be told apart
+        # from a timeout *inside* the handler. ``wait_for`` converts its own expiry into
+        # ``TimeoutError``, and so does a socket/provider timeout raised by the pipeline,
+        # so ``except TimeoutError`` would report every slow provider as "handler stuck"
+        # and inflate the counter the panel uses to decide something is wrong.
         try:
-            await handler(event)
+            if timeout > 0:
+                async with asyncio.timeout(timeout) as deadline:
+                    await handler(event)
+            else:
+                await handler(event)
+        except TimeoutError:
+            if deadline is None or not deadline.expired():
+                # A TimeoutError the handler raised itself: it is the handler's failure,
+                # not ours, and must not be counted as a dispatch timeout.
+                logger.exception(
+                    "event handler failed adapter=%s trace=%s",
+                    self.meta.name,
+                    event.trace_id,
+                )
+                return
+            elapsed = time.monotonic() - started
+            self.handler_timeouts += 1
+            logger.error(
+                "event handler timed out adapter=%s trace=%s after %.1fs",
+                self.meta.name,
+                event.trace_id,
+                elapsed,
+            )
+            _audit_timeout(self.meta.name, event, elapsed=elapsed, timeout=timeout)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -228,9 +416,19 @@ class Adapter(ABC):
 
     async def drain_handlers(self, timeout: float = 5.0) -> None:
         """Wait for in-flight handler tasks (used by tests and graceful shutdown)."""
-        tasks = [t for t in self._handler_tasks if not t.done()]
+        pending = self._handler_tasks | self._notice_tasks
+        tasks = [t for t in pending if not t.done()]
         if tasks:
             await asyncio.wait(tasks, timeout=timeout)
+
+    def backpressure_status(self) -> dict[str, int]:
+        """Counters for the panel: a cap that never reports is a cap nobody tunes."""
+        return {
+            "inflight": sum(1 for t in self._handler_tasks if not t.done()),
+            "dropped": self.dropped_events,
+            "busy_notices": self.busy_notices,
+            "handler_timeouts": self.handler_timeouts,
+        }
 
     # ---- capability helpers ----
     def supports(self, cap: Capability) -> bool:

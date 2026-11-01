@@ -18,6 +18,10 @@ secrets/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+# Explicit ``--basetemp`` targets used by local runs. Without this they are ordinary
+# untracked directories, and ``git add -A`` swept ~19k lines of test fixtures into a
+# commit that was only supposed to touch dispatch and shutdown code.
+.pytest_tmp*/
 
 # Node / frontend
 node_modules/
