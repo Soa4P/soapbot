@@ -37,11 +37,15 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import jwt
 
 from soapbot.config import settings
 from soapbot.security.files import write_private_file
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from soapbot.security.revocation import RevocationStore
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +107,14 @@ class TokenService:
         secret: str = "",
         ttl_hours: int = 72,
         secret_file: Path | None = None,
+        revocations: RevocationStore | None = None,
     ) -> None:
         self._secret_file = secret_file or (settings.data_dir / "jwt.key")
+        # ``None`` keeps verify() stateless, so tests and embedded callers that never
+        # construct a store behave exactly as before. The deployment path always
+        # supplies one — see ``app._init_auth``: a revocation list nobody consults is
+        # not a revocation mechanism, it is a file.
+        self._revocations = revocations
         if secret:
             raw = secret.encode("utf-8")
             if len(raw) < MIN_SECRET_BYTES:
@@ -168,13 +178,22 @@ class TokenService:
             # the endpoint into an oracle for crafting a valid token.
             raise TokenError("invalid token") from exc
 
-        return TokenClaims(
+        claims = TokenClaims(
             subject=str(payload.get("sub", "")),
             role=str(payload.get("role", "")),
             issued_at=int(payload.get("iat", 0)),
             expires_at=int(payload.get("exp", 0)),
             token_id=str(payload.get("jti", "")),
         )
+
+        # Revocation is checked *after* the signature and claims: an unsigned or expired
+        # token must not be reported as "revoked", because that would let a caller
+        # distinguish a token we once issued from one we never did.
+        if self._revocations is not None and self._revocations.is_revoked(
+            claims.token_id, claims.issued_at
+        ):
+            raise TokenError("token revoked")
+        return claims
 
 
 class BootstrapToken:
