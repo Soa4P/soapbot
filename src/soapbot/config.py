@@ -148,6 +148,32 @@ class Settings(BaseSettings):
     and takes a network round trip off the hot path.
     """
 
+    user_quota_calls: int = 30
+    """How many model-backed turns one user may take per window.
+
+    The limiters that already existed count *refusals* — a burst of denials means
+    enumeration, which is a different question from cost. Nothing bounded a user who
+    simply talks a lot: every message is a provider call, so one enthusiastic member can
+    spend the operator's budget without ever being refused anything.
+
+    Thirty per five minutes is roughly one turn every ten seconds, which is faster than a
+    person types and slow enough that a normal conversation never notices. Privileged
+    users are exempt — an operator debugging the bot should not be throttled by the
+    control they are operating.
+    """
+
+    user_quota_window_seconds: float = 300.0
+    """Window for :attr:`user_quota_calls`, in seconds. Sliding, not fixed: a fixed window
+    lets a caller spend the full budget at 00:59 and again at 00:01."""
+
+    user_quota_notice: str = "你说得有点快，我缓一下，稍后再聊。"
+    """What the user sees when the quota is spent.
+
+    Spoken rather than silent. Silence is correct for unauthorised traffic (it confirms
+    the bot is listening), but a legitimate user hitting a rate limit needs to know why
+    the bot stopped answering, or they conclude it broke.
+    """
+
     max_embedding_chars: int = 2000
     """Longest text sent to the embedding provider, in characters.
 

@@ -71,6 +71,9 @@ STAGE_ORDER: tuple[str, ...] = (
     "plugin_command",
     "plugin_message_hooks",
     "persist",
+    # After the free commands and before the model: a quota that fires after the provider
+    # call has already spent what it exists to protect.
+    "model_quota",
     "persona",
     "recall",
     "knowledge",

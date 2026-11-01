@@ -18,7 +18,9 @@ is to never query it.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+from soapbot.config import settings
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.security.audit import AuditLog, get_audit_log
 from soapbot.security.injection import (
@@ -251,6 +253,92 @@ class AuthorizationStage(Stage):
         ctx.model_reply = self.notice
         ctx.extras["skip_model"] = True
         return StageResult()
+
+
+class ModelQuotaStage(Stage):
+    """Cap how often one person may reach the model in a window.
+
+    The existing limiters all count *refusals*: a burst of denials means enumeration, and
+    that is a different question from cost. Nothing bounded a user who simply talks a lot
+    — every message is a provider call, and on a busy group one enthusiastic member can
+    spend the operator's budget without ever being refused anything.
+
+    Placed after the command stages and before context assembly, so:
+
+    * ``/help`` and other free commands do not consume the quota (they cost nothing);
+    * the refusal happens before the model call, which is the only place a quota saves
+      money.
+
+    The refusal is spoken rather than silent. Silence is right for unauthorised traffic —
+    acknowledging it confirms the bot is listening — but a legitimate user hitting a rate
+    limit needs to know why the bot stopped answering, or they will assume it broke.
+    """
+
+    name = "model_quota"
+
+    def __init__(
+        self,
+        *,
+        audit: AuditLog | None = None,
+        calls: int | None = None,
+        window_seconds: float | None = None,
+        notice: str = "",
+    ) -> None:
+        self.audit = audit or get_audit_log()
+        self.calls = settings.user_quota_calls if calls is None else calls
+        self.window_seconds = (
+            settings.user_quota_window_seconds if window_seconds is None else window_seconds
+        )
+        self.notice = notice or settings.user_quota_notice
+        self._limiter = SlidingWindowLimiter(
+            limit=max(1, self.calls), window_seconds=max(1.0, self.window_seconds)
+        )
+        self._limited = 0
+        """How many turns this process refused. Exposed for the panel."""
+
+    async def run(self, ctx: PipelineContext) -> StageResult:
+        principal: Principal | None = ctx.extras.get("principal")
+        if principal is None:
+            # No principal means Guard was not installed. The quota is a cost control,
+            # not an authorization gate, so refusing here would be the wrong failure —
+            # but it is also the one case where we cannot attribute the call.
+            return StageResult()
+
+        # Privileged users are exempt: an operator debugging the bot should not be
+        # rate-limited by the control they are operating.
+        if getattr(principal, "is_privileged", False):
+            return StageResult()
+
+        key = f"{principal.adapter}:{principal.user_id}"
+        result = self._limiter.check(key)
+        ctx.extras["quota_remaining"] = result.remaining
+        if not result.limited:
+            return StageResult()
+
+        self._limited += 1
+        self.audit.record(
+            kind="rate_limit",
+            action="model_quota",
+            outcome="block",
+            principal=principal,
+            detail=(
+                f"limit={self.calls}/{self.window_seconds:.0f}s "
+                f"retry_after={result.retry_after:.0f}s"
+            ),
+            trace_id=ctx.event.trace_id,
+        )
+        ctx.model_reply = self.notice
+        ctx.extras["skip_model"] = True
+        ctx.extras["quota_exceeded"] = True
+        return StageResult()
+
+    def status(self) -> dict[str, Any]:
+        """What the panel shows. Counts only — never the keys, which are user ids."""
+        return {
+            "limit": self.calls,
+            "window_seconds": self.window_seconds,
+            "refused": self._limited,
+        }
 
 
 def require(
