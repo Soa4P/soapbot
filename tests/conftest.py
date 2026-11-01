@@ -71,6 +71,8 @@ class MockLLM:
         payload = json.loads(request.content or b"{}")
         self.calls.append(RecordedCall(str(request.url), payload))
         reply = self._next_reply(payload)
+        if payload.get("stream"):
+            return self._sse(reply, payload)
         return Response(
             200,
             json={
@@ -87,6 +89,44 @@ class MockLLM:
                 "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
             },
         )
+
+    def _sse(self, reply: str, payload: dict[str, Any]) -> Response:
+        """Answer a ``stream: true`` request the way an OpenAI-compatible server does.
+
+        This mock used to return a plain JSON body no matter what was asked. The
+        streaming parser looked for ``data:`` lines, found none, yielded nothing, and
+        the router fell back to a second, non-streaming call — which consumed a
+        *second* scripted reply. So a test that pushed one reply then asserted on the
+        answer got ``default_reply`` instead, and a test asserting ``calls == 1`` saw
+        two.
+
+        Both symptoms were invisible on a machine whose root ``.env`` sets
+        ``SOAPBOT_STREAM_REPLY=false``: with streaming off, the mock was never asked
+        for SSE and the suite was green. CI has no ``.env``, so the default (streaming
+        on) applied and three tests failed there. Worse than the failure: every
+        streaming test was silently exercising the fallback path.
+        """
+        model = payload.get("model", "mock-model")
+        # Several small deltas rather than one, so the sentence assembler has something
+        # to assemble — a single delta would make "progressive" untestable.
+        chunks = [reply[i : i + 4] for i in range(0, len(reply), 4)] or [""]
+
+        def frame(delta: dict[str, Any], finish: str | None) -> str:
+            return "data: " + json.dumps(
+                {
+                    "id": "chatcmpl-mock",
+                    "object": "chat.completion.chunk",
+                    "model": model,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                },
+                ensure_ascii=False,
+            )
+
+        lines = [frame({"content": piece}, None) for piece in chunks]
+        lines.append(frame({}, "stop"))
+        lines.append("data: [DONE]")
+        body = ("\n\n".join(lines) + "\n\n").encode("utf-8")
+        return Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     def last_call(self) -> RecordedCall:
         if not self.calls:

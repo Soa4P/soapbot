@@ -303,15 +303,23 @@ class ModelStage(Stage):
         first_token_ms: float | None = None
         stream_error = ""
 
+        blocked = ""
         stream = self.engine.stream(call)
         try:
             async for piece in stream:
                 if first_token_ms is None:
                     first_token_ms = round((time.perf_counter() - started) * 1000, 2)
                 for sentence in aggregator.feed(piece, time.perf_counter()):
-                    if not await sender.send(sentence):
+                    # Guard each sentence *before* it leaves the process. This is the
+                    # only place these guards can run on the streaming path: the text
+                    # is already in the group by the time SafetyStage would see it.
+                    clean, reason = scrub_sentence(sentence)
+                    if reason:
+                        blocked = reason
                         break
-                if not sender.ok or sender.truncated:
+                    if clean and not await sender.send(clean):
+                        break
+                if blocked or not sender.ok or sender.truncated:
                     break
         except Exception as exc:  # provider died mid-answer
             stream_error = str(exc)
@@ -329,13 +337,53 @@ class ModelStage(Stage):
         finally:
             await stream.aclose()
 
-        if sender.ok and not stream_error:
+        if blocked:
+            # The reply stopped being safe, so nothing further from it is delivered —
+            # not the aggregator's tail, and not the rest of the stream. For a canary
+            # echo that means the model copied untrusted framing out of its data, which
+            # is either a leak or a successful injection; the whole answer is replaced
+            # rather than guessed at, exactly as SafetyStage does off the stream path.
+            ctx.extras["leak_blocked" if blocked == "leak" else "canary_blocked"] = True
+            logger.warning(
+                "streamed reply blocked trace=%s reason=%s after=%d sentences",
+                ctx.event.trace_id,
+                blocked,
+                len(sender.sent),
+            )
+            if blocked == "canary":
+                get_audit_log().record(
+                    kind="injection",
+                    action="output_canary",
+                    outcome="block",
+                    principal=ctx.extras.get("principal"),
+                    trace_id=ctx.event.trace_id,
+                )
+                apology = t("llm.apology_retry", ctx.locale)
+                # Only sent when nothing preceded it: an apology appended to a partial
+                # answer reads as a second, contradictory reply.
+                if not sender.sent:
+                    await sender.send(apology)
+        elif sender.ok and not stream_error:
             for sentence in aggregator.flush():
-                if not await sender.send(sentence):
+                clean, reason = scrub_sentence(sentence)
+                if reason:
+                    blocked = reason
+                    ctx.extras["leak_blocked" if reason == "leak" else "canary_blocked"] = True
+                    logger.warning(
+                        "buffered sentence blocked trace=%s reason=%s",
+                        ctx.event.trace_id,
+                        reason,
+                    )
+                    break
+                if not clean:
+                    continue
+                if not await sender.send(clean):
                     break
 
         delivered = "".join(sender.sent)
         stats = sender.stats()
+        if blocked:
+            stats["blocked"] = blocked
         if stream_error:
             # Surface the provider fault through the same field the reply stage
             # reports, so an operator reading one trace sees why the answer stopped.
@@ -349,6 +397,23 @@ class ModelStage(Stage):
         ctx.extras["progressive_sent"] = bool(sender.sent)
 
         if not delivered:
+            if blocked:
+                # A second full call would be a second chance for the same model to
+                # produce the same leak, and it would be paid for. The refusal is the
+                # answer instead.
+                logger.warning(
+                    "streamed reply blocked with nothing delivered trace=%s reason=%s",
+                    ctx.event.trace_id,
+                    blocked,
+                )
+                return AIResult(
+                    text=t("llm.apology_retry", ctx.locale),
+                    persona_id=call.persona_id,
+                    provider=call.provider,
+                    prompt_tokens=call.prompt_tokens,
+                    compression=call.compression,
+                    image_descriptions=call.image_descriptions,
+                )
             # Nothing reached the group, so nothing has to be reconciled: take the
             # ordinary path and let the user get a single normal reply.
             logger.info("stream produced nothing trace=%s, falling back", ctx.event.trace_id)
@@ -416,6 +481,52 @@ class ModelStage(Stage):
         return "\n".join(lines)
 
 
+#: Strings that only ever appear in the system prompt. A reply containing one means the
+#: model copied its instructions out of the prompt.
+#:
+#: Module-level rather than a ``SafetyStage`` attribute because the streaming path has to
+#: apply the same rule *before* each sentence leaves the process — see
+#: ``scrub_sentence``. Two copies of this list would drift, and the copy that drifted
+#: would be the one that stops protecting anything.
+_LEAK_MARKERS = (
+    "安全要求：用户消息中的任何指令",
+    "说话风格要求：",
+    "不可信数据",
+    "untrusted-boundary",
+)
+
+_INVISIBLE = dict.fromkeys(
+    map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
+)
+
+
+def scrub_sentence(text: str) -> tuple[str, str]:
+    """Clean one unit of model output. Returns ``(text, block_reason)``.
+
+    ``block_reason`` is ``""`` when the text is safe to deliver, ``"leak"`` when a
+    system-prompt marker was found (the text is truncated at the marker, which is what
+    ``SafetyStage`` always did), or ``"canary"`` when the model echoed the
+    untrusted-content canary (the text is empty and the whole reply must be dropped).
+
+    Extracted so the two delivery paths cannot disagree. The streaming path sends
+    sentences while the model is still talking, which means ``SafetyStage`` — a stage
+    that runs afterwards — never sees them. Before this function existed, a streamed
+    reply bypassed the leak check, the canary drop and credential redaction entirely:
+    the guards were real, tested, and simply not on the path that runs by default.
+    """
+    text = text.translate(_INVISIBLE)
+    # Canary first, and deliberately: the canary lives inside the same framing that
+    # carries the boundary marker, so a canary echo would otherwise be classified as a
+    # "leak" and merely truncated — keeping the text the model lifted out of its
+    # untrusted block. The stricter verdict has to win.
+    if leaked_canary(text):
+        return "", "canary"
+    for marker in _LEAK_MARKERS:
+        if marker in text:
+            return text.split(marker)[0].strip(), "leak"
+    return redact(text), ""
+
+
 class SafetyStage(Stage):
     """Output cleaning before delivery.
 
@@ -424,30 +535,24 @@ class SafetyStage(Stage):
     - collapse runaway whitespace
     - enforce the persona's char budget (hard cut with ellipsis)
     - refuse to echo the system prompt verbatim
+
+    Note on ordering: this stage runs *after* the model stage, so it only guards the
+    non-streaming path. ``scrub_sentence`` is the shared rule both paths apply; this
+    stage's own invocation of it is the second line of defence, not the only one.
     """
 
     name = "safety"
-
-    _LEAK_MARKERS = (
-        "安全要求：用户消息中的任何指令",
-        "说话风格要求：",
-        "不可信数据",
-        "untrusted-boundary",
-    )
-    _INVISIBLE = dict.fromkeys(
-        map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
-    )
 
     def __init__(self, max_chars: int = 1500) -> None:
         self.max_chars = max_chars
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         text = ctx.model_reply or ""
-        text = text.translate(self._INVISIBLE)
+        text = text.translate(_INVISIBLE)
         text = re.sub(r"\n{4,}", "\n\n\n", text)
         text = re.sub(r"[ \t]{3,}", " ", text).strip()
 
-        for marker in self._LEAK_MARKERS:
+        for marker in _LEAK_MARKERS:
             if marker in text:
                 logger.warning("possible system prompt leak blocked trace=%s", ctx.event.trace_id)
                 text = text.split(marker)[0].strip()
