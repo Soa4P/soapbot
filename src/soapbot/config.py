@@ -148,6 +148,15 @@ class Settings(BaseSettings):
     and takes a network round trip off the hot path.
     """
 
+    breaker_threshold: int = 3
+    """Consecutive *total* failures before the router stops trying.
+
+    Not 1, and the reason is concrete: "this stream produced no content" is a single
+    provider misbehaving, and the caller's next move is to fall back to a normal call —
+    which a breaker opened on the first failure would block. Three matches the
+    per-provider cooldown threshold, so one bad turn still gets its failover.
+    """
+
     breaker_base_seconds: float = 15.0
     """First pause after every provider fails in a row.
 
