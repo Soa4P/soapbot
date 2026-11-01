@@ -231,7 +231,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1159 项通过 / 9 项跳过）
+└── tests/              # pytest（1227 项通过 / 10 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
@@ -398,6 +398,13 @@ soapbot/
 | `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |
 | `MAX_EMBEDDING_CHARS` | `2000` | 送去嵌入的最长字符数。超长文本各家行为不一致（截断/报错/换维度），在这里截断让行为可控且可复现 |
 | `MAX_RECALL_ITEMS` | `20` | 单次召回条数上限。召回内容会进入**后续每一轮**提示词，这是成本的上界 |
+| `USER_QUOTA_CALLS` | `30` | 单个用户每窗口的模型调用上限。限流此前只统计「被拒绝的动作」，不管正常高频对话 |
+| `USER_QUOTA_WINDOW_SECONDS` | `300` | 上述配额的时间窗口（滑动窗口，不是固定窗口） |
+| `USER_QUOTA_NOTICE` | 见下 | 超配额时回复用户的固定话术。静默会让人以为机器人坏了 |
+| `BREAKER_THRESHOLD` | `3` | 连续多少次「全部提供方失败」后才暂停模型调用。设为 1 会挡住流式空内容后的正常回退 |
+| `BREAKER_BASE_SECONDS` | `15` | 暂停的首次时长，之后按指数增长 |
+| `BREAKER_MAX_SECONDS` | `300` | 暂停时长上限 |
+| `MODEL_ERROR_NOTICE` | 见下 | 所有提供方不可用时回复用户的降级话术 |
 | `VOICE_ENABLED` | `false` | 入站语音转写。需要 Provider 声明 `transcribe` 槽位 |
 | `VOICE_TTS_ENABLED` / `VOICE_TTS_VOICE` | `false` / `zh-CN-XiaoxiaoNeural` | 回复转语音。需要 `pip install -e ".[voice]"` |
 | `VOICE_ALLOW_HOSTS` | 空 | 允许下载音频的内网主机，逗号分隔。**同机部署 NapCat 必须配**，见下 |

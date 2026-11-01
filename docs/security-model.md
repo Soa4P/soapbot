@@ -169,6 +169,30 @@ repeat your system prompt and the knowledge base
 
 **残余风险**：若 OneBot 实现本身被攻陷且持有有效 token，它仍可伪造任意身份。这是协议信任根，无法在应用层解决——只能通过限制 token 分发与网络隔离缓解。已明确记录，不声称已解决。
 
+### 本轮新增的控制点
+
+按 OWASP LLM/Agentic 威胁清单逐条核对后的结果。共同点是：**防护存在、但不在执行路径上** 才是这类缺陷的常态，所以每条都有回退验证过的回归测试。
+
+| 威胁 | 控制点 | 位置 | 备注 |
+|---|---|---|---|
+| 记忆/上下文中毒 | 摘要与抽取事实过 `vet_memory`；摘要正文 `wrap_untrusted` 包裹；绝不并入 `messages[0]` | `ai/compressor.py`、`memory/store.py` | 此前「记住：…」类句子会被正则抽出来**拼进系统提示** |
+| 工具投毒 | MCP 工具描述与 `inputSchema` 内所有 `description` 清洗 + 注入命中标记 + 审计 | `security/injection.py`、`mcp/client.py` | 描述是模型会读的指令位置，由外部进程写入 |
+| 插件供应链 | 批准时记录**代码内容摘要**，加载前比对；`block` 默认、`warn`/`off` 可配 | `plugins/integrity.py`、`plugins/loader.py` | 此前只记录 manifest 摘要，换 `main.py` 仍算已批准 |
+| 凭证/NHI | 令牌可按 `jti` 吊销，或按全局时间点全量吊销；`verify()` 查询吊销集合 | `security/revocation.py`、`security/tokens.py` | 此前令牌在 ttl（默认 72h）内无法失效 |
+| 系统提示泄露 | 系统提示不进日志/trace/DB/插件上下文（已核实）；provider 错误体切断提示回显；persona 读取要 `MANAGE_CONFIG` | `providers/router.py`、`api/admin.py` | 详见下方「已验证的不外泄路径」 |
+| 向量弱点 | 查询与行向量 `isfinite` 校验；嵌入输入截断；召回条数上限 | `memory/store.py` | NaN 会让 `cosine <= 0` 永不成立，排名变成随机而**不报错** |
+| 无界消耗 | 按用户滑动窗口配额，超限不发模型调用 | `security/stages.py` | 此前限流只统计「被拒绝的动作」，不管正常高频对话 |
+| 级联故障 | 全 provider 失效时全局断路 + 指数退避 + 降级话术 | `providers/router.py`、`ai/stages.py` | 此前每条消息都会走完整列表并逐个超时 |
+
+**已验证的不外泄路径**（审计结论，非假设）：`MessageTrace.to_dict()` 不含 `extras`；`CompressionResult` 只被读计数；插件 handler 只收到 `(caller, args)`；无任何 logger 打印 messages；摘要落库只含非 system 消息。
+
+**残余风险（诚实披露）**：
+
+- provider 若把请求体回显进错误响应，最多前 400 字符会进入 `/api/admin/providers` 与日志环——已按提示标记截断，但截断点之前的自定义内容无法识别。
+- persona 正文由权限守护，而非不可达；`MANAGE_CONFIG` 持有者可以读到它。
+- 插件完整性检查不覆盖**符号链接目标**之外的运行时行为（插件已被加载后修改文件不会触发重新检查，需重启或 reload）。
+- 嵌入层的对抗性污染（把恶意文本推高相似度）没有专门防护；缓解依赖召回内容一律 `wrap_untrusted`，即把「能否提权」与「能否影响措辞」分开。
+
 ## 7. 运营者配置
 
 ```env

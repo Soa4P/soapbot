@@ -61,24 +61,50 @@ async def test_the_first_total_failure_tries_every_provider() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_second_message_attempts_nothing() -> None:
-    """This is the whole point: no second walk of the list."""
+async def test_one_bad_turn_does_not_open_the_breaker() -> None:
+    """The fallback after "stream produced no content" must still be able to run.
+
+    This is why the threshold is not 1: a single provider misbehaving is one bad turn, and
+    the caller's next move is a normal call. A breaker that opened on the first failure
+    would refuse it, turning a recoverable blip into a silent outage.
+    """
     router, attempts = _router("a", "b")
     with pytest.raises(ProviderError):
         await router.chat(_request())
 
+    with pytest.raises(ProviderError) as excinfo:
+        await router.chat(_request())
+
+    assert not isinstance(excinfo.value, ProviderCooldownError)
+    assert len(attempts) == 4, "the second turn must still try"
+
+
+@pytest.mark.asyncio
+async def test_repeated_total_failures_stop_the_attempts() -> None:
+    """This is the whole point: no unbounded walk of the list."""
+    from soapbot.config import settings
+
+    router, attempts = _router("a", "b")
+    for _ in range(settings.breaker_threshold):
+        with pytest.raises(ProviderError):
+            await router.chat(_request())
+
+    before = len(attempts)
     with pytest.raises(ProviderCooldownError):
         await router.chat(_request())
 
-    assert attempts == ["a", "b"], f"providers were retried: {attempts}"
+    assert len(attempts) == before, f"providers were retried: {attempts[before:]}"
 
 
 @pytest.mark.asyncio
 async def test_the_error_carries_a_retry_hint() -> None:
     """The caller needs to know it is transient, and roughly for how long."""
+    from soapbot.config import settings
+
     router, _attempts = _router("a")
-    with pytest.raises(ProviderError):
-        await router.chat(_request())
+    for _ in range(settings.breaker_threshold):
+        with pytest.raises(ProviderError):
+            await router.chat(_request())
 
     with pytest.raises(ProviderCooldownError) as excinfo:
         await router.chat(_request())
@@ -92,6 +118,7 @@ async def test_the_pause_grows_then_stops_growing(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(settings, "breaker_base_seconds", 10.0)
     monkeypatch.setattr(settings, "breaker_max_seconds", 25.0)
+    monkeypatch.setattr(settings, "breaker_threshold", 1)
 
     router, _attempts = _router("a")
     delays: list[float] = []
@@ -125,8 +152,11 @@ async def test_a_success_closes_the_breaker() -> None:
     provider = _Flaky(ProviderConfig(id="f", kind="flaky", base_url="https://x/v1"))
     router.add(provider)
 
-    with pytest.raises(ProviderError):
-        await router.chat(_request())
+    from soapbot.config import settings
+
+    for _ in range(settings.breaker_threshold):
+        with pytest.raises(ProviderError):
+            await router.chat(_request())
     assert router.breaker_status()["open"] is True
 
     provider.fail = False
@@ -141,11 +171,13 @@ async def test_a_success_closes_the_breaker() -> None:
 @pytest.mark.asyncio
 async def test_streaming_is_gated_too() -> None:
     """A stream that bypassed the breaker would double the exposure, not halve it."""
-    router, attempts = _router("a")
+    from soapbot.config import settings
 
-    with pytest.raises(ProviderError):
-        async for _piece in router.stream(_request()):
-            pass
+    router, attempts = _router("a")
+    for _ in range(settings.breaker_threshold):
+        with pytest.raises(ProviderError):
+            async for _piece in router.stream(_request()):
+                pass
 
     before = len(attempts)
     with pytest.raises(ProviderCooldownError):

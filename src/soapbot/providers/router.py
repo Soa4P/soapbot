@@ -250,9 +250,23 @@ class ProviderRouter:
 
     def _open_breaker(self, detail: str) -> None:
         self._breaker_strikes += 1
+        threshold = max(1, settings.breaker_threshold)
+        if self._breaker_strikes < threshold:
+            # Deliberately not opening yet. A single total failure is one bad turn — a
+            # stream that produced nothing still has a fallback worth trying, and a
+            # breaker that fires here would block it.
+            logger.warning(
+                "all providers failed (%d/%d before pausing). %s",
+                self._breaker_strikes,
+                threshold,
+                detail,
+            )
+            return
+
+        over = self._breaker_strikes - threshold + 1
         delay = min(
             settings.breaker_max_seconds,
-            settings.breaker_base_seconds * (2 ** (self._breaker_strikes - 1)),
+            settings.breaker_base_seconds * (2 ** (over - 1)),
         )
         self._breaker_until = time.time() + delay
         logger.error(
