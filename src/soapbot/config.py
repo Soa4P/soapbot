@@ -148,6 +148,27 @@ class Settings(BaseSettings):
     and takes a network round trip off the hot path.
     """
 
+    breaker_base_seconds: float = 15.0
+    """First pause after every provider fails in a row.
+
+    Per-provider cooldown stops us hammering one dead endpoint. It does not cover the case
+    where all of them are dead at once — a network partition, a revoked key shared across
+    configs — where every message otherwise walks the whole list, pays each timeout, and
+    still has nothing to say. The pause grows from here.
+    """
+
+    breaker_max_seconds: float = 300.0
+    """Cap on the pause. Long enough to stop a retry storm, short enough that recovery does
+    not need an operator."""
+
+    model_error_notice: str = "我这会儿连不上模型，稍后再试。"
+    """What the user sees when every provider is unavailable.
+
+    Said out loud rather than staying silent: a bot that goes quiet during an outage is
+    indistinguishable from a bot that is broken, and the operator's only signal becomes a
+    user complaining in the group.
+    """
+
     user_quota_calls: int = 30
     """How many model-backed turns one user may take per window.
 

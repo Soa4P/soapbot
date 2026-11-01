@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from soapbot.config import settings
 from soapbot.providers.base import (
     BaseProvider,
     CapabilitySlot,
@@ -86,11 +87,37 @@ class ProviderStat:
     """Cooldown deadline after repeated failures, to stop hammering a dead endpoint."""
 
 
+class ProviderCooldownError(ProviderError):
+    """Every provider is in cooldown; nothing was attempted.
+
+    A distinct type because the caller's correct response differs from a normal failure:
+    there is nothing to retry and no second provider to fail over to, so the turn should
+    degrade to a spoken notice rather than proceed and fail again.
+    """
+
+    def __init__(self, retry_after: float, detail: str = "") -> None:
+        super().__init__(
+            f"all providers are cooling down; retry in {max(0.0, retry_after):.0f}s"
+            + (f" ({detail})" if detail else "")
+        )
+        self.retry_after = max(0.0, retry_after)
+
+
 class ProviderRouter:
     def __init__(self, cooldown_seconds: float = 60.0) -> None:
         self._providers: dict[str, BaseProvider] = {}
         self._stats: dict[str, ProviderStat] = {}
         self._cooldown = cooldown_seconds
+        self._breaker_until: float = 0.0
+        """When the router as a whole stops trying.
+
+        Per-provider cooldown already stops us hammering one dead endpoint. It does not
+        cover the case where *every* provider is dead at once — a network partition, a
+        revoked key shared across configs — and then every message walks the whole list,
+        fails, logs, and pays the full timeout before the user is told nothing. On a busy
+        group that is a retry storm aimed at endpoints that are already struggling.
+        """
+        self._breaker_strikes: int = 0
 
     # ------------------------------------------------------------------ registry
     def add(self, provider: BaseProvider) -> None:
@@ -143,8 +170,14 @@ class ProviderRouter:
     async def chat(
         self, request: ChatRequest, *, slot: CapabilitySlot = CapabilitySlot.CHAT
     ) -> ChatResponse:
+        self._check_breaker()
         available = self._available(slot)
         if not available:
+            # Distinguish "nothing configured for this capability" (a configuration
+            # problem an operator must see) from "everything is cooling down" (transient,
+            # and the breaker should handle it quietly).
+            if self._all_cooling_down():
+                self._open_breaker("all providers cooling down")
             raise ProviderError(f"no provider available for slot={slot}")
 
         errors: list[str] = []
@@ -161,6 +194,7 @@ class ProviderRouter:
                 stat.last_latency_ms = round(latency, 2)
                 stat.consecutive_failures = 0
                 stat.last_error = ""
+                self._close_breaker()
                 logger.info(
                     "provider=%s ok slot=%s latency=%.0fms tokens=%s/%s",
                     provider.id,
@@ -197,7 +231,51 @@ class ProviderRouter:
                 # the WebUI streams and in the log file an operator ships elsewhere.
                 logger.warning("provider=%s failed slot=%s: %s", provider.id, slot, detail)
 
+        # Every configured provider was tried and every one failed. That is the condition
+        # the breaker exists for: opening it here means the next message is refused in
+        # microseconds instead of paying N timeouts to learn the same thing.
+        self._open_breaker(" | ".join(errors)[:300])
         raise ProviderError("all providers failed: " + " | ".join(errors))
+
+    # ------------------------------------------------------------------ breaker
+    def _all_cooling_down(self) -> bool:
+        now = time.time()
+        stats = [self._stats.get(p.id) for p in self._ordered()]
+        return bool(stats) and all(s is not None and s.disabled_until > now for s in stats)
+
+    def _check_breaker(self) -> None:
+        remaining = self._breaker_until - time.time()
+        if remaining > 0:
+            raise ProviderCooldownError(remaining)
+
+    def _open_breaker(self, detail: str) -> None:
+        self._breaker_strikes += 1
+        delay = min(
+            settings.breaker_max_seconds,
+            settings.breaker_base_seconds * (2 ** (self._breaker_strikes - 1)),
+        )
+        self._breaker_until = time.time() + delay
+        logger.error(
+            "all providers failed (%d in a row); pausing model calls for %.0fs. %s",
+            self._breaker_strikes,
+            delay,
+            detail,
+        )
+
+    def _close_breaker(self) -> None:
+        if self._breaker_until or self._breaker_strikes:
+            logger.info("provider recovered; circuit breaker closed")
+        self._breaker_until = 0.0
+        self._breaker_strikes = 0
+
+    def breaker_status(self) -> dict[str, Any]:
+        """What the panel shows. Counts and deadlines only, never provider secrets."""
+        remaining = max(0.0, self._breaker_until - time.time())
+        return {
+            "open": remaining > 0,
+            "retry_after": round(remaining, 1),
+            "consecutive_total_failures": self._breaker_strikes,
+        }
 
     def _stream_candidates(self) -> list[BaseProvider]:
         """Streaming providers first, then chat-only ones as a last resort.
@@ -231,8 +309,11 @@ class ProviderRouter:
         *before* its first yield is still replaced, which is the case that matters in
         practice: bad key, dead host, 429 on connect.
         """
+        self._check_breaker()
         candidates = self._stream_candidates()
         if not candidates:
+            if self._all_cooling_down():
+                self._open_breaker("all providers cooling down")
             raise ProviderError(f"no provider available for slot={slot}")
 
         errors: list[str] = []
@@ -248,6 +329,7 @@ class ProviderRouter:
                         stat.last_latency_ms = round((time.perf_counter() - t0) * 1000, 2)
                         stat.consecutive_failures = 0
                         stat.last_error = ""
+                        self._close_breaker()
                         if on_pick is not None:
                             on_pick(provider.id)
                         logger.info(
@@ -263,14 +345,15 @@ class ProviderRouter:
                 stat.calls += 1 if not produced else 0
                 stat.failures += 1
                 stat.consecutive_failures += 1
-                stat.last_error = str(exc)
-                errors.append(f"{provider.id}: {exc}")
+                stat.last_error = scrub_prompt_echo(str(exc))
+                errors.append(f"{provider.id}: {stat.last_error}")
                 if produced:
                     # Half an answer is already in the group. A second provider would
                     # continue someone else's sentence; surfacing the break is honest.
                     raise
                 logger.warning("provider=%s stream failed: %s", provider.id, exc)
 
+        self._open_breaker(" | ".join(errors)[:300])
         raise ProviderError("all stream providers failed: " + " | ".join(errors))
 
     async def embed(self, texts: list[str]) -> list[float] | list[list[float]]:

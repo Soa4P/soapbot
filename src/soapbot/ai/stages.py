@@ -11,12 +11,14 @@ from soapbot.ai.compressor import ContextCompressor
 from soapbot.ai.engine import AIEngine, AIRequest, AIResult
 from soapbot.ai.persona import PersonaStore
 from soapbot.ai.streaming import SentenceAggregator
+from soapbot.config import settings
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
 from soapbot.i18n import t
+from soapbot.providers.router import ProviderCooldownError
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import (
     INJECTION_BLOCK_ON,
@@ -238,6 +240,20 @@ class ModelStage(Stage):
                     if use_stream
                     else await self.engine.respond(req)
                 )
+            except ProviderCooldownError as exc:
+                # Every provider is in cooldown, so nothing was attempted. Halting here
+                # would leave the group with silence, indistinguishable from a broken bot;
+                # the operator's only signal would be someone complaining in the group.
+                logger.warning(
+                    "model unavailable (breaker open) trace=%s retry_in=%.0fs",
+                    ctx.event.trace_id,
+                    exc.retry_after,
+                )
+                ctx.extras["model_error"] = str(exc)
+                ctx.extras["breaker_open"] = True
+                ctx.model_reply = settings.model_error_notice
+                ctx.extras["skip_model"] = True
+                return StageResult()
             except Exception as exc:
                 logger.error("model stage failed trace=%s: %s", ctx.event.trace_id, exc)
                 ctx.extras["model_error"] = str(exc)
