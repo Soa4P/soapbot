@@ -497,6 +497,10 @@ async def _serve():
             if inspect.isawaitable(out):
                 await out
     except BaseException as exc:
+        # ``BaseException`` on purpose: this runs in the plugin *subprocess*, where an
+        # unreported exit leaves the host waiting on a child that is already gone.
+        # ``except Exception`` would miss ``SystemExit``/``KeyboardInterrupt`` and
+        # produce exactly that deadlock. See ``plugins/isolation.py`` for the same note.
         _send({"type": "ready", "ok": False, "error": type(exc).__name__})
         return
 
@@ -514,6 +518,9 @@ async def _serve():
         try:
             frame = await loop.run_in_executor(None, _read_frame)
         except BaseException as exc:
+            # Wide on purpose for the same reason as above: a cancel delivered while a
+            # frame is being read must still produce a ``fatal`` frame, or the host
+            # waits forever for a child that has already stopped serving.
             _send({"type": "fatal",
                    "error": type(exc).__name__ + ": " + str(exc)[:200]})
             return

@@ -249,6 +249,42 @@ class Settings(BaseSettings):
     stream_send_interval: float = 0.35
     """Minimum seconds between two progressive messages to the same group."""
 
+    # ---- dispatch backpressure ----
+    max_inflight_handlers: int = 32
+    """Ceiling on message-handling tasks running at once, per adapter.
+
+    Over the cap a new message is dropped instead of queued. A queue would be worse
+    than the drop in both directions: every later reply would inherit the backlog's
+    delay, and each waiting message still costs a task plus a full pipeline run once
+    it drains. The number is deliberately well above real chat concurrency — one busy
+    group produces a handful of overlapping turns — because the cost of hitting this
+    limit is a dropped answer, and the cost of setting it too low is dropped answers
+    during exactly the burst the operator cared about.
+
+    ``SOAPBOT_MAX_INFLIGHT_HANDLERS=0`` disables the cap (old behaviour).
+    """
+
+    handler_timeout_seconds: float = 60.0
+    """Wall-clock bound on one message's handling, measured from task start.
+
+    Not a per-``await`` timeout: the model provider already bounds its own calls, and
+    scattering deadlines across a dozen awaits makes the one number an operator cares
+    about ("how long until this message is abandoned") impossible to find. Sixty
+    seconds sits just above a worst-case model call plus one retry, so a timeout here
+    means genuinely stuck rather than merely slow.
+
+    ``0`` disables it.
+    """
+
+    busy_notice: str = "忙不过来啦，稍后再试一次"
+    """Reply sent when an @mention is dropped by the cap.
+
+    Silence is not an acceptable answer to a direct mention: from the member's side an
+    ignored "@" and a crashed bot look identical. Ordinary group chatter is dropped
+    quietly — answering every dropped line would turn one overload into a flood of
+    busy notices. Set to an empty string to drop mentions silently too.
+    """
+
     voice_enabled: bool = False
     """Transcribe inbound voice messages into the conversation.
 

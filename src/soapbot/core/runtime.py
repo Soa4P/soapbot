@@ -147,6 +147,30 @@ class BotRuntime:
                 logger.error("adapter start failed: %s -> %s", adapter.meta.name, exc)
                 adapter.health.last_error = str(exc)
 
+    async def drain(self, *, timeout: float = 5.0) -> None:
+        """Let in-flight work finish before anything it writes to is closed.
+
+        Called by the app *before* ``stop()``, and the order is the whole point:
+        handlers still running are mid-reply, mid-archive, and possibly mid-`send()`.
+        Closing adapters and the database first turns that work into writes against
+        dead resources — and because those failures land inside cancelled tasks, the
+        operator sees a clean shutdown while the last replies were lost.
+
+        Adapters go first, then the observer: a handler is what produces the archive
+        payloads, so draining them in the other order would leave archives created
+        after the observer was already drained.
+        """
+        for adapter in self.adapters.values():
+            try:
+                await adapter.drain_handlers(timeout=timeout)
+            except Exception as exc:  # pragma: no cover - shutdown must not raise
+                logger.warning("adapter drain failed %s: %s", adapter.meta.name, exc)
+        if self.passive is not None:
+            try:
+                await self.passive.drain(timeout=timeout)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("passive observer drain failed: %s", exc)
+
     async def stop(self) -> None:
         self._running = False
         if self.mcp is not None:
@@ -307,6 +331,10 @@ class BotRuntime:
                     "online": a.health.online,
                     "last_error": a.health.last_error,
                     "capabilities": sorted(str(c) for c in a.capabilities),
+                    # Dispatch backpressure, per adapter. A cap whose drops are
+                    # invisible is a cap nobody can tell apart from a quiet group,
+                    # and the operator's only symptom would be unanswered messages.
+                    "dispatch": a.backpressure_status(),
                 }
                 for name, a in self.adapters.items()
             },

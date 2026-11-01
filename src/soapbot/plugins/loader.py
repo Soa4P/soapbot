@@ -56,7 +56,7 @@ import yaml
 
 from soapbot.config import settings
 from soapbot.plugins.context import PluginContext
-from soapbot.plugins.integrity import compare as compare_integrity
+from soapbot.plugins.integrity import compare_async as compare_integrity_async
 from soapbot.plugins.integrity import digest_tree
 from soapbot.plugins.integrity import forget as forget_integrity
 from soapbot.plugins.isolation import DEFAULT_PLUGIN_MEMORY_BYTES
@@ -329,6 +329,29 @@ class PluginLoader:
         for name, record in self.approvals.all().items():
             self._approved[name] = record.capabilities
 
+    async def hash_plugin(self, name: str) -> str:
+        """Digest a plugin's code without blocking the event loop.
+
+        ``approve`` hashes synchronously because its callers include the CLI, but the
+        WebUI approval path runs inside a request handler: hashing a large plugin tree
+        there stalls every other task, chat included. The two halves must stay
+        consistent — this clears the cache exactly as ``approve`` would, then hashes in
+        a worker thread.
+        """
+        directory = self.plugins_dir / name
+        if not directory.is_dir():
+            return ""
+
+        def _compute() -> str:
+            forget_integrity(directory)
+            try:
+                return digest_tree(directory)
+            except OSError as exc:  # pragma: no cover - unreadable tree
+                logger.warning("could not hash plugin %s: %s", name, exc)
+                return ""
+
+        return await asyncio.to_thread(_compute)
+
     def approve(
         self,
         name: str,
@@ -336,6 +359,7 @@ class PluginLoader:
         *,
         actor: str = "",
         manifest_digest: str = "",
+        content_digest: str | None = None,
     ) -> None:
         """Operator action: approve capabilities for a plugin.
 
@@ -355,14 +379,26 @@ class PluginLoader:
         # rather than at load time is what makes the digest an approval of reviewed
         # bytes: a load-time hash would record whatever is on disk when the plugin is
         # started, which is exactly the value an attacker controls.
-        content_digest = ""
-        directory = self.plugins_dir / name
-        if directory.is_dir():
-            try:
-                forget_integrity(directory)
-                content_digest = digest_tree(directory)
-            except OSError as exc:  # pragma: no cover - unreadable tree
-                logger.warning("could not hash plugin %s at approval time: %s", name, exc)
+        # ``content_digest`` may be supplied by an async caller that already paid the
+        # hashing cost off the event loop (see ``hash_plugin``); otherwise it is done
+        # here, synchronously, which is correct for CLI and test callers.
+        #
+        # An *empty* string falls back too. ``hash_plugin`` returns "" when the tree is
+        # unreadable, and recording that as the approved digest would silently downgrade
+        # the plugin to ``unknown`` — the one state the integrity check deliberately does
+        # not block. Falling back re-hashes, so an unreadable tree is still recorded as
+        # unverified but never because a caller passed a blank.
+        if not content_digest:
+            content_digest = ""
+            directory = self.plugins_dir / name
+            if directory.is_dir():
+                try:
+                    forget_integrity(directory)
+                    content_digest = digest_tree(directory)
+                except OSError as exc:  # pragma: no cover - unreadable tree
+                    logger.warning(
+                        "could not hash plugin %s at approval time: %s", name, exc
+                    )
         if self.approvals is not None:
             self.approvals.approve(
                 name,
@@ -424,7 +460,7 @@ class PluginLoader:
             ),
         )
 
-    def _enforce_integrity(self, name: str, directory: Path) -> str:
+    async def _enforce_integrity(self, name: str, directory: Path) -> str:
         """Refuse (or warn about) code that changed after it was approved.
 
         Returns the verdict state so the loaded record can report it. Three outcomes:
@@ -452,7 +488,9 @@ class PluginLoader:
         # both size and mtime (a deliberate attacker move, and also what `git checkout`
         # of the same-size file can do).
         forget_integrity(directory)
-        verdict = compare_integrity(directory, recorded)
+        # Awaited off the loop: this hashes the tree, and a load is reachable from the
+        # panel, so an inline read would stall chat and the UI for its duration.
+        verdict = await compare_integrity_async(directory, recorded)
 
         if verdict.state != "changed":
             if verdict.state == "unknown" and recorded == "" and self.approvals is not None:
@@ -560,7 +598,7 @@ class PluginLoader:
         # executed the code it was supposed to vet, which is the failure mode this
         # project has hit three times (a constructor argument nobody read, a guard the
         # streaming path skipped, a sanitiser whose output was thrown away).
-        integrity = self._enforce_integrity(name, directory)
+        integrity = await self._enforce_integrity(name, directory)
 
         grant = self.grant_for(manifest)
         guard = CapabilityGuard(grant, audit=self.audit)

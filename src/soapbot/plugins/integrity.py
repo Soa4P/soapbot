@@ -22,6 +22,7 @@ position for manifests.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -126,8 +127,26 @@ def digest_tree(directory: Path) -> str:
     return digest
 
 
+async def compare_async(directory: Path, recorded: str) -> IntegrityVerdict:
+    """``compare`` off the event loop.
+
+    ``digest_tree`` reads every byte of the plugin tree. The cache means it usually
+    only stats files, but the first call after any edit is a full read — and both call
+    sites (``PluginLoader.load`` and the ``/api/plugins`` listing) are async, so running
+    it inline stalls every other task, including chat replies and the WebUI, for as
+    long as the disk takes. ``to_thread`` keeps the synchronous function usable from
+    tests and sync callers without a second implementation.
+    """
+    return await asyncio.to_thread(compare, directory, recorded)
+
+
 def compare(directory: Path, recorded: str) -> IntegrityVerdict:
-    """Compare the tree under ``directory`` against a previously recorded digest."""
+    """Compare the tree under ``directory`` against a previously recorded digest.
+
+    Synchronous by design: hashing is CPU/disk bound and this is the version a sync
+    caller wants. Async callers must use :func:`compare_async` so the read does not
+    happen on the loop.
+    """
     if not recorded:
         return IntegrityVerdict(state="unknown", recorded="", current="")
 
@@ -151,4 +170,4 @@ def forget(directory: Path) -> None:
     _CACHE.pop(str(Path(directory).resolve()), None)
 
 
-__all__ = ["IntegrityVerdict", "compare", "digest_tree", "forget"]
+__all__ = ["IntegrityVerdict", "compare", "compare_async", "digest_tree", "forget"]

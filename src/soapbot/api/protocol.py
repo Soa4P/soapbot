@@ -145,9 +145,23 @@ async def scan_ports(ports: list[int], token_for: dict[int, str] | None = None) 
     for port in ports:
         if 0 < port < 65536 and port not in unique:
             unique.append(port)
-    results = await asyncio.gather(*(_classify(port, token_for) for port in unique[:MAX_PORTS]))
+    # ``return_exceptions`` is required, not defensive: a scan covers a range, and one
+    # unreachable or malformed port would otherwise cancel the gather and turn "22 is
+    # open, 3001 is not answering" into an outright 500. An error here means this
+    # port could not be classified, which is what "closed" already says.
+    results = await asyncio.gather(
+        *(_classify(port, token_for) for port in unique[:MAX_PORTS]),
+        return_exceptions=True,
+    )
+    entries: list[dict[str, Any]] = []
+    for port, result in zip(unique[:MAX_PORTS], results, strict=True):
+        if isinstance(result, BaseException):
+            logger.debug("port scan failed port=%d: %s", port, result)
+            entries.append({"port": port, "kind": "closed"})
+        else:
+            entries.append(result)
     order = {"onebot": 0, "onebot_locked": 1, "http": 2, "closed": 3}
-    return sorted(results, key=lambda item: (order.get(item["kind"], 9), item["port"]))
+    return sorted(entries, key=lambda item: (order.get(item["kind"], 9), item["port"]))
 
 
 @router.get("/protocol/scan")

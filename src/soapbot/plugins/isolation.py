@@ -363,6 +363,12 @@ def main():
             return
         _send({"ok": True, "result": result})
     except BaseException as exc:
+        # ``BaseException`` is deliberate here, not a slip: this is the plugin
+        # *subprocess* boundary, and anything the child does not report is a child that
+        # dies with the parent still waiting on a reply. ``except Exception`` would let
+        # ``SystemExit`` and ``KeyboardInterrupt`` (and a cancel delivered into the
+        # child) escape the reporting path. Do not "fix" this to ``Exception``.
+        #
         # Report the type only: the message is plugin-controlled and routinely
         # contains paths, tokens or another user's data.
         _send({"ok": False, "error": type(exc).__name__})

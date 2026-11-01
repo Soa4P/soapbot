@@ -61,12 +61,16 @@ def _manager():
     return manager
 
 
-def _code_changed(loader, name: str, record) -> bool:
+async def _code_changed(loader, name: str, record) -> bool:
     """Whether the plugin's source no longer matches what was approved.
 
     Computed for the listing so the panel can warn *before* someone presses Load. The
     enforcement lives in ``PluginLoader.load``; this is the same comparison, done earlier,
     because an operator's first notice of tampering should not be a failed load.
+
+    Async because the comparison hashes the plugin tree: this runs once per installed
+    plugin inside the listing endpoint, so doing it inline summed every plugin's disk
+    read onto the event loop and stalled chat while the panel was open.
     """
     if record is None or not getattr(record, "content_digest", ""):
         return False
@@ -74,9 +78,9 @@ def _code_changed(loader, name: str, record) -> bool:
     if not directory.is_dir():
         return False
     try:
-        from soapbot.plugins.integrity import compare
+        from soapbot.plugins.integrity import compare_async
 
-        return compare(directory, record.content_digest).state == "changed"
+        return (await compare_async(directory, record.content_digest)).state == "changed"
     except OSError:  # pragma: no cover - unreadable tree
         return False
 
@@ -178,7 +182,7 @@ async def list_plugins(request: Request) -> dict:
                         # is enforced on load (block by default), but the panel has to show
                         # it *before* someone presses Load, or the only way to discover it
                         # is a failed attempt with a stack trace.
-                        "code_changed": _code_changed(loader, manifest.name, record),
+                        "code_changed": await _code_changed(loader, manifest.name, record),
                         "integrity_mode": settings.plugin_integrity_mode,
                     }
                     if record is not None
@@ -230,11 +234,18 @@ async def approve(name: str, body: ApproveRequest, request: Request) -> dict:
     # ``actor="webui"`` and the manifest digest both go into the record: the first
     # tells an auditor where the decision came from, the second makes a later
     # silent manifest edit detectable instead of invisible.
+    #
+    # The content digest is computed here, off the loop, and passed in: ``approve``
+    # would otherwise hash the tree synchronously inside this request and stall chat.
+    # It must be hashed *now* rather than at load time — the approved bytes are the
+    # reviewed bytes, and a load-time hash records whatever is on disk by then.
+    content_digest = await loader.hash_plugin(name)
     loader.approve(
         name,
         set(body.capabilities),
         actor="webui",
         manifest_digest=manifest.manifest_digest,
+        content_digest=content_digest,
     )
     return {"ok": True, "name": name, "granted": body.capabilities, "persisted": True}
 
