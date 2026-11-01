@@ -3,8 +3,6 @@
 
 soapbot.api.bilibili
 soapbot.api.pipeline
-soapbot.api.security
-soapbot.api.settings
 soapbot.bilibili.wbi
 soapbot.core.bus
 soapbot.core.progressive
@@ -14,5 +12,4 @@ soapbot.examples.plugins.admin.main
 soapbot.examples.plugins.echo.main
 soapbot.examples.plugins.help.main
 soapbot.examples.plugins.remind.main
-soapbot.logging_setup
 soapbot.memory.migrations
