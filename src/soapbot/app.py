@@ -111,7 +111,27 @@ def get_startup_errors() -> list[str]:
 # -------------------------------------------------------------------------- auth
 def _init_auth() -> None:
     """Create the token service and the one-time bootstrap credential."""
-    service = TokenService(secret=settings.jwt_secret, ttl_hours=settings.jwt_ttl_hours)
+    from soapbot.security.revocation import RevocationStore, default_path
+
+    revocations = RevocationStore(default_path(settings.data_dir))
+    # Prune on boot rather than on every verify: an expired entry is already rejected by
+    # the signature check, so the only reason to keep the file tidy is that a list an
+    # operator never sees grow is one they will edit by hand or delete.
+    try:
+        pruned = revocations.prune()
+        if pruned:
+            logger.info("pruned %d expired token revocation(s)", pruned)
+    except RuntimeError as exc:
+        # A corrupt revocation file must stop startup: continuing would treat every
+        # revoked token as valid, which is the one outcome this must not have.
+        logger.error("%s", exc)
+        raise
+
+    service = TokenService(
+        secret=settings.jwt_secret,
+        ttl_hours=settings.jwt_ttl_hours,
+        revocations=revocations,
+    )
     bootstrap = BootstrapToken(settings.init_token)
 
     if bootstrap.generated:
@@ -130,7 +150,7 @@ def _init_auth() -> None:
         except OSError as exc:  # pragma: no cover - read-only or full filesystem
             logger.error("could not write bootstrap token file (%s); it is lost", exc)
 
-    configure_auth(service=service, bootstrap=bootstrap)
+    configure_auth(service=service, bootstrap=bootstrap, revocations=revocations)
     logger.info("auth ready (jwt secret from %s)", service.secret_source)
 
 

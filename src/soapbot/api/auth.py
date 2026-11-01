@@ -25,7 +25,7 @@ import logging
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from soapbot.security.audit import get_audit_log
@@ -39,6 +39,9 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient", ""})
 
 _token_service: TokenService | None = None
 _bootstrap: BootstrapToken | None = None
+_revocations: Any = None
+"""The store the token service consults. Held here too so the endpoints can revoke
+without reaching through the service's private state."""
 
 def _new_login_limiter() -> SlidingWindowLimiter:
     return SlidingWindowLimiter(limit=5, window_seconds=300.0)
@@ -53,11 +56,17 @@ into noise while the real operator is trying to log in.
 """
 
 
-def configure_auth(*, service: TokenService | None, bootstrap: BootstrapToken | None) -> None:
+def configure_auth(
+    *,
+    service: TokenService | None,
+    bootstrap: BootstrapToken | None,
+    revocations: Any = None,
+) -> None:
     """Install the process-wide auth objects (called from the app lifespan)."""
-    global _token_service, _bootstrap, _login_limiter
+    global _token_service, _bootstrap, _revocations, _login_limiter
     _token_service = service
     _bootstrap = bootstrap
+    _revocations = revocations
     # A fresh bootstrap token means a fresh login budget: carrying a previous app
     # instance's failed attempts into this one would lock out the operator for five
     # minutes after a restart, which is the opposite of what the limit is for.
@@ -74,10 +83,15 @@ def get_bootstrap() -> BootstrapToken | None:
 
 def reset_auth() -> None:
     """Test seam: forget the installed objects and any login throttling."""
-    global _token_service, _bootstrap, _login_limiter
+    global _token_service, _bootstrap, _revocations, _login_limiter
     _token_service = None
     _bootstrap = None
+    _revocations = None
     _login_limiter = _new_login_limiter()
+
+
+def get_revocations() -> Any:
+    return _revocations
 
 
 def _client_host(request: Request) -> str:
@@ -308,3 +322,127 @@ async def auth_status(request: Request) -> dict:
         "init_token_generated": bool(bootstrap is not None and bootstrap.generated),
         "ttl_seconds": _token_service.ttl_seconds if _token_service else 0,
     }
+
+
+# ------------------------------------------------------------- revocation
+@router.post("/logout")
+async def logout(request: Request, auth: dict[str, Any] = Depends(require_api_auth)) -> dict:
+    """Revoke the caller's own token.
+
+    Until this existed there was no way to end a session: a signed token was valid for
+    its full 72 hours whatever the operator did, and the only remedy — rotating the
+    signing secret — logged every session out at once, so nobody used it.
+
+    Only a bearer token can be revoked. The loopback fallback carries no token, so there
+    is nothing to revoke; saying so is better than returning ``ok: true`` and doing
+    nothing.
+    """
+    store = _revocations
+    claims = getattr(request.state, "claims", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="token revocation is not initialised")
+    if auth.get("mode") != "token" or claims is None:
+        raise HTTPException(
+            status_code=400,
+            detail="this session has no token to revoke; loopback access is not a session",
+        )
+
+    revoked = store.revoke(claims.token_id, claims.expires_at)
+    get_audit_log().record(
+        kind="login",
+        action="logout",
+        outcome="allow" if revoked else "deny",
+        detail=(
+            f"subject={claims.subject} jti={claims.token_id[:8]} from={_client_host(request)}"
+            + ("" if revoked else " (already revoked)")
+        ),
+    )
+    return {"ok": True, "revoked": revoked}
+
+
+@router.post("/revoke-all")
+async def revoke_all_tokens(
+    request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
+    """Invalidate every token issued so far. Owner only.
+
+    This is the "the signing key may be compromised" button. It has to work without
+    knowing which tokens exist, which is why the store keeps a cut-off timestamp rather
+    than only a list of ids — an operator who suspects their laptop was stolen does not
+    have the ``jti`` of the token on it.
+
+    Owner rather than admin: it logs out every operator and every open panel, and an
+    admin who can do that to the owner is an admin who can deny service.
+    """
+    from soapbot.api.admin import _role_of
+    from soapbot.security.principal import Role
+
+    store = _revocations
+    if store is None:
+        raise HTTPException(status_code=503, detail="token revocation is not initialised")
+
+    role = _role_of(auth)
+    if role.rank < Role.OWNER.rank:
+        get_audit_log().record(
+            kind="login",
+            action="revoke_all",
+            outcome="deny",
+            role=role.value,
+            detail=f"requires owner from={_client_host(request)}",
+        )
+        raise HTTPException(status_code=403, detail="revoking all tokens requires the owner role")
+
+    # Two mechanisms, used together on purpose. The cut-off catches tokens the operator
+    # cannot enumerate; revoking the caller's own id catches the one token the timestamp
+    # cannot distinguish — its own, if it was issued in the same whole second as the
+    # cut-off. Without the second step "revoke everything" can leave the caller's own
+    # session alive, which is the one session the operator definitely knows about.
+    caller_claims = getattr(request.state, "claims", None)
+    if caller_claims is not None:
+        store.revoke(caller_claims.token_id, caller_claims.expires_at)
+    cut_off = store.revoke_all()
+
+    # Hand the caller a replacement token. Without this, "revoke all" logs out the owner
+    # who just pressed it, and the way back in — the bootstrap token — was redeemed at
+    # their first login. The next step would be regenerating credentials on the host,
+    # which is exactly the situation an operator cannot recover from at 3am.
+    replacement = ""
+    service = _token_service
+    claims = getattr(request.state, "claims", None)
+    if service is not None and auth.get("mode") == "token":
+        new_token, new_claims = service.issue(
+            claims.subject if claims else "operator",
+            role=claims.role if claims else role.value,
+        )
+        replacement = new_token
+        expires_at = new_claims.expires_at
+    else:
+        expires_at = 0
+
+    get_audit_log().record(
+        kind="login",
+        action="revoke_all",
+        outcome="allow",
+        role=role.value,
+        detail=(
+            f"revoked_before={int(cut_off)} from={_client_host(request)} "
+            f"replacement_issued={bool(replacement)}"
+        ),
+    )
+    return {
+        "ok": True,
+        "revoked_before": cut_off,
+        "access_token": replacement,
+        "expires_at": expires_at,
+    }
+
+
+@router.get("/revocations")
+async def list_revocations(
+    _auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict[str, Any]:
+    """What the panel shows on the security page. Read-only, no secrets."""
+    store = _revocations
+    if store is None:
+        return {"revoked_before": 0.0, "count": 0, "tokens": []}
+    return store.snapshot()
