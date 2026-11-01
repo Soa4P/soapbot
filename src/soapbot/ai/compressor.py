@@ -29,7 +29,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from soapbot.ai.tokens import count_messages, count_tokens
-from soapbot.security.injection import wrap_untrusted
+from soapbot.security.audit import get_audit_log
+from soapbot.security.injection import vet_memory, wrap_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,11 @@ class ContextCompressor:
 
         # 4. extractive key facts when the summary alone is still too fat
         if current > budget and cfg.enable_extraction:
-            facts = self.extract_facts(messages)
+            # ``extract_facts`` matches 记住|必须|不要|禁止 — sentences addressed at the
+            # assistant — so the filter is the same one the memory table uses. The block
+            # is also wrapped as untrusted by ``_inject_system_note``; two independent
+            # reasons a planted instruction cannot act like an operator rule.
+            facts = [f for f in self.extract_facts(messages) if vet_memory(f)[0]]
             if facts:
                 fact_block = "已确认的关键事实：\n" + "\n".join(f"- {f}" for f in facts[:20])
                 clean = self._inject_system_note(clean, fact_block)
@@ -276,7 +281,33 @@ class ContextCompressor:
             logger.warning("summariser failed, falling back to trim: %s", exc)
             return system + recent, len(to_fold)
 
+        # The summary is model-written *about* user messages, so it can carry a poisoned
+        # claim forward verbatim. Wrapping it as untrusted data (below) removes its
+        # authority, but a summary is also *persisted* and re-fed on every later turn, so
+        # the same rule the memory table applies belongs here too: refuse to carry text
+        # that asserts privileges or tries to rewrite the rules.
+        allowed, reason = vet_memory(new_summary)
+        if not allowed:
+            logger.warning(
+                "summariser output quarantined reason=%s; keeping the previous summary only",
+                reason,
+            )
+            get_audit_log().record(
+                kind="injection",
+                action="memory_summary",
+                outcome="block",
+                detail=f"summariser output refused: {reason}",
+            )
+            new_summary = ""
+
         merged = f"{summary}\n{new_summary}".strip() if summary else new_summary.strip()
+        if not merged:
+            # Nothing safe survived, and there is no earlier summary to fall back on, so
+            # the folded turns are simply dropped. Trimming is the honest outcome: an
+            # empty summary block would claim the conversation was summarised when it was
+            # not.
+            logger.info("no summary retained after quarantine; falling back to trimming")
+            return [*system, *recent], len(to_fold)
         summary_msg = {
             "role": "system",
             # The summary is model-written *about* user text, and it is the one piece of
