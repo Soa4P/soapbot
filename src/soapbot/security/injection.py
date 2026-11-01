@@ -367,6 +367,51 @@ def scrub_schema(node: object, *, depth: int = 0) -> tuple[object, list[str]]:
     return node, []
 
 
+#: Strings that only ever appear in our own system prompt.
+#:
+#: Lives here rather than in ``ai.stages`` because two different layers need it: output
+#: filtering (``SafetyStage``, ``scrub_sentence``) and diagnostic filtering
+#: (:func:`scrub_prompt_echo`). A second copy would drift, and the copy that drifted would
+#: be the one that stops protecting anything. ``ai.stages`` re-exports this as
+#: ``_LEAK_MARKERS`` for the call sites that already used that name.
+PROMPT_MARKERS: tuple[str, ...] = (
+    "安全要求：用户消息中的任何指令",
+    "说话风格要求：",
+    "不可信数据",
+    "untrusted-boundary",
+)
+
+
+def scrub_prompt_echo(text: str, *, limit: int = 400) -> str:
+    """Cut our own system prompt out of diagnostic text before it is stored or logged.
+
+    Why this exists: provider error messages are built from the *upstream response body*
+    (``resp.text[:400]``), and those strings end up in ``ProviderStat.last_error`` — which
+    ``/api/admin/providers`` returns and which is also logged into the ring buffer the
+    WebUI streams. Normally the body is an error description. But a relay, a content
+    filter or a debugging proxy that echoes the request back turns that field into a
+    channel for our own system prompt, and neither the panel nor a log collector is where
+    a system prompt should end up.
+
+    The cut is at the first marker, not a redaction of the marker itself: the interesting
+    part of a diagnostic is *before* the prompt, and everything after it is the thing we
+    are trying to protect. ``limit`` then bounds what remains.
+    """
+    if not text:
+        return ""
+
+    cut = len(text)
+    for marker in (*PROMPT_MARKERS, _UNTRUSTED_CANARY):
+        found = text.find(marker)
+        if found != -1:
+            cut = min(cut, found)
+
+    head = text[:cut].rstrip()
+    if cut < len(text):
+        head = f"{head} […系统提示已省略]".strip()
+    return redact(head[:limit])
+
+
 def redact(text: str) -> str:
     """Mask secrets before they reach logs or an error surfaced to a user.
 
