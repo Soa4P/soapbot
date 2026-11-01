@@ -303,6 +303,14 @@ async def _shutdown() -> None:
 
     runtime = _RUNTIME
     if runtime is not None:
+        # Drain before closing anything: handlers still in flight are mid-reply and
+        # mid-archive, and a shutdown that closes sockets and the database first
+        # turns their last write into an exception inside a cancelled task — which
+        # looks like a clean stop and silently loses the replies that were underway.
+        try:
+            await runtime.drain(timeout=5.0)
+        except Exception as exc:  # pragma: no cover - shutdown must not raise
+            logger.warning("runtime drain failed: %s", exc)
         # Close the Bilibili HTTP pool before the runtime stops: a plugin or command
         # that is unwinding must not find a closed client mid-request.
         if getattr(runtime, "bilibili", None) is not None:

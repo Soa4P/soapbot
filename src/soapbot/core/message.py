@@ -187,6 +187,32 @@ class IncomingMessage:
     def has_image(self) -> bool:
         return any(s.type is SegmentType.IMAGE for s in self.segments)
 
+    @property
+    def addresses_me(self) -> bool:
+        """Whether this message is aimed at the bot specifically.
+
+        Private messages always are. In a group it takes an AT segment naming this
+        account — ``all`` (``@全体成员``) does not count, because that is addressed to
+        everyone and a bot that treats it as a direct mention would answer every
+        announcement.
+
+        Used by dispatch backpressure to decide whether silence is acceptable. Dropping
+        an ordinary group message costs a missed read; dropping an @mention is
+        indistinguishable from a dead bot, and that is exactly the failure this project
+        kept being told about.
+        """
+        if self.scene is MessageScene.PRIVATE:
+            return True
+        if not self.self_id:
+            return False
+        for segment in self.segments:
+            if segment.type is not SegmentType.AT:
+                continue
+            target = str(segment.data.get("qq", ""))
+            if target and target == self.self_id:
+                return True
+        return False
+
 
 @dataclass(slots=True)
 class OutgoingMessage:

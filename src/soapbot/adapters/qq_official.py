@@ -120,6 +120,13 @@ class QQOfficialAdapter(Adapter):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
             self._task = None
+        # Cancelling ``_task`` stops the inbound reader; it does not stop the handler
+        # tasks that reader already dispatched. Without this, a shutdown mid-reply
+        # left those tasks to be destroyed with the loop, which is the same "reply
+        # half-written, nothing in the log" outcome the OneBot adapter drains to
+        # avoid. Draining must happen before ``_client.close()``: the remaining work
+        # sends through that client.
+        await self.drain_handlers(timeout=3.0)
         if self._client is not None:
             with contextlib.suppress(Exception):
                 await self._client.close()
