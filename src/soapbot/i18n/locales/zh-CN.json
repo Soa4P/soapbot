@@ -27,6 +27,7 @@
     "pipeline.stage.plugin_command": "插件命令",
     "pipeline.stage.plugin_message_hooks": "插件钩子",
     "pipeline.stage.persist": "写入历史",
+  "pipeline.stage.model_quota": "用量配额",
     "pipeline.stage.persona": "人格注入",
     "pipeline.stage.recall": "记忆召回",
     "pipeline.stage.knowledge": "知识检索",
