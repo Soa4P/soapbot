@@ -316,6 +316,26 @@ class Settings(BaseSettings):
     "run code from anyone in-process" and should be temporary, for review only.
     """
 
+    plugin_integrity_mode: str = "block"
+    """What to do when a plugin's code changed after it was approved.
+
+    ``block`` (default) refuses to load it: approval was a decision about code the
+    operator reviewed, and code that has since changed is code nobody approved. The
+    refusal is audited and names both digests, so an operator can see *that* something
+    changed before deciding to re-approve.
+
+    ``warn`` loads it anyway and records the same audit entry. Useful while rolling out
+    an upgrade across several plugins, when re-approving every one up front is
+    impractical. It is a deliberate downgrade, not a safe default: the changed code runs.
+
+    ``off`` skips the check. Kept because a deployment may manage plugins out of band
+    and a check that cannot be turned off gets worked around by disabling the loader
+    instead.
+
+    An approval recorded before content digests existed has no value to compare against;
+    that is reported as ``unknown`` and never blocked, in either mode.
+    """
+
     allow_unknown_private: bool = False
     """Allow private messages from users not on ``private_allowlist``.
 
@@ -372,6 +392,24 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_lists(cls, value: Any) -> Any:
         return _split_list(value)
+
+    @field_validator("plugin_integrity_mode", mode="before")
+    @classmethod
+    def _check_integrity_mode(cls, value: Any) -> Any:
+        """Reject a typo instead of silently falling back to the default.
+
+        ``SOAPBOT_PLUGIN_INTEGRITY_MODE=blok`` would otherwise leave the operator
+        believing the check is enforced when the value is merely unrecognised. Naming the
+        accepted values in the error is the whole point: the failure mode of a security
+        switch is not "it crashed", it is "it looked like it worked".
+        """
+        allowed = {"block", "warn", "off"}
+        text = str(value or "").strip().lower()
+        if text not in allowed:
+            raise ValueError(
+                f"plugin_integrity_mode must be one of {sorted(allowed)}, got {value!r}"
+            )
+        return text
 
     @property
     def resolved_db_url(self) -> str:

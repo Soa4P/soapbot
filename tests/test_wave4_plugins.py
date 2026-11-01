@@ -213,6 +213,18 @@ async def test_hot_reload_picks_up_new_command(
             source.replace(marker, new_command + marker, 1), encoding="utf-8"
         )
 
+        # The operator workflow is edit -> re-approve -> reload. Reloading first must be
+        # refused, because approval covers the bytes that were reviewed and this file has
+        # just changed. Asserting the refusal is the point: a control that is never seen
+        # to fire is indistinguishable from one that is not wired.
+        from soapbot.plugins.loader import PluginLoadError
+
+        with pytest.raises(PluginLoadError, match="changed since it was approved"):
+            await manager.reload("echo")
+
+        manifest = manager.loader.read_manifest(plugins_dir / "echo")
+        manager.loader.approve_from_manifest(manifest, actor="test")
+
         await manager.reload("echo")
         assert "hello" in manager.loader.all_commands()
 
