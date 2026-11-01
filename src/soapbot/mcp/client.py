@@ -31,6 +31,9 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
+from soapbot.security.audit import get_audit_log
+from soapbot.security.injection import scrub_schema, scrub_tool_text
+
 logger = logging.getLogger(__name__)
 
 #: The newest version this client speaks. The server answers with the version *it*
@@ -73,6 +76,13 @@ class McpTool:
     qualified_name: str
     description: str
     parameters: dict[str, Any]
+    suspicious: bool = False
+    """Whether the server's metadata tripped the injection screen.
+
+    Kept on the record so the panel can show it *before* the tool is called. A refusal
+    that only appears in the audit log after the model has already been fed the text is
+    a post-mortem, not a control.
+    """
 
 
 class McpClient:
@@ -350,13 +360,45 @@ class McpClient:
             name = str(raw.get("name") or "")
             if not name:
                 continue
+
+            # Tool metadata is written by the server, not by the host, and it lands in
+            # the schema the model reads. Sanitised here — at the boundary, before the
+            # text is ever stored — rather than in ``schemas()``: a value that is unsafe
+            # is unsafe for every consumer, including the panel that renders it.
+            description, description_suspicious = scrub_tool_text(
+                str(raw.get("description") or "")
+            )
+            parameters, schema_hits = scrub_schema(
+                raw.get("inputSchema") or {"type": "object", "properties": {}}
+            )
+            hits = (["description"] if description_suspicious else []) + list(schema_hits)
+            suspicious = bool(hits)
+            if suspicious:
+                logger.warning(
+                    "mcp server=%s tool=%s advertises instruction-like metadata (%s); "
+                    "forwarding it as labelled data",
+                    self.server.name,
+                    name,
+                    ",".join(hits)[:80],
+                )
+                get_audit_log().record(
+                    kind="injection",
+                    action="mcp_tool_metadata",
+                    outcome="block",
+                    detail=(
+                        f"server={self.server.name} tool={name} "
+                        f"fields={','.join(hits)[:80]}"
+                    ),
+                )
+
             tools.append(
                 McpTool(
                     server=self.server.name,
                     name=name,
                     qualified_name=f"{NAME_PREFIX}__{self.server.name}__{name}",
-                    description=str(raw.get("description") or ""),
-                    parameters=raw.get("inputSchema") or {"type": "object", "properties": {}},
+                    description=description,
+                    parameters=parameters if isinstance(parameters, dict) else {},
+                    suspicious=suspicious,
                 )
             )
         return tools
