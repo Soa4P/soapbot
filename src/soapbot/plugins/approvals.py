@@ -29,16 +29,26 @@ restored from an attacker-supplied archive (silently granting). It also keeps
 this single decision record readable at a fixed path for ``soapbot doctor`` and
 for operators who back up one file.
 
-What it deliberately does *not* do
-----------------------------------
-Changing a plugin's code does not revoke its approval. That is a real gap, and
-it is bounded rather than hidden: ``digest`` records the manifest bytes that were
-approved, and :meth:`ApprovalStore.drift` reports plugins whose manifest no
-longer matches. Blocking on drift would make every legitimate version bump a
-manual re-approval step, which in practice trains operators to click through the
-warning — the usual outcome of a check that fires constantly. Capability *gaps*
-(a newly declared capability) do require re-approval and are enforced by
-``CapabilityGrant.effective`` regardless of what this file says.
+Two digests, and why changing the code now revokes the approval
+---------------------------------------------------------------
+This file used to say: *"Changing a plugin's code does not revoke its approval. That is a
+real gap."* It was — ``digest`` covers ``plugin.yaml``, so replacing ``main.py`` left the
+manifest byte-identical and the plugin kept loading as approved. Approval was a decision
+about a directory name.
+
+:attr:`ApprovalRecord.content_digest` records the code as well, and
+:meth:`soapbot.plugins.loader.PluginLoader.load` compares it before importing anything.
+Both are kept, not merged: a manifest edit and a code edit are different events and an
+operator reading this file should be able to tell which one happened.
+
+Enforcement lives on the *load* path, not here. :meth:`ApprovalStore.code_drift` and
+:meth:`ApprovalStore.drift` stay report-only so that a panel can show what drifted without
+the page failing to render. Refusing to execute is the loader's job, and it is governed by
+``SOAPBOT_PLUGIN_INTEGRITY_MODE`` — ``block`` by default, ``warn`` to keep running while
+an upgrade is being rolled out, ``off`` to disable the check entirely.
+
+Capability *gaps* (a newly declared capability) still require re-approval independently,
+enforced by ``CapabilityGrant.effective`` regardless of what this file says.
 """
 
 from __future__ import annotations
@@ -68,8 +78,24 @@ class ApprovalRecord:
     digest: str = ""
     """Manifest digest (``sha256:...``) of the bytes that were approved.
 
-    Used for drift detection only — see the module docstring for why drift is
-    reported rather than enforced.
+    Covers ``plugin.yaml`` only, which is why it rides alongside
+    :attr:`content_digest` rather than replacing it: the manifest answers "did the
+    declared capabilities change", the content digest answers "did the code change".
+    """
+
+    content_digest: str = ""
+    """Digest of the plugin's *code*, not its manifest.
+
+    Recorded at approval time and checked before every load. Without it, approval was a
+    decision about a directory name: ``digest`` stays identical while ``main.py`` is
+    replaced, so a plugin that was reviewed once could execute anything later. The two
+    digests are separate fields on purpose — a manifest edit (new capability) needs
+    re-approval through the capability gap, while a code edit needs re-approval through
+    this one, and an operator reading the file should be able to tell which happened.
+
+    Empty for approvals written before this field existed; see
+    :func:`soapbot.plugins.integrity.compare`, where empty means ``unknown`` rather than
+    ``changed``.
     """
 
     approved_at: float = 0.0
@@ -80,6 +106,7 @@ class ApprovalRecord:
         return {
             "capabilities": sorted(self.capabilities),
             "digest": self.digest,
+            "content_digest": self.content_digest,
             "approved_at": self.approved_at,
             "approved_by": self.approved_by,
         }
@@ -94,6 +121,7 @@ class ApprovalRecord:
             plugin=plugin,
             capabilities=frozenset(str(c) for c in caps if isinstance(c, str)),
             digest=str(raw.get("digest") or ""),
+            content_digest=str(raw.get("content_digest") or ""),
             approved_at=float(raw.get("approved_at") or 0.0),
             approved_by=str(raw.get("approved_by") or ""),
         )
@@ -187,6 +215,7 @@ class ApprovalStore:
         capabilities: set[str] | frozenset[str] | None = None,
         *,
         digest: str = "",
+        content_digest: str = "",
         actor: str = "",
     ) -> ApprovalRecord:
         import time
@@ -195,6 +224,7 @@ class ApprovalStore:
             plugin=plugin,
             capabilities=frozenset(str(c) for c in (capabilities or ())),
             digest=digest,
+            content_digest=content_digest,
             approved_at=time.time(),
             approved_by=actor,
         )
@@ -225,6 +255,28 @@ class ApprovalStore:
 
     def all(self) -> dict[str, ApprovalRecord]:
         return self.load()
+
+    def code_drift(self, digests: dict[str, str]) -> dict[str, str]:
+        """Plugins whose approved *code* digest no longer matches ``digests``.
+
+        Report-only, like :meth:`drift`, and for the same reason: raising here would
+        make the panel page unusable after a legitimate upgrade. Enforcement happens on
+        the load path (:meth:`soapbot.plugins.loader.PluginLoader.load`), where refusing
+        to execute is meaningful and where the policy setting applies. Keeping the two
+        separate means an operator can *see* drift before it is ever loaded.
+
+        ``digests`` maps plugin name -> current :func:`soapbot.plugins.integrity.digest_tree`.
+        A plugin with no recorded content digest is not reported: approved-before-this-
+        existed is not the same claim as modified.
+        """
+        out: dict[str, str] = {}
+        for name, current in digests.items():
+            record = self.get(name)
+            if record is None or not record.content_digest:
+                continue
+            if record.content_digest != current:
+                out[name] = record.content_digest
+        return out
 
     def drift(self, manifests: dict[str, str]) -> dict[str, str]:
         """Plugins whose approved manifest digest no longer matches ``manifests``.

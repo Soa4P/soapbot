@@ -54,7 +54,11 @@ from typing import Any
 
 import yaml
 
+from soapbot.config import settings
 from soapbot.plugins.context import PluginContext
+from soapbot.plugins.integrity import compare as compare_integrity
+from soapbot.plugins.integrity import digest_tree
+from soapbot.plugins.integrity import forget as forget_integrity
 from soapbot.plugins.isolation import DEFAULT_PLUGIN_MEMORY_BYTES
 from soapbot.plugins.manifest import (
     MANIFEST_ALT_FILENAME,
@@ -102,6 +106,13 @@ class LoadedPlugin:
     instance: Any
     context: PluginContext
     module_names: list[str] = field(default_factory=list)
+    integrity: str = "unknown"
+    """Result of the content check at load time: ``ok`` / ``changed`` / ``unknown``.
+
+    Exposed on the loaded record so ``/api/plugins`` can show "running, but the code no
+    longer matches what was approved" — a state that only exists because ``warn`` mode
+    allowed the load. Without it, that is invisible from the panel.
+    """
     """Fully-qualified module names created by this load, for exact unloading."""
 
     loaded_at: float = field(default_factory=time.time)
@@ -340,9 +351,25 @@ class PluginLoader:
         self._sync_approvals()
         caps = frozenset(capabilities or ())
         self._approved[name] = caps
+        # Hash the code as it is *now*, at the moment of the decision. Doing this here
+        # rather than at load time is what makes the digest an approval of reviewed
+        # bytes: a load-time hash would record whatever is on disk when the plugin is
+        # started, which is exactly the value an attacker controls.
+        content_digest = ""
+        directory = self.plugins_dir / name
+        if directory.is_dir():
+            try:
+                forget_integrity(directory)
+                content_digest = digest_tree(directory)
+            except OSError as exc:  # pragma: no cover - unreadable tree
+                logger.warning("could not hash plugin %s at approval time: %s", name, exc)
         if self.approvals is not None:
             self.approvals.approve(
-                name, caps, digest=manifest_digest, actor=actor or "loader"
+                name,
+                caps,
+                digest=manifest_digest,
+                content_digest=content_digest,
+                actor=actor or "loader",
             )
 
     def revoke(self, name: str, *, actor: str = "") -> None:
@@ -396,6 +423,69 @@ class PluginLoader:
                 c for c in (Capability(a) for a in approved if a in {x.value for x in Capability})
             ),
         )
+
+    def _enforce_integrity(self, name: str, directory: Path) -> str:
+        """Refuse (or warn about) code that changed after it was approved.
+
+        Returns the verdict state so the loaded record can report it. Three outcomes:
+
+        ``ok``       — the tree matches the digest recorded at approval.
+        ``unknown``  — no digest was recorded (approved before this existed, or through
+                       a loader with no persistent store). Reported, never blocked: "we
+                       never recorded this" is a different claim from "this changed", and
+                       conflating them would refuse every plugin on upgrade, which is how
+                       an operator learns to set the mode to ``off``.
+        ``changed``  — the tree differs. ``block`` raises; ``warn`` loads anyway with an
+                       audit entry that says so.
+        """
+        mode = settings.plugin_integrity_mode
+        if mode == "off":
+            return "unknown"
+
+        recorded = ""
+        if self.approvals is not None:
+            record = self.approvals.get(name)
+            recorded = record.content_digest if record is not None else ""
+
+        # Drop the cache entry first: reload() re-hashes the same path, and a stale
+        # fingerprint would report the tree as unchanged after an edit that preserved
+        # both size and mtime (a deliberate attacker move, and also what `git checkout`
+        # of the same-size file can do).
+        forget_integrity(directory)
+        verdict = compare_integrity(directory, recorded)
+
+        if verdict.state != "changed":
+            if verdict.state == "unknown" and recorded == "" and self.approvals is not None:
+                logger.info(
+                    "plugin %s has no recorded content digest; integrity is unverified",
+                    name,
+                )
+            return verdict.state
+
+        detail = (
+            f"content changed since approval "
+            f"approved={verdict.recorded[:19]} current={verdict.current[:19]}"
+        )
+        blocked = mode == "block"
+        self.audit.record(
+            kind="plugin",
+            action="load",
+            outcome="deny" if blocked else "allow",
+            detail=detail if blocked else f"{detail} (allowed: mode=warn)",
+            plugin=name,
+        )
+        if blocked:
+            raise PluginLoadError(
+                f"plugin {name} has changed since it was approved; re-approve it to load "
+                f"this code (approved {verdict.recorded[:19]}, now {verdict.current[:19]})"
+            )
+
+        logger.error(
+            "plugin %s loaded despite changed content (plugin_integrity_mode=warn): %s",
+            name,
+            detail,
+        )
+        return "changed"
 
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         """Load one plugin by name. Explicit; never triggered by discovery."""
@@ -464,6 +554,14 @@ class PluginLoader:
                 "capabilities; set allow_untrusted only after reviewing the code"
             )
 
+        # ---- content integrity ---------------------------------------------------
+        # Placed after the approval/trust checks and *before* anything is imported. The
+        # order is the fix: a check that runs after ``_import_plugin`` has already
+        # executed the code it was supposed to vet, which is the failure mode this
+        # project has hit three times (a constructor argument nobody read, a guard the
+        # streaming path skipped, a sanitiser whose output was thrown away).
+        integrity = self._enforce_integrity(name, directory)
+
         grant = self.grant_for(manifest)
         guard = CapabilityGuard(grant, audit=self.audit)
         context = PluginContext(
@@ -486,7 +584,7 @@ class PluginLoader:
         # plugins still ran inside the host and the review's "layer 2" was a library
         # nobody used.
         if self.supervisor is not None:
-            return await self._load_isolated(name, directory, manifest, context)
+            return await self._load_isolated(name, directory, manifest, context, integrity)
 
         try:
             module_names = self._import_plugin(manifest, directory)
@@ -542,6 +640,7 @@ class PluginLoader:
             instance=instance,
             context=context,
             module_names=module_names,
+            integrity=integrity,
         )
         self._loaded[name] = loaded
         self.audit.record(
@@ -599,6 +698,7 @@ class PluginLoader:
         directory: Path,
         manifest: PluginManifest,
         context: PluginContext,
+        integrity: str = "unknown",
     ) -> LoadedPlugin:
         """Load a plugin into its own process instead of this one.
 
@@ -699,6 +799,7 @@ class PluginLoader:
             context=context,
             module_names=[],
             worker=worker,
+            integrity=integrity,
         )
         self._loaded[name] = loaded
         self.audit.record(
