@@ -191,7 +191,7 @@ class MemoryStore:
     ) -> int:
         """Append one message. Never mutates existing rows."""
         ts = created_at if created_at is not None else time.time()
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = MessageRow(
                 session_key=session_key,
                 adapter=adapter,
@@ -239,7 +239,7 @@ class MemoryStore:
                 # must not abort the write.
                 logger.warning("embedding failed for memory, storing without vector: %s", exc)
 
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = MemoryRow(
                 layer=str(layer),
                 scope=scope,
@@ -266,7 +266,7 @@ class MemoryStore:
         await _fts_index(session, table, content, row_id)
 
     async def save_summary(self, session_key: str, summary: str, folded: int) -> None:
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             session.add(
                 SummaryRow(
                     session_key=session_key,
@@ -544,7 +544,7 @@ class MemoryStore:
     async def _touch(self, ids: list[int]) -> None:
         if not ids:
             return
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             for mid in ids:
                 row = await session.get(MemoryRow, mid)
                 if row is not None:
@@ -581,7 +581,7 @@ class MemoryStore:
             )
 
     async def delete_memory(self, memory_id: int) -> bool:
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             row = await session.get(MemoryRow, memory_id)
             if row is None:
                 return False
@@ -639,7 +639,7 @@ class KnowledgeBase:
             except Exception as exc:
                 logger.warning("knowledge embedding failed, storing text only: %s", exc)
 
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             ids: list[int] = []
             for i, chunk in enumerate(chunks):
                 vec = vectors[i] if i < len(vectors) else []
@@ -791,7 +791,7 @@ class KnowledgeBase:
         return [{"doc_id": r[0], "title": r[1], "chunks": r[2]} for r in rows]
 
     async def delete_document(self, doc_id: str) -> int:
-        async with self.db.session_factory()() as session:
+        async with self.db.write() as session:
             ids = (
                 await session.execute(
                     select(KnowledgeRow.id).where(KnowledgeRow.doc_id == doc_id)

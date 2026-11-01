@@ -242,6 +242,17 @@ async def list_adapters(_: dict = Depends(require_api_auth)) -> dict:
                 "online": health.online,
                 "last_error": health.last_error,
                 "connected_at": health.connected_at,
+                # ``silent_for`` is what turns a false green light into a visible one:
+                # a socket can stay ESTABLISHED forever after the peer stops answering,
+                # and ``online`` alone reported exactly that as healthy for seventeen
+                # hours. The number is seconds since the last frame or successful probe,
+                # so the panel can say "last heard from 6h ago" instead of "online".
+                "last_seen_at": health.last_seen_at,
+                "silent_for": (
+                    round(time.time() - health.last_seen_at, 1)
+                    if health.last_seen_at
+                    else None
+                ),
                 "reconnect_attempts": health.reconnect_attempts,
                 "capabilities": sorted(str(c) for c in adapter.capabilities),
             }

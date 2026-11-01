@@ -21,6 +21,7 @@ import contextlib
 import hmac
 import json
 import logging
+import random
 import time
 import uuid
 from typing import Any
@@ -41,6 +42,21 @@ from soapbot.core.message import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: First reconnect delay, doubled per failed attempt up to ``_RECONNECT_MAX_S``.
+#:
+#: One second is short enough that a NapCat restart is invisible to the group, and the
+#: cap keeps a protocol side that is down for an hour from being hammered.
+_RECONNECT_BASE_S = 1.0
+_RECONNECT_MAX_S = 30.0
+
+#: How long a socket may be silent before it is probed, in seconds.
+#:
+#: A group that is talking produces frames constantly, so this only elapses on a quiet
+#: group or a dead socket — which is the distinction that matters. Thirty seconds is
+#: short enough that a dropped connection is noticed while the conversation is still
+#: live, and long enough that a quiet group is not probed needlessly.
+_LIVENESS_WINDOW_S = 30.0
 
 _CAPABILITIES = frozenset(
     {
@@ -147,6 +163,11 @@ class OneBot11Adapter(Adapter):
         self.allow_unauthenticated_reverse = allow_unauthenticated_reverse
 
         self._ws: Any = None
+        self._reader_task: asyncio.Task[Any] | None = None
+        """The live reader, tracked apart from ``_tasks`` so the supervisor cannot wait
+        on itself — it is a member of that set too."""
+        self._url = ws_url or f"ws://{host}:{port}"
+        """Resolved forward URL. Kept so the supervisor reconnects to the same place."""
         self._server: Any = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._send_lock = asyncio.Lock()
@@ -161,23 +182,160 @@ class OneBot11Adapter(Adapter):
         self._closed = False
         if self.mode == "reverse":
             await self._start_reverse()
-        else:
-            await self._start_forward()
+            return
+        # Forward mode is supervised: the first connect is awaited so a bad URL or a
+        # refused port still fails startup loudly, then the supervisor owns the
+        # connection for the rest of the adapter's life.
+        await self._start_forward()
+        if self.reconnect:
+            task = asyncio.create_task(self._supervise_forward())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     async def _start_forward(self) -> None:
-        url = self.ws_url or f"ws://{self.host}:{self.port}"
+        url = self._url
         headers = {}
         if self.access_token:
             headers["Authorization"] = f"Bearer {self.access_token}"
         self._ws = await ws_connect(url, additional_headers=headers, max_size=16 * 1024 * 1024)
         self.health.online = True
         self.health.connected_at = time.time()
+        self.health.last_seen_at = time.time()
         self.health.last_error = ""
         logger.info("onebot11 forward connected url=%s account=%s", url, self.account_id)
         task = asyncio.create_task(self._reader_loop(self._ws))
         self._tasks.add(task)
+        # Tracked separately from ``_tasks``: the handler set also holds the supervisor,
+        # and a supervisor that waits on "any pending task" would wait on itself.
+        self._reader_task = task
         task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._forget_reader)
         await self._refresh_self_info()
+
+    def _forget_reader(self, task: asyncio.Task[Any]) -> None:
+        if self._reader_task is task:
+            self._reader_task = None
+
+    async def _supervise_forward(self) -> None:
+        """Keep the forward connection up for as long as the adapter is meant to run.
+
+        ``reconnect=True`` was accepted by the constructor and **never read**. The
+        reader loop set ``online = False`` and returned, so the first dropped socket —
+        a NapCat restart, a network blip, a laptop sleeping — left the bot permanently
+        offline with no log line saying so. That is the "适配器和 QQ 又掉了" the
+        operator kept reporting: not a flaky connection, a connection with no second
+        attempt.
+
+        Backoff is exponential with a cap and jitter. The jitter matters: a protocol
+        side that restarts and a bot that retries on a fixed interval will keep meeting
+        at the same phase, and the retry storm is what gets an account rate-limited.
+        """
+        attempt = 0
+        while not self._closed:
+            try:
+                # ``start()`` already dialled once so a bad URL fails startup loudly.
+                # Dialling again here would open a *second* socket to the same peer and
+                # orphan the first reader — two connections, one of them invisible.
+                if self._ws is None:
+                    await self._start_forward()
+                attempt = 0
+                # ``_start_forward`` returns as soon as the reader task is scheduled;
+                # wait for it to finish so a dropped socket is noticed here.
+                await self._wait_for_reader()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.health.online = False
+                self.health.last_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "onebot11 forward connect failed account=%s attempt=%d err=%s",
+                    self.account_id,
+                    attempt + 1,
+                    exc,
+                )
+            if self._closed or not self.reconnect:
+                break
+            attempt += 1
+            self.health.reconnect_attempts += 1
+            delay = min(_RECONNECT_MAX_S, _RECONNECT_BASE_S * (2 ** (attempt - 1)))
+            delay *= 0.5 + random.random()  # jitter: half to one-and-a-half
+            self.health.last_error = f"reconnecting in {delay:.1f}s (attempt {attempt})"
+            logger.info(
+                "onebot11 reconnecting account=%s in %.1fs (attempt %d)",
+                self.account_id,
+                delay,
+                attempt,
+            )
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                raise
+
+    async def _wait_for_reader(self) -> None:
+        """Block until the current reader task ends, or the adapter is closed.
+
+        Also runs the liveness probe. Waiting only on the reader is not enough: a
+        half-open socket never ends the reader — ``async for raw in ws`` simply never
+        yields again — so the bot sits here forever believing it is connected. That is
+        precisely the seventeen-hour outage this file's supervisor exists to prevent,
+        and a reader that never returns would have survived the first fix.
+        """
+        task = self._reader_task
+        if task is None or task.done():
+            # The reader already ended (a socket that died before this was called).
+            # The handle must still be cleared, or the supervisor sees a live ``_ws``,
+            # skips the dial and spins here forever without ever reconnecting.
+            await self._drop_socket()
+            return
+
+        reader = asyncio.create_task(asyncio.wait({task}, return_when=asyncio.FIRST_COMPLETED))
+        try:
+            while not self._closed:
+                # Wake up at least as often as the liveness window, so a silent socket
+                # is noticed within one interval rather than at the next message.
+                done, _pending = await asyncio.wait({reader}, timeout=_LIVENESS_WINDOW_S)
+                if reader in done:
+                    break
+                if await self._probe_alive():
+                    continue
+                logger.warning(
+                    "onebot11 liveness probe failed account=%s — treating the socket as "
+                    "dead and reconnecting",
+                    self.account_id,
+                )
+                break
+        finally:
+            reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await reader
+
+        # The socket is gone either way.
+        await self._drop_socket()
+
+    async def _drop_socket(self) -> None:
+        """Close the current socket and clear the handle so a dial is attempted again."""
+        ws = self._ws
+        self._ws = None
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                await ws.close()
+
+    async def _probe_alive(self) -> bool:
+        """One cheap round trip. ``get_status`` is the least invasive OneBot API there is.
+
+        A real API call rather than a websocket ping: NapCat can answer pings at the
+        transport layer while its QQ session is gone, and a bot that reports healthy
+        while its account is logged out is the same false green light as not probing.
+        """
+        try:
+            await self._call("get_status", {}, timeout=10.0)
+        except Exception as exc:
+            self.health.last_error = f"liveness: {type(exc).__name__}: {exc}"
+            self.health.online = False
+            return False
+        self.health.last_seen_at = time.time()
+        self.health.online = True
+        return True
 
     async def _start_reverse(self) -> None:
         """Listen for a reverse-WS client and *authenticate it before trusting it*.
@@ -272,6 +430,7 @@ class OneBot11Adapter(Adapter):
         # Let in-flight pipelines finish before tearing down the socket: a
         # half-finished reply would otherwise be dropped silently.
         await self.drain_handlers(timeout=3.0)
+        self._reader_task = None
         for task in list(self._tasks):
             task.cancel()
         for task in list(self._tasks):
@@ -293,6 +452,9 @@ class OneBot11Adapter(Adapter):
     async def _reader_loop(self, ws: Any) -> None:
         try:
             async for raw in ws:
+                # Any frame is proof of life; the liveness probe only has to cover the
+                # quiet stretches.
+                self.health.last_seen_at = time.time()
                 try:
                     payload = json.loads(raw)
                 except json.JSONDecodeError:
