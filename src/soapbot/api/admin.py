@@ -275,8 +275,16 @@ async def list_providers(_: dict = Depends(require_api_auth)) -> dict:
 
 
 @router.get("/personas")
-async def list_personas(_: dict = Depends(require_api_auth)) -> dict:
-    """Installed persona cards and the group/user bindings in force."""
+async def list_personas(
+    request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
+    """Installed persona cards and the group/user bindings in force.
+
+    Even truncated, this is configuration: 4000 characters of the body plus the style,
+    the banned-word list and the wake words. Guarded like the write path — see
+    :func:`_require_persona_access`.
+    """
+    _require_persona_access(auth, request, action="persona_read")
     runtime = _runtime()
     if runtime.personas is None:
         return {"personas": [], "binding": {}, "count": 0}
@@ -330,13 +338,27 @@ class PersonaWrite(BaseModel):
     locale: str = ""
 
 
-def _require_persona_write(auth: dict[str, Any], request: Request) -> Role:
+def _require_persona_access(
+    auth: dict[str, Any], request: Request, *, action: str = "persona_write"
+) -> Role:
+    """Reading a persona card is a config action, not a chat action.
+
+    The card's body *is* the first section of the system prompt (``Persona`` is what
+    ``Engine._system_prompt`` starts from), and the detail endpoint returns it verbatim.
+    Before this, that read required only ``require_api_auth`` while writing the same file
+    required ``MANAGE_CONFIG`` — so the text the bot is instructed by was easier to read
+    than to change, and any future role-scoped token would have been able to read the
+    operator's configuration without being allowed to touch it.
+
+    ``action`` distinguishes read from write in the audit trail; the threshold is the same
+    because both operate on the same file.
+    """
     role = _role_of(auth)
     minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
     if role.rank < minimum.rank:
         get_audit_log().record(
             kind="authz",
-            action="persona_write",
+            action=action,
             outcome="deny",
             role=role.value,
             detail=f"from={request.client.host if request.client else '-'}",
@@ -348,13 +370,24 @@ def _require_persona_write(auth: dict[str, Any], request: Request) -> Role:
     return role
 
 
+def _require_persona_write(auth: dict[str, Any], request: Request) -> Role:
+    return _require_persona_access(auth, request, action="persona_write")
+
+
 @router.get("/personas/{persona_id}")
-async def read_persona(persona_id: str, _: dict = Depends(require_api_auth)) -> dict:
+async def read_persona(
+    persona_id: str, request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
     """The full card, body included.
 
     The list endpoint truncates the prompt to keep the table light; an editor cannot
     work from a truncated prompt, and saving one back would destroy the rest of it.
+
+    Untruncated is exactly why this needs the config permission: the returned body is the
+    text the model is instructed by, and it was previously readable by any authenticated
+    caller while writing it required ``MANAGE_CONFIG``.
     """
+    _require_persona_access(auth, request, action="persona_read")
     runtime = _runtime()
     if runtime.personas is None:
         raise HTTPException(status_code=503, detail="persona store is not initialised")

@@ -26,6 +26,7 @@ from soapbot.providers.base import (
     ProviderConfig,
     ProviderError,
 )
+from soapbot.security.injection import scrub_prompt_echo
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,14 @@ class ProviderRouter:
                 stat.calls += 1
                 stat.failures += 1
                 stat.consecutive_failures += 1
-                stat.last_error = str(exc)
+                # Provider errors are built from the *upstream response body*. A relay,
+                # content filter or debugging proxy that echoes the request back would
+                # otherwise put our own system prompt into ``stats.last_error`` (returned
+                # by /api/admin/providers) and into the log ring the WebUI streams. The
+                # scrub keeps the diagnostic part and cuts everything from the first
+                # prompt marker onward.
+                detail = scrub_prompt_echo(str(exc))
+                stat.last_error = detail
                 stat.last_latency_ms = round(latency, 2)
                 if stat.consecutive_failures >= 3:
                     stat.disabled_until = time.time() + self._cooldown
@@ -184,8 +192,10 @@ class ProviderRouter:
                         self._cooldown,
                         stat.consecutive_failures,
                     )
-                errors.append(f"{provider.id}: {exc}")
-                logger.warning("provider=%s failed slot=%s: %s", provider.id, slot, exc)
+                errors.append(f"{provider.id}: {detail}")
+                # Same scrubbed text, not ``exc``: this line lands in the ring buffer that
+                # the WebUI streams and in the log file an operator ships elsewhere.
+                logger.warning("provider=%s failed slot=%s: %s", provider.id, slot, detail)
 
         raise ProviderError("all providers failed: " + " | ".join(errors))
 
