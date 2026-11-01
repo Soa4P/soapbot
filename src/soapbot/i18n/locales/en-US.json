@@ -27,6 +27,7 @@
     "pipeline.stage.plugin_command": "Plugin command",
     "pipeline.stage.plugin_message_hooks": "Plugin hooks",
     "pipeline.stage.persist": "Persist inbound",
+  "pipeline.stage.model_quota": "Usage quota",
     "pipeline.stage.persona": "Persona",
     "pipeline.stage.recall": "Memory recall",
     "pipeline.stage.knowledge": "Knowledge search",

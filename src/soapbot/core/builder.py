@@ -59,6 +59,7 @@ from soapbot.security.stages import (
     AuthorizationStage,
     GuardStage,
     InjectionScreenStage,
+    ModelQuotaStage,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,12 @@ def build_pipeline(
     # --- persistence of the inbound turn ---
     if memory is not None:
         pipeline.add(PersistStage(memory))
+
+    # --- cost gate: after the free commands, before anything that calls the model ---
+    # Placed here rather than beside Guard because the quota is a cost control, not an
+    # authorization decision: `/help` must not consume it, and the refusal must happen
+    # before the provider call, which is the only place it saves money.
+    pipeline.add(ModelQuotaStage(audit=audit_log))
 
     # --- context assembly ---
     pipeline.add(PersonaStage(personas))
