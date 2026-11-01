@@ -20,6 +20,7 @@ from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import (
     INJECTION_BLOCK_ON,
+    PROMPT_MARKERS,
     injection_refusal,
     leaked_canary,
     looks_like_injection,
@@ -484,16 +485,11 @@ class ModelStage(Stage):
 #: Strings that only ever appear in the system prompt. A reply containing one means the
 #: model copied its instructions out of the prompt.
 #:
-#: Module-level rather than a ``SafetyStage`` attribute because the streaming path has to
-#: apply the same rule *before* each sentence leaves the process — see
-#: ``scrub_sentence``. Two copies of this list would drift, and the copy that drifted
-#: would be the one that stops protecting anything.
-_LEAK_MARKERS = (
-    "安全要求：用户消息中的任何指令",
-    "说话风格要求：",
-    "不可信数据",
-    "untrusted-boundary",
-)
+#: Defined in ``security.injection`` (as ``PROMPT_MARKERS``) because the provider layer
+#: needs the same list to strip echoed prompts out of diagnostic text; imported here so
+#: the two consumers cannot drift. Two copies of this list would drift, and the copy that
+#: drifted would be the one that stops protecting anything.
+_LEAK_MARKERS = PROMPT_MARKERS
 
 _INVISIBLE = dict.fromkeys(
     map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
