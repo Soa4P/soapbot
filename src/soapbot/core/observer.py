@@ -25,6 +25,7 @@ private-chat default would stop meaning anything.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -38,6 +39,19 @@ logger = logging.getLogger(__name__)
 #: group chats; the cost of being wrong is a missed memory, not a wrong reply.
 _MIN_CHARS = 4
 
+#: How many archives may be in flight before new ones are dropped.
+#:
+#: Passive mode reads *everything*, so on a busy group it would otherwise queue an
+#: unbounded number of SQLite writes behind a bot that has to answer in the same
+#: process. Dropping the read is the right failure: a missed memory costs context, a
+#: growing backlog costs every reply's latency and eventually the write lock itself.
+_MAX_INFLIGHT = 8
+
+#: Attempts per archive before giving up. A locked database is transient by definition
+#: — the other writer commits in milliseconds — so one retry covers the realistic case
+#: without turning a persistent fault into an infinite loop.
+_ATTEMPTS = 2
+
 
 class PassiveObserver:
     """Archive and embed messages the bot was not asked to answer.
@@ -46,14 +60,30 @@ class PassiveObserver:
     and it does nothing else. No model call, no reply, no persona — the persona card
     is applied by ``PersonaStage`` on the answer path only, which is what keeps "the
     card only affects the words" true by construction rather than by convention.
+
+    The write is *detached* from the message path. It used to be awaited inline, which
+    put a second SQLite writer on the same critical section as the answering write and
+    produced ``database is locked`` on a real group — the read was slowing down and
+    breaking the very replies it was supposed to improve. Now the observer schedules
+    the archive and returns immediately; the bus publish is not held open by it.
     """
 
-    def __init__(self, memory: Any, *, min_chars: int = _MIN_CHARS) -> None:
+    def __init__(
+        self,
+        memory: Any,
+        *,
+        min_chars: int = _MIN_CHARS,
+        max_inflight: int = _MAX_INFLIGHT,
+    ) -> None:
         self.memory = memory
         self.min_chars = min_chars
+        self.max_inflight = max_inflight
         self.seen = 0
         """Messages read without answering. Exposed so the panel can show that passive
         mode is doing something — a silent feature reads as a broken one."""
+        self.dropped = 0
+        """Messages skipped because too many archives were already in flight."""
+        self._inflight: set[asyncio.Task[None]] = set()
 
     async def __call__(self, ctx: PipelineContext) -> None:
         event = ctx.event
@@ -95,25 +125,59 @@ class PassiveObserver:
         if len(words) < self.min_chars and not images:
             return
 
-        try:
-            await self.memory.archive_message(
-                session_key=event.session_key,
-                role="user",
-                content=event.text.strip() or f"[{len(images)} 张图片]",
-                adapter=event.adapter,
-                scene=str(event.scene),
-                group_id=event.group_id,
-                user_id=event.sender.user_id,
-                user_name=event.sender.display_name,
-                message_id=event.message_id,
-                trace_id=event.trace_id,
-            )
-        except Exception as exc:  # pragma: no cover - a read must never break chat
-            logger.warning("passive archive failed trace=%s: %s", event.trace_id, exc)
+        if len(self._inflight) >= self.max_inflight:
+            # Backpressure, not a queue. See ``_MAX_INFLIGHT``.
+            self.dropped += 1
             return
 
+        payload = {
+            "session_key": event.session_key,
+            "role": "user",
+            "content": event.text.strip() or f"[{len(images)} 张图片]",
+            "adapter": event.adapter,
+            "scene": str(event.scene),
+            "group_id": event.group_id,
+            "user_id": event.sender.user_id,
+            "user_name": event.sender.display_name,
+            "message_id": event.message_id,
+            "trace_id": event.trace_id,
+        }
         self.seen += 1
         ctx.extras["passive_read"] = True
+
+        task = asyncio.create_task(self._archive(payload))
+        self._inflight.add(task)
+        # The set is the only strong reference; without this the task is garbage
+        # collected mid-await and the archive silently never happens.
+        task.add_done_callback(self._inflight.discard)
+
+    async def _archive(self, payload: dict[str, Any]) -> None:
+        """Write one row, retrying a locked database once.
+
+        Runs as its own task, so an exception here is not swallowed by the caller's
+        frame — it is caught here and logged, because a background task that raises
+        only prints "Task exception was never retrieved" at shutdown.
+        """
+        for attempt in range(1, _ATTEMPTS + 1):
+            try:
+                await self.memory.archive_message(**payload)
+                return
+            except Exception as exc:  # pragma: no cover - a read must never break chat
+                if attempt == _ATTEMPTS:
+                    logger.warning(
+                        "passive archive failed trace=%s after %d attempts: %s",
+                        payload.get("trace_id"),
+                        attempt,
+                        exc,
+                    )
+                    return
+                await asyncio.sleep(0.05 * attempt)
+
+    async def drain(self, timeout: float = 5.0) -> None:
+        """Wait for in-flight archives. For shutdown and for tests that assert on rows."""
+        if not self._inflight:
+            return
+        await asyncio.wait(set(self._inflight), timeout=timeout)
 
 
 def install_passive_observer(bus: Any, memory: Any) -> PassiveObserver | None:
