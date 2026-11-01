@@ -50,10 +50,25 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout(): void {
-    clearToken()
-    status.value = null
-    void refresh()
+  /**
+   * Sign out, and actually invalidate the credential.
+   *
+   * This used to only delete the copy in localStorage. The token itself stayed valid on
+   * the server for its full ttl, which meant "log out" on a shared machine left a usable
+   * credential behind in whatever had seen it — a HAR file, a screenshot, another tab
+   * that had already read localStorage. The local clear still runs in `finally`: a failed
+   * request must not leave the operator looking signed in.
+   */
+  async function logout(): Promise<void> {
+    try {
+      if (hasToken.value) await api.logout()
+    } catch {
+      /* server unreachable or token already dead — the local clear is what matters */
+    } finally {
+      clearToken()
+      status.value = null
+      void refresh()
+    }
   }
 
   function openDialog(): void {

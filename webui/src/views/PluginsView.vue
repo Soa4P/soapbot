@@ -155,6 +155,16 @@ async function remove(plugin: any): Promise<void> {
                   {{ plugin.pending.length ? t('plugins.partial') : t('plugins.full') }}
                 </span>
                 <span v-else class="faint">{{ t('plugins.notApproved') }}</span>
+                <!-- Code changed after approval. Shown here, before anyone presses Load:
+                     the server enforces it on load (block by default), and learning about
+                     it from a failed load with a stack trace is the wrong first notice. -->
+                <span
+                  v-if="plugin.approval?.code_changed"
+                  class="tag bad"
+                  :title="t('plugins.codeChangedHint', { mode: plugin.approval.integrity_mode })"
+                >
+                  {{ t('plugins.codeChanged') }}
+                </span>
               </td>
               <td>
                 <span class="pill" :class="plugin.loaded ? 'ok' : ''">
@@ -175,7 +185,15 @@ async function remove(plugin: any): Promise<void> {
                   <button
                     v-if="plugin.approved && !plugin.loaded"
                     class="btn lamp"
-                    :disabled="busy !== ''"
+                    :disabled="
+                      busy !== '' ||
+                      (plugin.approval?.code_changed && plugin.approval?.integrity_mode === 'block')
+                    "
+                    :title="
+                      plugin.approval?.code_changed && plugin.approval?.integrity_mode === 'block'
+                        ? t('plugins.codeChangedHint', { mode: plugin.approval.integrity_mode })
+                        : ''
+                    "
                     @click="act(plugin.name, 'load')"
                   >
                     {{ t('plugins.load') }}
