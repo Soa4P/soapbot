@@ -160,3 +160,25 @@ soapbot setup --non-interactive \
 ```
 
 它和面板走同一套「读 → 合并 → 校验 → 原子写」：写之前先用启动解析器验一遍（`env:` 变量没设就直接报错，绝不落盘）；密钥可以用 `--api-key-env VAR` 只写变量名；结束会打印面板地址、`soapbot token` 和 `soapbot start`。配置在启动时读取，**改完仍需重启**。
+
+
+## 让它活过下一次会话断开
+
+**不要**从 WinRM / RDP 会话里直接启动机器人。WinRM 会把子进程放进 job object，
+而 `winrm get winrm/config/winrs` 的 `IdleTimeout` 默认是 2 小时；会话闲置到期时整组被
+终止，机器人跟着消失。
+
+这种死法很难查：**没有** Python 异常（`panel.err` 里没有 `Shutting down`）、
+**没有** Application 事件、**没有** WER 记录、**没有**重启。进程就那么没了。
+实测过一次：19:29 从 WinRM 启动，最后一条日志 21:28:50，`IdleTimeout=7200000ms`，
+两小时的刻度正好落在那个窗口里。
+
+用计划任务托管，父进程链是 `python.exe → cmd.exe → svchost.exe → services.exe`，
+关掉所有远程会话也不受影响，并且开机自启：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_windows_task.ps1 -Start
+```
+
+验证：`Get-ScheduledTaskInfo -TaskName SoapbotBot`，`LastTaskResult` 为 `267009`
+（0x41301）表示正在运行，这是健康值。进程树里不应出现 `wsmprovhost`。
