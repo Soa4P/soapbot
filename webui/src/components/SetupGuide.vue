@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import { t } from '@/i18n'
+import { copyText } from '@/lib/clipboard'
 import { useAsync } from '@/lib/useAsync'
 
 /**
@@ -46,7 +47,9 @@ function dismiss(): void {
   try {
     localStorage.setItem(DISMISS_KEY, '1')
   } catch {
-    /* the card stays hidden for this session only, which is fine */
+    // The card stays hidden for this session only — the intent (stop showing it) is
+    // already satisfied by `dismissed.value = true` above.
+    return
   }
 }
 
@@ -137,17 +140,20 @@ const items = computed<Item[]>(() => [
 const NAPCAT_DEFAULT = 'ws://127.0.0.1:3001'
 const copied = ref(false)
 
+const copyFailed = ref('')
+
 async function copyAddress(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(NAPCAT_DEFAULT)
+  copyFailed.value = ''
+  // copyText keeps working over plain HTTP; when even that fails, say so and show the
+  // value inline rather than leaving a button that appears to do nothing.
+  if (await copyText(NAPCAT_DEFAULT)) {
     copied.value = true
     window.setTimeout(() => {
       copied.value = false
     }, 2000)
-  } catch {
-    // Clipboard needs a secure context; the text is on screen and selectable either way.
-    copied.value = false
+    return
   }
+  copyFailed.value = t('common.copyFailed', { value: NAPCAT_DEFAULT })
 }
 
 const failed = computed(() => items.value.filter((item) => !item.ok).length)
@@ -189,6 +195,7 @@ const visible = computed(() => !dismissed.value && failed.value > 0)
           </li>
           <li>{{ t('setup.step3') }}</li>
         </ol>
+        <p v-if="copyFailed" class="warn-banner" role="alert">{{ copyFailed }}</p>
       </div>
       <ul class="setup">
         <li v-for="item in items" :key="item.key" class="setup__item">

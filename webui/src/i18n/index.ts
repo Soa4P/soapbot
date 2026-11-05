@@ -31,7 +31,8 @@ function readInitialLocale(): Locale {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (isLocale(stored)) return stored
   } catch {
-    /* storage unavailable: fall through to the default */
+    // fallback: storage unavailable (private mode). Falling through to the browser
+    // preference below IS the recovery, so there is nothing to report.
   }
   // The browser's own preference is a better guess than always defaulting, and it
   // costs nothing: if the operator cannot read it they will change it once.
@@ -74,7 +75,8 @@ export function setLocale(next: Locale): void {
   try {
     localStorage.setItem(STORAGE_KEY, next)
   } catch {
-    /* the choice simply will not persist; the UI still switches now */
+    // fallback: the choice will not persist across reloads, but `locale.value` is
+    // already set above, so the UI switches now — which is what the click promised.
   }
   // Keep the document language in sync so a screen reader switches voice, and so
   // `:lang()` CSS has something true to match.

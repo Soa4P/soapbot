@@ -63,7 +63,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       if (hasToken.value) await api.logout()
     } catch {
-      /* server unreachable or token already dead — the local clear is what matters */
+      // Server unreachable, or the token was already dead. The local clear in
+      // `finally` is what actually logs this browser out, so stop here.
+      return
     } finally {
       clearToken()
       status.value = null
