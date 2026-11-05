@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
+import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { clock } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -88,9 +89,7 @@ function detail(entry: any): string {
         <div class="error-banner">{{ logs.error.value }}</div>
       </div>
       <div v-else-if="logs.loading.value && !entries.length" class="empty">{{ t('common.loading') }}</div>
-      <div v-else-if="!entries.length" class="empty">
-        {{ t('logs.empty') }}
-      </div>
+      <EmptyState v-else-if="!entries.length" :lead="t('logs.empty')" :hint="t('logs.emptyHint')" />
       <div v-else class="scroll" style="max-height: 640px">
         <table class="data"><caption class="visually-hidden">{{ t('logs.title') }}</caption>
           <thead>

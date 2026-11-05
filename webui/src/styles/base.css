@@ -638,6 +638,12 @@ table.data td.key {
   border-color: var(--brand-line);
 }
 
+/* "Updated 12s ago" while a refresh is being skipped. Only the text loses contrast;
+   the numbers beside it stay legible, so a paused poll never looks like stale data. */
+.tag--stale {
+  color: var(--ink-3);
+}
+
 .tag.ok {
   color: var(--ok);
   background: var(--ok-soft);
@@ -776,6 +782,28 @@ textarea.field {
   padding: 9px 12px;
   font-family: var(--mono);
   font-size: 11.5px;
+}
+
+/* A halt explained in words, with the machine token kept alongside it.
+   The banner is monospace so that raw reasons line up; once there is a sentence to
+   read, the sentence should be set as prose and only the token stays monospace. */
+.halt-banner {
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.halt-token {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--warn-line);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  vertical-align: 1px;
 }
 
 .info-banner {

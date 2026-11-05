@@ -56,10 +56,18 @@
 | `guard` 在 `whitelist` 之前 | 白名单要判断「谁在哪儿说话」，身份得先建立 |
 | `wake` 在 `strip_wake` 之前 | 去掉 @ 之后就再也判断不出「是不是在叫我」 |
 | `sanitize` 在 `injection_screen` 之前 | 先清理零宽字符，否则注入检测可被不可见字符绕过 |
-| `command` 在 `persist` 之前 | 命令不产生对话历史，写进去会污染上下文压缩 |
+| `injection_screen` 在 `persist` 之前 | 被判定为注入的内容不该变成「记忆」 |
+| `persist` 在 `skip_reply` 之前 | 没被 @ 的消息也要归档；归档完才决定要不要回话 |
+| `skip_reply` 在 `command` 之前 | 一个只听不说的群，不该因为有人发了斜杠命令就开口 |
 | `persist` 在 `model` 之前 | 模型调用失败时用户消息仍要留下，否则历史有洞 |
 | `knowledge`/`recall` 在 `model` 之前 | 检索结果是提示词的一部分 |
 | `safety` 在 `reply` 之前 | 输出清理必须发生在发送之前 |
+
+`persist` 曾经在 `wake` 之后，于是「只有被叫到才入库」——这让「把这个群记下来」变成
+不可配置的事。现在归档由**采集群**决定，回不回话由**回复群**决定，两者互不影响：
+`WhitelistStage` 把两个判断都写进 `extras`（`memory_collect` / `replies_here`），
+`PersistStage` 读前者，`SkipReplyStage` 读后者。`SkipReplyStage` 用 `is False` 而不是
+假值判断——没有这个键（自建流水线的调用方）意味着「不限制」，而不是「全部禁言」。
 
 ---
 
@@ -323,23 +331,28 @@ soapbot/
    （AT 段 + 文字段 + 图片段），`emit` 派发。
 2. `BotRuntime._on_event` 按 `session_key` 加锁，进入 `Pipeline`。
 3. `DedupStage` 丢掉重复投递；`GuardStage` 解析出 `Principal`（角色只来自配置）。
-4. `WhitelistStage` 判断这个群是否允许（空名单 = 全开）。
-5. `WakeStage` 看到 AT 段指向自己 → 通过，记录 `wake_reason=at`。
+4. `WhitelistStage` 判断这个群是否允许（两个名单都空 = 全开），并把「要不要归档」
+   （`memory_collect`）和「要不要回话」（`replies_here`）写进 `extras`。
+5. `WakeStage` 看到 AT 段指向自己 → 通过，记录 `wake_reason=at`。它**不再**因为没被叫到
+   就终止，只记录判断结果。
 6. `StripWakeWordStage` 去掉 AT 段与唤醒词；`SanitizeStage` 去控制字符。
-7. `InjectionScreenStage` 检查越权指令；`AuthorizationStage` 确认能聊天。
-8. `CommandStage` / 插件命令 / 插件钩子：不是命令，继续。
-9. `PersistStage` 归档这条消息（模型调用失败也要留下，否则历史有洞）。
-10. `PersonaStage` 按群 + 用户解析人格卡；`RecallStage` 检索记忆；
+7. `InjectionScreenStage` 检查越权指令。
+8. `PersistStage` 归档这条消息（采集群内才写；模型调用失败也要留下，否则历史有洞）。
+9. `SkipReplyStage`：没被叫到（`not_woken`）或这个群只采集不回复（`group_not_replied`）
+   → 到此为止。归档已经完成，只是不开口。
+10. `AuthorizationStage` 确认能聊天。
+11. `CommandStage` / 插件命令 / 插件钩子：不是命令，继续。
+12. `PersonaStage` 按群 + 用户解析人格卡；`RecallStage` 检索记忆；
     `KnowledgeStage` 检索知识库——两者都以**不可信数据块**注入系统提示。
-11. `ModelStage`：语音段先转写（转写文本**同样过注入筛查**——嘴说出来的不是可信输入），
+13. `ModelStage`：语音段先转写（转写文本**同样过注入筛查**——嘴说出来的不是可信输入），
     图片按内容哈希查缓存，未命中才调用视觉模型；随后带工具列表请求主模型；
     若模型要求调用工具，执行后把结果作为不可信数据块回灌，最多两轮。
     开了 `STREAM_REPLY` 且没有工具待调用时，改为边生成边按句发送。
-12. `SafetyStage`：清理不可见字符、拦截提示词泄漏、检测 canary 复述、
+14. `SafetyStage`：清理不可见字符、拦截提示词泄漏、检测 canary 复述、
     脱敏疑似凭据、按人格卡截断。
-13. `ReplyStage` 通过适配器 `degrade()` 降级不支持的段落后发送；开了
+15. `ReplyStage` 通过适配器 `degrade()` 降级不支持的段落后发送；开了
     `VOICE_TTS_ENABLED` 时先合成为语音，失败或过长则回退为文本。
-14. `PersistReplyStage` 归档回复；`MemoryWriteStage` 异步抽取值得记住的事实。
+16. `PersistReplyStage` 归档回复；`MemoryWriteStage` 异步抽取值得记住的事实。
 
 任何一步都可以 `StageResult(halt=True, reason="...")` 终止——终止原因会进指标和审计，
 这是排查「机器人为什么不回我」的第一手材料。

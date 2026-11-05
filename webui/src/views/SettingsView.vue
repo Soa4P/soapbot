@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { ApiError, api } from '@/api/client'
+import GroupScopeCard from '@/components/GroupScopeCard.vue'
 import { t, locale, setLocale, availableLocales, type Locale } from '@/i18n'
 import { useAsync } from '@/lib/useAsync'
 
@@ -238,6 +239,9 @@ const schemaMismatch = computed(
         <div v-else class="empty">{{ t('settings.mcp.empty') }}</div>
       </div>
     </section>
+
+    <!-- ------------------------------------------------------------- group scope -->
+    <GroupScopeCard />
 
     <!-- ----------------------------------------------------------------- runtime -->
     <section class="panel">

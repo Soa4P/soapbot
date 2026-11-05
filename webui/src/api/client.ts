@@ -316,6 +316,32 @@ export const api = {
       inherited_owner: string
     }>('/api/security/authority', { method: 'POST', body: JSON.stringify(payload) }),
 
+  /** Which persona card speaks in which group; written to .env, applied on restart. */
+  writePersonaBinding: (payload: { group_personas: string }) =>
+    request<{ ok: boolean; restart_required: boolean; group_personas: string }>(
+      '/api/personas/binding',
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+
+  /** Where the bot speaks and where it learns — two independent lists. */
+  groupScope: () =>
+    request<{
+      reply_groups: string[]
+      memory_collect_groups: string[]
+      effective_collect: string[]
+      legacy_alias_in_use: boolean
+      reply_scope: 'all' | 'listed'
+      collect_scope: 'all' | 'listed'
+    }>('/api/security/group-scope'),
+  writeGroupScope: (payload: {
+    reply_groups: string[]
+    memory_collect_groups: string[]
+  }) =>
+    request<{ ok: boolean; restart_required: boolean }>('/api/security/group-scope', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   memorySessions: (limit = 50) => request<any>(`/api/memory/sessions?limit=${limit}`),
   memoryTimeline: (sessionKey: string, limit = 50) =>
     request<any>(

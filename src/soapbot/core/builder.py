@@ -31,6 +31,7 @@ from soapbot.core.stages import (
     DedupStage,
     ReplyStage,
     SanitizeStage,
+    SkipReplyStage,
     StripWakeWordStage,
     WakePolicy,
     WakeStage,
@@ -80,7 +81,39 @@ def build_persona_store(directory: Path | None = None) -> PersonaStore:
     store.load_directory(target)
     if not store.all():
         logger.info("no persona cards yet in %s; the panel can create the first one", target)
+    _apply_group_personas(store)
     return store
+
+
+def _apply_group_personas(store: PersonaStore) -> None:
+    """Wire ``SOAPBOT_GROUP_PERSONAS`` into the store.
+
+    ``群号:人格ID`` pairs. A pair naming a persona that does not exist is dropped with a
+    warning instead of being kept: a typo would otherwise look like "the binding does
+    not work", and the fallback order (user → group → default) would hide which pair
+    was wrong.
+    """
+    raw = (settings.group_personas or "").strip()
+    if not raw:
+        return
+    known = {persona.id for persona in store.all()}
+    for pair in raw.replace("；", ";").replace(",", ";").split(";"):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        group_id, _, persona_id = pair.partition(":")
+        group_id = normalize_id(group_id)
+        persona_id = persona_id.strip()
+        if not group_id or not persona_id:
+            continue
+        if persona_id not in known:
+            logger.warning(
+                "SOAPBOT_GROUP_PERSONAS names unknown persona %r for group %s; ignored",
+                persona_id,
+                group_id,
+            )
+            continue
+        store.bind_group(group_id, persona_id)
 
 
 class EmbeddingBridge:
@@ -141,12 +174,28 @@ def build_pipeline(
 
     # --- reachability gates ---
     pipeline.add(WhitelistStage(policy))
+    # ``wake`` records the decision instead of halting: ``persist`` sits below it and
+    # an un-mentioned message in a collected group still has to be archived. The turn
+    # is stopped by ``SkipReplyStage`` immediately after that archive step.
     pipeline.add(WakeStage(default_wake))
     pipeline.add(StripWakeWordStage(wake_words=default_wake.wake_words))
     pipeline.add(SanitizeStage())
 
     # --- content screening, before anything is stored or sent to a model ---
     pipeline.add(InjectionScreenStage(audit_log))
+
+    # --- archive the inbound turn ---
+    # After sanitising (so control characters are already gone) and after injection
+    # screening (so poisoned content never becomes "memory"), but before the reply
+    # decision. ``PersistStage`` itself consults the collect list.
+    if memory is not None:
+        pipeline.add(PersistStage(memory))
+    # Always present, including when there is no store: an un-mentioned message must be
+    # stopped here whether or not it was archived. Leaving this inside the ``memory is
+    # not None`` branch let every group message continue to the model on a runtime
+    # without memory — the exact opposite of the wake rule.
+    pipeline.add(SkipReplyStage())
+
     pipeline.add(AuthorizationStage(audit_log))
 
     # --- commands run before anything expensive ---
@@ -178,10 +227,6 @@ def build_pipeline(
 
         pipeline.add(PluginCommandStage(plugin_manager.loader, audit=audit_log))
         pipeline.add(PluginMessageHookStage(plugin_manager.loader, audit=audit_log))
-
-    # --- persistence of the inbound turn ---
-    if memory is not None:
-        pipeline.add(PersistStage(memory))
 
     # --- cost gate: after the free commands, before anything that calls the model ---
     # Placed here rather than beside Guard because the quota is a cost control, not an
@@ -292,8 +337,23 @@ def build_access_policy(settings_obj=None) -> AccessPolicy:
     operator who later emptied the allow-list silently reopened private chat.
     """
     cfg = settings_obj or settings
+    # ``group_allowlist`` predates the split and meant "reply here". Honouring it as a
+    # fallback keeps an untouched ``.env`` behaving exactly as before; when the new key
+    # is set it wins, and the old one is ignored rather than silently intersected.
+    # ``getattr`` rather than attribute access: tests and embedders pass small stand-ins
+    # that predate this split, and a missing field must mean "not configured" rather
+    # than an AttributeError at startup.
+    reply = list(getattr(cfg, "reply_groups", None) or [])
+    if not reply and getattr(cfg, "group_allowlist", None):
+        logger.warning(
+            "SOAPBOT_GROUP_ALLOWLIST is deprecated, use SOAPBOT_REPLY_GROUPS; "
+            "treating the old list as the reply set for now"
+        )
+        reply = list(cfg.group_allowlist)
+    collect = list(getattr(cfg, "memory_collect_groups", None) or [])
     return AccessPolicy(
-        group_allowlist={normalize_id(g) for g in (cfg.group_allowlist or []) if g},
+        group_allowlist={normalize_id(g) for g in reply if g},
+        memory_collect_groups={normalize_id(g) for g in collect if g},
         group_blacklist={normalize_id(g) for g in (cfg.group_blacklist or []) if g},
         user_blacklist={normalize_id(u) for u in (cfg.user_blacklist or []) if u},
         private_allowlist={normalize_id(u) for u in (cfg.private_allowlist or []) if u},

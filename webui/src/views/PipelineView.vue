@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { api, type MessageTrace, type PipelineTopology, type TraceSummary } from '@/api/client'
+import EmptyState from '@/components/EmptyState.vue'
 import StageGraph from '@/components/StageGraph.vue'
 import { t } from '@/i18n'
 import { clock } from '@/lib/format'
+import { refreshWouldDisrupt } from '@/lib/polling'
 
 /**
  * 09 — pipeline topology plus the trace of one message.
@@ -25,6 +27,8 @@ const selected = ref<MessageTrace | null>(null)
 const error = ref('')
 const loading = ref(false)
 const live = ref(false)
+/** True while a live tick was skipped, so the header can say so instead of looking stuck. */
+const livePaused = ref(false)
 let timer: number | undefined
 
 async function loadTopology(): Promise<void> {
@@ -62,13 +66,29 @@ function select(trace: MessageTrace): void {
   selected.value = trace
 }
 
+/** 15s, not 4s: the trace list rarely changes that fast, and every tick replaced the
+ * array under whoever was reading it. A hidden tab does not poll at all — five open
+ * tabs used to mean five times the queries for nobody's benefit. */
+const LIVE_INTERVAL_MS = 15_000
+
 function toggleLive(): void {
   live.value = !live.value
   if (live.value) {
-    timer = window.setInterval(() => void loadTraces(), 4000)
+    timer = window.setInterval(() => {
+      // Same rule as the other pages: skip while hidden, scrolling, or typing. This list
+      // is the one people actually read row by row, so a refresh that reorders it under
+      // the cursor is the worst case.
+      if (refreshWouldDisrupt()) {
+        livePaused.value = true
+        return
+      }
+      livePaused.value = false
+      void loadTraces()
+    }, LIVE_INTERVAL_MS)
   } else if (timer) {
     window.clearInterval(timer)
     timer = undefined
+    livePaused.value = false
   }
 }
 
@@ -79,6 +99,43 @@ const haltedLabel = computed(() => {
   return trace.halt_reason.startsWith('stage_error:')
     ? trace.halt_reason.replace('stage_error:', '')
     : trace.halt_reason
+})
+
+/**
+ * The same fact as a sentence.
+ *
+ * `halt_reason` is a machine token (`not_woken`, `group_not_replied`) because the log,
+ * the metrics and the audit trail all key off it. Rendering that token in a sentence —
+ * "stopped at not_woken" — is technically accurate and tells the reader nothing. The
+ * token stays on screen underneath, so the value to grep for is never lost.
+ */
+const KNOWN_REASONS = [
+  'not_woken',
+  'group_not_replied',
+  'group_not_allowed',
+  'duplicate',
+  'empty_input',
+  'empty_reply',
+  'empty_after_safety',
+  'model_failed',
+  'abuse_rate_limited',
+  'no_principal',
+  'pipeline_error',
+] as const
+
+const haltSentence = computed(() => {
+  const reason = selected.value?.halt_reason ?? ''
+  if (!reason) return ''
+  if ((KNOWN_REASONS as readonly string[]).includes(reason)) {
+    return t(`pipeline.reason.${reason}`)
+  }
+  if (reason.startsWith('plugin_halt:')) {
+    return t('pipeline.reason.plugin_halt', { plugin: reason.slice('plugin_halt:'.length) })
+  }
+  if (reason.startsWith('stage_error:')) {
+    return t('pipeline.reason.stage_error', { stage: reason.slice('stage_error:'.length) })
+  }
+  return ''
 })
 
 function fmtMs(value: number): string {
@@ -171,13 +228,12 @@ onBeforeUnmount(() => {
       <button class="btn" :class="live ? 'lamp' : 'ghost'" type="button" @click="toggleLive">
         {{ live ? t('pipeline.stopFollow') : t('pipeline.follow') }}
       </button>
+      <span v-if="live && livePaused" class="tag tag--stale">{{ t('polling.paused') }}</span>
     </div>
 
     <div class="panel__body split">
       <div class="split__list">
-        <p v-if="!traces.length" class="empty">
-          {{ t('pipeline.empty') }}
-        </p>
+        <EmptyState v-if="!traces.length" :lead="t('pipeline.empty')" :hint="t('pipeline.emptyHint')" />
 
         <ul v-else class="msglist">
           <li v-for="trace in traces" :key="trace.trace_id">
@@ -221,8 +277,9 @@ onBeforeUnmount(() => {
           <!-- One sentence with the stage name as a placeholder, rather than two
                fragments around a <code> token. Monospace was doing less work here than
                the sentence being translatable as a unit. -->
-          <p v-if="selected.halted" class="warn-banner" style="margin: 8px 0 0">
-            {{ t('pipeline.halted', { stage: haltedLabel || t('pipeline.unknownStage') }) }}
+          <p v-if="selected.halted" class="warn-banner" :class="{ 'halt-banner': haltSentence }" style="margin: 8px 0 0">
+            {{ haltSentence || t('pipeline.halted', { stage: haltedLabel || t('pipeline.unknownStage') }) }}
+            <code v-if="haltSentence" class="halt-token">{{ selected.halt_reason }}</code>
           </p>
 
           <div v-if="topology" style="margin-top: 10px">
@@ -284,7 +341,7 @@ onBeforeUnmount(() => {
           </section>
         </template>
 
-        <p v-else class="empty">{{ t('pipeline.pickOne') }}</p>
+        <EmptyState v-else :lead="t('pipeline.pickOne')" />
       </div>
     </div>
   </section>

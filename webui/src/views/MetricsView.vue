@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { api, type MetricsResponse, type TraceSummary } from '@/api/client'
 import BarChart from '@/components/charts/BarChart.vue'
 import LineChart from '@/components/charts/LineChart.vue'
 import { t } from '@/i18n'
 import { clock } from '@/lib/format'
+import { useNow, usePolling } from '@/lib/polling'
 
 /**
  * 10 — throughput and latency over the ring buffer's window.
@@ -85,17 +86,26 @@ const counters = computed(() => {
 
 const hasSamples = computed(() => (data.value?.samples.length ?? 0) > 1)
 
-let timer: number | undefined
+onMounted(() => void load())
 
-onMounted(() => {
-  void load()
-  // 10 s against a 5 s sample interval: fast enough to feel live, slow enough that the
-  // chart is not redrawn in the middle of a hover.
-  timer = window.setInterval(() => void load(), 10_000)
-})
+// 20 s against a 5 s sample interval: the chart still moves, but it is no longer
+// redrawn under a hover or mid-scroll, which is what made it feel unstable rather than
+// live. Skipped entirely in a background tab.
+const { paused, lastRunAt } = usePolling(load, 20_000)
+const now = useNow()
 
-onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+/**
+ * "Updated 12s ago", not a spinner.
+ *
+ * The interval went from 10s to 20s, which is the right call for a chart that samples
+ * every 5s — but a slower poll with no visible timestamp reads as a frozen page. This
+ * text is the only thing that changes on a tick, so it can go grey without the numbers
+ * flickering.
+ */
+const sinceText = computed(() => {
+  if (!lastRunAt.value) return t('polling.notYet')
+  const seconds = Math.max(0, Math.round((now.value - lastRunAt.value) / 1000))
+  return t('polling.updatedAgo', { n: seconds })
 })
 
 function fmtMs(value: number): string {
@@ -114,6 +124,8 @@ function fmtCount(value: number): string {
   <section class="panel">
     <div class="panel__head">
       <h2>{{ t('metrics.overview') }}</h2>
+      <span class="tag" :class="{ 'tag--stale': paused }">{{ sinceText }}</span>
+      <span v-if="paused" class="tag">{{ t('polling.paused') }}</span>
       <span class="strip__spacer" />
       <button class="btn ghost" type="button" @click="load">{{ t('common.refresh') }}</button>
     </div>

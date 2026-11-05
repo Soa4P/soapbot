@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
+import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { datetime, fromNow, num, uptime, untilFuture } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -194,7 +195,13 @@ const counters = computed(() => [
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty">{{ t('runtime.noAdapters') }}</div>
+      <EmptyState
+        v-else
+        :lead="t('runtime.noAdapters')"
+        :hint="t('runtime.noAdaptersHint')"
+        to="/settings"
+        :action="t('runtime.noAdaptersAction')"
+      />
     </div>
   </section>
 

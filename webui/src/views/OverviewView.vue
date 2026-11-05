@@ -7,10 +7,12 @@ import { t } from '@/i18n'
 import { compact, num, uptime } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
 
-const runtime = useAsync(() => api.runtime())
-const providers = useAsync(() => api.providers())
-const personas = useAsync(() => api.personas())
-const bilibili = useAsync(() => api.bilibili())
+// Cache keys: this page fires four requests, and it is the one people bounce off to
+// check a detail and come back. Without keys every return meant four blank frames.
+const runtime = useAsync(() => api.runtime(), 'overview.runtime')
+const providers = useAsync(() => api.providers(), 'overview.providers')
+const personas = useAsync(() => api.personas(), 'overview.personas')
+const bilibili = useAsync(() => api.bilibili(), 'overview.bilibili')
 
 const metrics = computed(() => runtime.data.value?.metrics ?? {})
 
