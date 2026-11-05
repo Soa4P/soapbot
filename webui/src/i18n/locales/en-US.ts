@@ -643,6 +643,8 @@ export default {
   'napcat.qrNotReady': 'NapCat is still starting; no QR yet. Retrying automatically.',
   'napcat.qrUnreachable': 'Cannot reach the NapCat WebUI (default port 6099). Check that it is running.',
   'napcat.qrFailed': 'Could not fetch the QR: {reason}. Retrying automatically.',
+  'napcat.qrStale':
+    'This QR has expired: NapCat stopped minting new ones after the last one timed out. Sign in again in the NapCat WebUI, or restart NapCat and click Refresh now.',
   'napcat.foundLocal': 'A NapCat is already running here (its WebUI is listening) — no Docker needed.',
   'napcat.hintLocal':
     'NapCat is already running on this machine (probably one you installed). Press "Show login QR" and scan it with mobile QQ; the card then turns into "logged in" and you press "Connect QQ".',
