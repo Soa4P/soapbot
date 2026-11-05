@@ -178,6 +178,12 @@ class OneBot11Adapter(Adapter):
         """Reverse mode without a token is an unauthenticated transport."""
 
     # ------------------------------------------------------------------ lifecycle
+    def _spawn_supervisor(self) -> None:
+        """Start the reconnect loop and keep a strong reference to its task."""
+        task = asyncio.create_task(self._supervise_forward())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     async def start(self) -> None:
         self._closed = False
         if self.mode == "reverse":
@@ -186,11 +192,23 @@ class OneBot11Adapter(Adapter):
         # Forward mode is supervised: the first connect is awaited so a bad URL or a
         # refused port still fails startup loudly, then the supervisor owns the
         # connection for the rest of the adapter's life.
-        await self._start_forward()
+        #
+        # The supervisor must exist on the FAILURE path too. It used to be created only
+        # after a successful dial, so a bot that booted while the protocol end was down
+        # never acquired one: startup raised, ``runtime.start`` logged "adapter start
+        # failed", and the adapter then sat offline for ever — even after NapCat came
+        # back. Recovering required a human to restart the bot, which is what made a
+        # protocol-side outage look like "the bot randomly dies". Spawn before
+        # re-raising: at that point ``_ws`` is None and the supervisor will dial again.
+        try:
+            await self._start_forward()
+        except BaseException:
+            self.health.online = False
+            if self.reconnect:
+                self._spawn_supervisor()
+            raise
         if self.reconnect:
-            task = asyncio.create_task(self._supervise_forward())
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self._spawn_supervisor()
 
     async def _start_forward(self) -> None:
         url = self._url
@@ -266,6 +284,19 @@ class OneBot11Adapter(Adapter):
                 delay,
                 attempt,
             )
+            # A thousand identical "WinError 1225" WARNINGs are not a diagnosis. On
+            # the real outage the operator saw 1025 of them and no indication that the
+            # protocol end had been killed and QQ needed a fresh login. Escalate at a
+            # few thresholds with the two concrete things worth checking, then stay
+            # quiet apart from occasional reminders.
+            if attempt in (5, 20, 100) or (attempt >= 200 and attempt % 500 == 0):
+                logger.error(
+                    "onebot11 protocol end still unreachable after %d attempts; "
+                    "check NapCat is running and QQ is logged in (WebUI on :6099), "
+                    "and that its scheduled task has ExecutionTimeLimit=PT0S. last=%s",
+                    attempt,
+                    self.health.last_error,
+                )
             try:
                 await asyncio.sleep(delay)
             except asyncio.CancelledError:

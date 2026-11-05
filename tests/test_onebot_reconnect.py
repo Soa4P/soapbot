@@ -107,6 +107,95 @@ async def test_a_refused_first_connect_still_fails_startup(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
+async def test_boot_while_protocol_end_is_down_recovers_when_it_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production outage that made a NapCat restart look like a dead bot.
+
+    ``start()`` used to create the supervisor only *after* a successful first dial.
+    When NapCat was down at boot, the exception escaped before any supervisor existed;
+    ``runtime.start`` logged "adapter start failed" and the adapter then never tried
+    again. Bringing NapCat back did nothing — the bot needed a human restart.
+
+    This is a distinct failure from a socket that drops *after* connecting (covered
+    above): here the connection has never succeeded at all.
+    """
+    available = False
+    attempts: list[str] = []
+
+    async def fake_connect(url: str, **_kwargs: Any) -> _FakeWS:
+        attempts.append(url)
+        if not available:
+            raise ConnectionRefusedError("nothing listening")
+        return _FakeWS(fail=False)
+
+    monkeypatch.setattr(onebot11, "ws_connect", fake_connect)
+    monkeypatch.setattr(onebot11, "_RECONNECT_BASE_S", 0.01)
+
+    adapter = OneBot11Adapter(account_id="1", mode="forward", ws_url="ws://x:1")
+    adapter._refresh_self_info = _noop  # type: ignore[method-assign]
+
+    with pytest.raises(ConnectionRefusedError):
+        await adapter.start()
+
+    # Startup must stay loud, but a supervisor has to exist despite it.
+    assert adapter._tasks, "no reconnect supervisor was created"
+    assert not adapter.health.online
+
+    available = True
+    try:
+        for _ in range(300):
+            if adapter.health.online:
+                break
+            await asyncio.sleep(0.01)
+        assert adapter.health.online, "bot never came back after NapCat returned"
+        assert len(attempts) >= 2
+    finally:
+        await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_long_outage_escalates_to_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 1000-line wall of identical WARNINGs is why the outage felt "inexplicable".
+
+    The real incident produced 1025 `WinError 1225` warnings and not one line saying
+    what to check. Escalation must name the protocol end and QQ login, and must not
+    repeat on every attempt.
+    """
+    import logging
+
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(seconds: float) -> None:
+        if adapter.health.reconnect_attempts >= 6:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    async def always_fail(_url: str, **_kwargs: Any) -> _FakeWS:
+        raise ConnectionRefusedError("down")
+
+    monkeypatch.setattr(onebot11, "_RECONNECT_BASE_S", 0.01)
+    monkeypatch.setattr(onebot11.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(onebot11, "ws_connect", always_fail)
+
+    adapter = OneBot11Adapter(account_id="1", mode="forward", ws_url="ws://x:1")
+    adapter._refresh_self_info = _noop  # type: ignore[method-assign]
+
+    with (
+        caplog.at_level(logging.ERROR, logger="soapbot.adapters.onebot11"),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await adapter._supervise_forward()
+
+    escalations = [r for r in caplog.records if "protocol end still unreachable" in r.message]
+    assert len(escalations) == 1, "escalate once at the threshold, not on every retry"
+    text = escalations[0].getMessage()
+    assert "6099" in text and "ExecutionTimeLimit" in text
+
+
+@pytest.mark.asyncio
 async def test_backoff_grows_and_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     """A protocol side that is down for an hour must not be hammered once per second."""
     monkeypatch.setattr(onebot11, "_RECONNECT_BASE_S", 1.0)
