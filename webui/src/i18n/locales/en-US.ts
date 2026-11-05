@@ -555,6 +555,11 @@ export default {
   'api.timeout': 'Request timed out after {seconds}s — the service may be restarting; refresh and retry.',
   'shell.unauthenticated': 'This session is not authenticated. Remote access must sign in at the top right, or every admin endpoint returns 401.',
   'login.title': 'Exchange a one-time token for an access token',
+  'login.whereTitle': 'Where to find the token',
+  'login.whereHint': 'On the server, use either of these — no need to guess a file path.',
+  'login.resetHint': 'Restart the service afterwards; restarting alone does not mint a new one.',
+  'login.copy': 'Copy',
+  'login.copied': 'Copied',
   'login.detail': 'Written to data/init_token.txt on first start; restarting does not change it until it is used. If SOAPBOT_INIT_TOKEN is set, that value is used instead.',
   'login.label': 'Bootstrap token',
   'login.checking': 'Checking…',
@@ -630,7 +635,14 @@ export default {
   'napcat.tokenLabel': "NapCat WebUI token (read automatically; the button opens with it attached):",
   'napcat.tokenCopy': 'Copy',
   'napcat.tokenCopied': 'Copied',
-  'napcat.qrHint': 'Scan it with mobile QQ; this card switches to "logged in" by itself.',
+  'napcat.qrHint': 'Scan with mobile QQ. This code is short-lived; the timestamp below shows when it was last refreshed, and a new one is fetched automatically (or click Refresh now). If QQ warns about an unusual sign-in location, confirm it is you.',
+  'napcat.qrAge': 'This QR was refreshed {seconds}s ago; a new one is fetched every {ttl}s.',
+  'napcat.qrRefreshNow': 'Refresh now',
+  'napcat.qrRateLimited': 'NapCat WebUI rate-limited the login exchange; retries are paused and will resume automatically. You can also click Refresh now.',
+  'napcat.qrLoginFailed': 'NapCat WebUI refused the credential exchange. Restart NapCat and try again.',
+  'napcat.qrNotReady': 'NapCat is still starting; no QR yet. Retrying automatically.',
+  'napcat.qrUnreachable': 'Cannot reach the NapCat WebUI (default port 6099). Check that it is running.',
+  'napcat.qrFailed': 'Could not fetch the QR: {reason}. Retrying automatically.',
   'napcat.foundLocal': 'A NapCat is already running here (its WebUI is listening) — no Docker needed.',
   'napcat.hintLocal':
     'NapCat is already running on this machine (probably one you installed). Press "Show login QR" and scan it with mobile QQ; the card then turns into "logged in" and you press "Connect QQ".',
@@ -644,7 +656,6 @@ export default {
   'napcat.restarting': 'Restarting… the page will come back in a few seconds.',
   'napcat.restartManual':
     'This process is not supervised by systemd or a container, so it cannot restart itself. On the host run: systemctl restart soapbot (Linux), docker restart <name> (container), or schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (Windows scheduled task).',
-  'napcat.qrNotReady': 'The QR is not ready yet — try again once it has finished starting.',
   'napcat.loginFailed':
     "NapCat's WebUI answers but refused the login — its process is likely stuck. Restart NapCat on the host (schtasks /End /TN NapCat && schtasks /Run /TN NapCat), then try again in a few seconds.",
 

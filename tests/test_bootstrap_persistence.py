@@ -191,6 +191,11 @@ def test_http_login_deletes_the_file_and_status_reports_the_state(
         before = client.get("/api/auth/status").json()
         assert before["login_available"] is True
         assert before["bootstrap_state"] == "available"
+        # The panel must be able to show the operator WHERE the file is, resolved from
+        # the real data dir — but never the credential's value on an unauthenticated route.
+        assert before["bootstrap_path"].endswith("init_token.txt")
+        assert str(data_dir) in before["bootstrap_path"]
+        assert token not in str(before)
 
         assert client.post("/api/auth/login", json={"init_token": token}).status_code == 200
         assert not path.exists(), "a spent credential must not stay on disk"

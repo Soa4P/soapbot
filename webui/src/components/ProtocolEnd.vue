@@ -27,6 +27,16 @@ const qrSvg = ref('')
 const busy = ref(false)
 let timer: number | undefined
 
+/** QR state is visible on purpose. A picture that silently goes stale while the caption
+ * promises "it refreshes automatically" is exactly the failure this component had: the
+ * backend was rate-limited, every refresh failed, and the operator kept scanning a dead
+ * code with no way to tell. Now the age, the last error and the next attempt are shown. */
+const qrFetchedAt = ref(0)
+const qrError = ref('')
+const qrNextAttemptAt = ref(0)
+const qrAgeSeconds = ref(0)
+let qrInFlight = false
+
 /**
  * Draw the QR ourselves from the URL NapCat hands back.
  *
@@ -42,10 +52,40 @@ function renderQr(url: string): string {
   return qr.createSvgTag({ cellSize: 4, margin: 2 })
 }
 
-/** NapCat's login QR lives for about two minutes. A picture that silently expires is how
- * "扫不上" happens — so it is re-fetched on a timer while the account is not logged in. */
+/** NapCat's login QR is short-lived. Re-fetch before it expires, but never hammer the
+ * WebUI: each QR call used to drive a fresh /api/auth/login, and NapCat rate-limits that
+ * endpoint (loginRate=10). Three-second polling locked the panel out of its own WebUI. */
 const QR_TTL_MS = 60_000
-let qrFetchedAt = 0
+const QR_RETRY_MS = 5_000
+
+function describeQrFailure(reason: string): string {
+  if (reason.includes('webui-rate-limited')) return t('napcat.qrRateLimited')
+  if (reason.includes('webui-login-failed')) return t('napcat.qrLoginFailed')
+  if (reason.includes('webui-not-ready')) return t('napcat.qrNotReady')
+  if (reason.includes('webui-unreachable')) return t('napcat.qrUnreachable')
+  return t('napcat.qrFailed', { reason: reason.slice(0, 80) })
+}
+
+async function fetchQr(): Promise<void> {
+  if (qrInFlight) return
+  qrInFlight = true
+  try {
+    const body = await api.napcatQr()
+    if (!body.url) throw new Error('no-qrcode')
+    qrSvg.value = renderQr(body.url)
+    qrFetchedAt.value = Date.now()
+    qrAgeSeconds.value = 0
+    qrError.value = ''
+    qrNextAttemptAt.value = 0
+  } catch (err) {
+    // Do NOT swallow this. The old `catch { /* keep polling */ }` left a stale picture on
+    // screen with a caption claiming it would refresh, which is why nobody could log in.
+    qrError.value = describeQrFailure((err as { message?: string }).message ?? '')
+    qrNextAttemptAt.value = Date.now() + QR_RETRY_MS
+  } finally {
+    qrInFlight = false
+  }
+}
 
 async function refresh(): Promise<void> {
   try {
@@ -57,25 +97,19 @@ async function refresh(): Promise<void> {
     // keeps saying "scan me" at someone who already did — the panel now names the account.
     if (loggedIn) {
       qrSvg.value = ''
+      qrError.value = ''
+      qrFetchedAt.value = 0
       return
     }
-    // Fetch the QR as soon as the panel can, instead of waiting to be asked: the operator
-    // pressed "start" and the next thing they need is the picture. 409s are ignored — that
-    // is "not booted yet", and the next poll tries again. Once shown, it is re-fetched on
-    // the TTL above: a stale QR scanned with a phone fails, and that failure looks like a
-    // broken bot rather than an expired picture.
+    if (qrFetchedAt.value) {
+      qrAgeSeconds.value = Math.floor((Date.now() - qrFetchedAt.value) / 1000)
+    }
     const waitingForScan = state.value.status === 'running' || state.value.webui_reachable
-    const stale = Date.now() - qrFetchedAt > QR_TTL_MS
-    if (waitingForScan && (stale || !qrSvg.value)) {
-      try {
-        const body = await api.napcatQr()
-        if (body.url) {
-          qrSvg.value = renderQr(body.url)
-          qrFetchedAt = Date.now()
-        }
-      } catch {
-        /* keep polling */
-      }
+    const now = Date.now()
+    const stale = qrFetchedAt.value > 0 && now - qrFetchedAt.value > QR_TTL_MS
+    const needFirst = !qrSvg.value && !qrFetchedAt.value
+    if (waitingForScan && (stale || needFirst) && now >= qrNextAttemptAt.value) {
+      await fetchQr()
     }
   } catch (err) {
     error.value = (err as Error).message
@@ -102,6 +136,8 @@ async function stop(): Promise<void> {
   try {
     await api.napcatStop()
     qrSvg.value = ''
+    qrFetchedAt.value = 0
+    qrError.value = ''
     await refresh()
   } catch (err) {
     error.value = (err as Error).message
@@ -113,21 +149,9 @@ async function stop(): Promise<void> {
 async function showQr(): Promise<void> {
   busy.value = true
   error.value = ''
-  try {
-    const body = await api.napcatQr()
-    qrSvg.value = body.url ? renderQr(body.url) : ''
-    if (qrSvg.value) qrFetchedAt = Date.now()
-    else error.value = t('napcat.qrNotReady')
-  } catch (err) {
-    // 409 carries a machine token (webui-login-failed vs webui-not-ready) in ApiError.status
-    // detail — map it to a sentence the operator can act on instead of a bare "409".
-    const reason = (err as { message?: string }).message ?? ''
-    error.value = reason.includes('webui-login-failed')
-      ? t('napcat.loginFailed')
-      : t('napcat.qrNotReady')
-  } finally {
-    busy.value = false
-  }
+  qrNextAttemptAt.value = 0 // a deliberate click always gets one attempt
+  await fetchQr()
+  busy.value = false
 }
 
 /* ------------------------------------------------- connect (the whole point) */
@@ -281,6 +305,22 @@ onBeforeUnmount(() => {
     <!-- Generated locally from NapCat's login URL, so no third party ever sees the token. -->
     <div v-if="qrSvg" class="napcat__qr" v-html="qrSvg" />
     <p v-if="qrSvg" class="muted">{{ t('napcat.qrHint') }}</p>
+
+    <!-- The age is shown so "auto refresh" is verifiable rather than a promise. When a
+         refresh fails the old picture stays (it may still be scannable) but is explicitly
+         marked as possibly stale, with the reason and a manual retry. -->
+    <p v-if="qrSvg && qrFetchedAt" class="muted napcat__qr-age">
+      {{ t('napcat.qrAge', { seconds: qrAgeSeconds, ttl: QR_TTL_MS / 1000 }) }}
+      <button class="btn ghost" type="button" :disabled="busy" @click="showQr">
+        {{ t('napcat.qrRefreshNow') }}
+      </button>
+    </p>
+    <p v-if="qrError" class="warn-banner" role="status">
+      {{ qrError }}
+      <button class="btn ghost" type="button" :disabled="busy" @click="showQr">
+        {{ t('napcat.qrRefreshNow') }}
+      </button>
+    </p>
 
     <!-- NapCat's WebUI wants a token on first open; making the operator read a startup log
          for it is exactly the "go read the docs" move this card exists to prevent. -->
