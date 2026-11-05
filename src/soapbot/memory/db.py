@@ -44,7 +44,7 @@ from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: How long SQLite waits for a competing writer before giving up, in seconds.
 #:
@@ -120,6 +120,78 @@ class MemoryRow(Base):
     created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     accessed_at: Mapped[float] = mapped_column(Float, default=0.0)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SceneCardRow(Base):
+    """The per-scene index card: a bounded, always-injectable map of a conversation.
+
+    One row per scope, replaced rather than appended. A card is a *view* of the memories
+    in its scope, so keeping history would mean keeping stale maps and having to decide
+    which one is current — a decision with no right answer and a wrong one that is easy
+    to make.
+    """
+
+    __tablename__ = "scene_cards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    topics: Mapped[str] = mapped_column(Text, default="")
+    """Newline-joined. A separate table would be normalised and pointless: the list is
+    read whole, written whole, and never queried by element."""
+    people: Mapped[str] = mapped_column(Text, default="")
+    memory_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+
+class ScenePortraitRow(Base):
+    """The per-scene portrait: slow-changing, evidence-derived understanding.
+
+    Separate from :class:`SceneCardRow` because the lifetimes differ. The card changes
+    every turn and is always injected; the portrait changes rarely, costs more to build,
+    and is injected only when relevant.
+    """
+
+    __tablename__ = "scene_portraits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    headline: Mapped[str] = mapped_column(Text, default="")
+    themes: Mapped[str] = mapped_column(Text, default="")
+    tone: Mapped[str] = mapped_column(String(64), default="")
+    recurring_questions: Mapped[str] = mapped_column(Text, default="")
+    memory_count: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    """0..1, from how much evidence the portrait rests on. Stored rather than recomputed
+    so a reader can decide whether to trust the portrait without re-reading its inputs."""
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+
+class SceneLinkRow(Base):
+    """A typed, directed edge between two memories — the ``[[wikilink]]``.
+
+    ``kind`` is a string column holding a value from a closed set
+    (:data:`soapbot.memory.scene.LINK_KINDS`). Not an enum column because SQLite has no
+    native enum and a CHECK constraint would need a migration to extend; the validation
+    lives where the vocabulary is defined.
+    """
+
+    __tablename__ = "scene_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="same_topic", index=True)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+    __table_args__ = (
+        # The pair plus kind is the identity of an edge. Without the constraint, repeated
+        # extraction of the same fact would add a new row each time and ``neighbours``
+        # would return the same id many times over.
+        Index("uq_scene_link", "source_id", "target_id", "kind", unique=True),
+    )
 
 
 class KnowledgeRow(Base):

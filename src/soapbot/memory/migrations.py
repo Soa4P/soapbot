@@ -69,12 +69,102 @@ async def _v2_message_lookup_index(conn: Any) -> None:
     )
 
 
+async def _v3_scene_layer(conn: Any) -> None:
+    """Add the scene layer: cards, portraits and links.
+
+    ``create_all`` builds these on a fresh database, so this step exists for the
+    databases that already hold conversation history — which is every database that
+    matters. Without it, an upgraded binary would query ``scene_cards`` on a database
+    that has no such table and fail at the first turn.
+
+    The tables are created empty rather than backfilled. A card is derived from memories,
+    and the first ``refresh`` after startup builds it; backfilling here would mean running
+    the derivation inside a migration transaction, which is the one place a slow query is
+    least affordable.
+    """
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS scene_cards ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "scope VARCHAR(128) NOT NULL UNIQUE, "
+            "title VARCHAR(256) NOT NULL DEFAULT '', "
+            "summary TEXT NOT NULL DEFAULT '', "
+            "topics TEXT NOT NULL DEFAULT '', "
+            "people TEXT NOT NULL DEFAULT '', "
+            "memory_count INTEGER NOT NULL DEFAULT 0, "
+            "updated_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_scene_cards_scope ON scene_cards (scope)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_scene_cards_updated ON scene_cards (updated_at)")
+    )
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS scene_portraits ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "scope VARCHAR(128) NOT NULL UNIQUE, "
+            "headline TEXT NOT NULL DEFAULT '', "
+            "themes TEXT NOT NULL DEFAULT '', "
+            "tone VARCHAR(64) NOT NULL DEFAULT '', "
+            "recurring_questions TEXT NOT NULL DEFAULT '', "
+            "memory_count INTEGER NOT NULL DEFAULT 0, "
+            "confidence FLOAT NOT NULL DEFAULT 0, "
+            "updated_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_scene_portraits_scope "
+            "ON scene_portraits (scope)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_scene_portraits_updated "
+            "ON scene_portraits (updated_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS scene_links ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "source_id INTEGER NOT NULL, "
+            "target_id INTEGER NOT NULL, "
+            "kind VARCHAR(32) NOT NULL DEFAULT 'same_topic', "
+            "weight FLOAT NOT NULL DEFAULT 1, "
+            "created_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_scene_links_source ON scene_links (source_id)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_scene_links_target ON scene_links (target_id)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_scene_links_kind ON scene_links (kind)")
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scene_link "
+            "ON scene_links (source_id, target_id, kind)"
+        )
+    )
+
+
 #: ``{target_version: step}``. The step moves the database *to* ``target_version``.
 #:
 #: Version 1 was the first schema and needed no step. Version 2 adds the index above.
+#: Version 3 adds the scene layer (cards, portraits, links).
 #: ``tests/test_migrations.py`` monkeypatches this table to exercise the loop, the gap
 #: check and rollback independently of the real step.
-MIGRATIONS: dict[int, MigrationStep] = {2: _v2_message_lookup_index}
+MIGRATIONS: dict[int, MigrationStep] = {
+    2: _v2_message_lookup_index,
+    3: _v3_scene_layer,
+}
 
 
 class SchemaTooNewError(RuntimeError):

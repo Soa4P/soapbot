@@ -147,8 +147,9 @@ def webui_token() -> str:
     Windows: ``<home>\\napcat\\config\\webui.json``, one level deeper than the Linux container's
     ``/app/napcat/config/webui.json``.
     """
-    if settings.napcat_webui_token:
-        return settings.napcat_webui_token
+    explicit = settings.napcat_webui_token.get_secret_value()
+    if explicit:
+        return explicit
 
     candidates: list[Path] = [config_dir() / "webui.json"]
     if settings.napcat_home is not None:
