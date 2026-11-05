@@ -21,6 +21,7 @@ from soapbot.core.stages import (
     AccessPolicy,
     DedupStage,
     SanitizeStage,
+    SkipReplyStage,
     StripWakeWordStage,
     WakeStage,
     WhitelistStage,
@@ -62,7 +63,10 @@ async def test_whitelist_allows_when_empty() -> None:
 
 
 async def test_whitelist_blocks_group_not_listed() -> None:
-    policy = AccessPolicy(group_allowlist={"999"})
+    # The collect list is pinned too: an empty one means "every group", so leaving it
+    # out would admit 123456 through the collect scope and the refusal below would never
+    # happen.
+    policy = AccessPolicy(group_allowlist={"999"}, memory_collect_groups={"999"})
     ctx = make_ctx(make_event(group_id="123456"))
     result = await WhitelistStage(policy).run(ctx)
     assert result.halt is True
@@ -99,10 +103,14 @@ async def test_wake_private_always_woken() -> None:
 
 
 async def test_wake_group_requires_at_or_word() -> None:
+    """A message nobody addressed is marked, not killed — archiving still runs."""
     ctx = make_ctx(make_event(text="just chatting"))
     result = await WakeStage().run(ctx)
-    assert result.halt is True
-    assert result.reason == "not_woken"
+    assert result.halt is False, "wake must not end the turn; persist still has to run"
+    assert ctx.extras.get("skip_reply") is True
+
+    # The halt now happens after the archive step, with the same reason as before.
+    assert (await SkipReplyStage().run(ctx)).reason == "not_woken"
 
 
 async def test_wake_group_by_at_segment() -> None:
@@ -119,9 +127,12 @@ async def test_wake_group_by_wake_word() -> None:
 
 
 async def test_wake_at_other_user_does_not_wake() -> None:
+    """@-ing someone else is not an @ to the bot — still marked, still archived."""
     segments = [MessageSegment.at("99999"), MessageSegment.text(" hey")]
     ctx = make_ctx(make_event(segments=segments))
-    assert (await WakeStage().run(ctx)).halt is True
+    assert (await WakeStage().run(ctx)).halt is False
+    assert ctx.extras.get("skip_reply") is True
+    assert (await SkipReplyStage().run(ctx)).halt is True
 
 
 # ---------------------------------------------------------------- strip + sanitize

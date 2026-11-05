@@ -131,7 +131,10 @@ def test_user_id_padding_cannot_dodge_blacklist() -> None:
 
 
 def test_group_id_padding_still_matches_allowlist() -> None:
-    policy = AccessPolicy(group_allowlist={"123456"})
+    # Both lists are pinned so that admission still depends on the reply list: an empty
+    # collect list means "every group", which would admit 999999 and make the negative
+    # case below pass for the wrong reason.
+    policy = AccessPolicy(group_allowlist={"123456"}, memory_collect_groups={"123456"})
     for disguised in (" 123456", "123456 ", "０１２３４５６", "\u200b123456"):
         ok, _ = policy.allows(MessageScene.GROUP, disguised, "20001")
         assert ok is True, f"{disguised!r} failed to match the allow-list"

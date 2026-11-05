@@ -15,6 +15,7 @@ import DiffEditor from '@/components/DiffEditor.vue'
 import Adapters from '@/components/Adapters.vue'
 import ProtocolEnd from '@/components/ProtocolEnd.vue'
 import McpServers from '@/components/McpServers.vue'
+import PersonaBindingCard from '@/components/PersonaBindingCard.vue'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
 import { num, truncate } from '@/lib/format'
@@ -403,6 +404,10 @@ async function applyChanges(): Promise<void> {
 </script>
 
 <template>
+  <!-- Bound at the top: "which card speaks where" is the question this page exists to
+       answer, and it was previously only editable by hand-editing .env. -->
+  <PersonaBindingCard />
+
   <div class="grid cols-3">
     <div class="readout">
       <span class="readout__label">Provider</span>

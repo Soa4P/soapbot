@@ -66,11 +66,15 @@ STAGE_ORDER: tuple[str, ...] = (
     "strip_wake",
     "sanitize",
     "injection_screen",
+    # Archive before the reply decision: an un-mentioned message in a collected group is
+    # still history. ``skip_reply`` then stops the turn, which is why it sits before the
+    # authorization gate and before anything that acts on the message.
+    "persist",
+    "skip_reply",
     "authorization",
     "command",
     "plugin_command",
     "plugin_message_hooks",
-    "persist",
     # After the free commands and before the model: a quota that fires after the provider
     # call has already spent what it exists to protect.
     "model_quota",
@@ -94,9 +98,14 @@ ORDER_CONSTRAINTS: tuple[tuple[str, str], ...] = (
     ("wake", "strip_wake"),
     ("strip_wake", "sanitize"),
     ("sanitize", "injection_screen"),
+    # The archive step moved ahead of the reply decision so a collected group keeps its
+    # history even when nobody @-ed the bot. What must NOT move ahead of it is screening:
+    # storing a message the injection screen would have rejected writes poisoned text
+    # into every later recall.
+    ("injection_screen", "persist"),
+    ("persist", "skip_reply"),
     ("injection_screen", "command"),
     ("authorization", "command"),
-    ("command", "persist"),
     ("persist", "model"),
     ("safety", "reply"),
 )
