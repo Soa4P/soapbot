@@ -170,6 +170,72 @@ class Settings(BaseSettings):
     """Cap on the pause. Long enough to stop a retry storm, short enough that recovery does
     not need an operator."""
 
+    # ---- outbound HTTP ----
+
+    outbound_connect_timeout: float = 5.0
+    """Seconds allowed to establish a connection, separately from reading a reply.
+
+    Separate because the two failures mean different things. A refused or blackholed
+    connect means the endpoint is down and the next provider should be tried now; a slow
+    read means the model is thinking and the caller's own budget should decide. With a
+    single flat timeout, a dead host costs the full completion budget before failover —
+    five seconds instead of sixty turns a stalled conversation into a quick retry.
+    """
+
+    outbound_read_timeout: float = 60.0
+    """Default seconds allowed between bytes once the request is sent.
+
+    Providers override this with their own ``timeout`` from ``providers.yaml``; this is
+    the value used by callers that have no per-provider budget (probes, webhooks).
+    """
+
+    outbound_write_timeout: float = 10.0
+    """Seconds allowed to send the request body. A prompt large enough to stall writes is
+    a prompt worth failing fast on."""
+
+    outbound_pool_timeout: float = 5.0
+    """Seconds to wait for a free connection when the pool is saturated.
+
+    Short on purpose: queueing behind a full pool for a minute is indistinguishable from
+    a hang, and the caller has other providers to try.
+    """
+
+    outbound_max_connections: int = 32
+    """Ceiling on simultaneous sockets to *all* hosts.
+
+    A busy group can produce a burst of concurrent replies, and without a ceiling each
+    one opens its own connection — a spike that looks like an attack from the far side
+    and that the local machine pays for in file descriptors.
+    """
+
+    outbound_max_keepalive: int = 16
+    """Idle connections kept for reuse. Half the ceiling: enough to absorb the gap
+    between two messages in the same conversation, few enough that idle sockets do not
+    hold the pool against a burst."""
+
+    outbound_keepalive_expiry: float = 30.0
+    """Seconds an idle connection is kept.
+
+    Longer than a typical gap between messages in one conversation, so the second
+    message reuses the first one's TLS session instead of paying for a new handshake.
+    """
+
+    outbound_max_redirects: int = 3
+    """Hops allowed when a caller opts into following redirects.
+
+    Bounded because the alternative — ``follow_redirects=True`` — lets the server decide
+    how many round trips the client makes, and never re-checks the destination. Each hop
+    here goes back through the caller's validator.
+    """
+
+    outbound_user_agent: str = "soapbot/0.1 (+https://github.com/soapbot/soapbot)"
+    """Sent on every outbound request.
+
+    Set explicitly because httpx's default identifies the library, not the deployment,
+    which makes this bot's traffic indistinguishable from any other httpx client in a
+    provider's abuse dashboard.
+    """
+
     model_error_notice: str = "我这会儿连不上模型，稍后再试。"
     """What the user sees when every provider is unavailable.
 

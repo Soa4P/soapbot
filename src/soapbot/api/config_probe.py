@@ -47,7 +47,6 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -56,6 +55,7 @@ from soapbot.api.config_write import _audit, _caller_label, _require_permission
 from soapbot.config import settings
 from soapbot.core import config_write
 from soapbot.core.config_files import ConfigError, resolve_secret
+from soapbot.net import build_timeout, outbound_client
 from soapbot.security.posture import probe_endpoint
 from soapbot.security.principal import Permission
 from soapbot.security.ratelimit import SlidingWindowLimiter
@@ -243,10 +243,20 @@ async def list_provider_models(
     candidates = _models_candidates(base_url, key)
     response = None
     used = candidates[0][0]
-    async with httpx.AsyncClient(timeout=payload.timeout) as client:
+    # The shared pool, not a fresh client: this endpoint is clicked repeatedly while an
+    # operator tries to get a base URL right, and each click used to pay for a new
+    # handshake. ``follow_redirects`` stays off — the candidate list already encodes the
+    # shapes worth trying, and a redirect would take the request somewhere the operator
+    # did not type.
+    async with outbound_client() as client:
         for candidate, candidate_headers in candidates:
             try:
-                attempt = await client.get(candidate, headers=candidate_headers)
+                attempt = await client.get(
+                    candidate,
+                    headers=candidate_headers,
+                    timeout=build_timeout(payload.timeout),
+                    follow_redirects=False,
+                )
             except Exception as exc:
                 return {"ok": False, "models": [], "error": f"{type(exc).__name__}: {exc}"[:200]}
             response, used = attempt, candidate

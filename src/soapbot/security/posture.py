@@ -49,6 +49,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from soapbot.config import settings
+
 
 class Severity(StrEnum):
     CRITICAL = "critical"
@@ -509,8 +511,16 @@ async def probe_endpoint(
             response = await client.get(f"{base}/models")
         else:
             open_client = client_factory or httpx.AsyncClient
-            async with open_client(timeout=timeout, follow_redirects=True) as owned:
-                response = await owned.get(f"{base}/models")
+            # ``follow_redirects=False`` plus a same-host rule, rather than
+            # ``follow_redirects=True``. The probe takes a URL from an operator and
+            # connects to it, and private addresses are allowed on purpose (Ollama and
+            # NapCat are same-host deployments). What the operator did *not* ask for is
+            # being bounced to a different host: a compromised or hostile endpoint can
+            # answer ``302 -> http://169.254.169.254/latest/meta-data/`` and turn a
+            # reachability check into a metadata read. Same-host redirects (http->https,
+            # a trailing slash, ``/v1`` normalisation) are the ones that actually occur.
+            async with open_client(timeout=timeout, follow_redirects=False) as owned:
+                response = await _get_same_host(owned, f"{base}/models", base)
     except Exception as exc:  # every failure is reported, none raised
         result["error"] = f"{type(exc).__name__}: {exc}"
     else:
@@ -521,6 +531,41 @@ async def probe_endpoint(
     result["hint"] = _probe_hint(result["status_code"], result["error"])
 
     return result
+
+
+async def _get_same_host(client: Any, url: str, base: str) -> Any:
+    """GET ``url``, following redirects only while they stay on the same host.
+
+    Bounded as well as restricted: a redirect loop between two paths on one host would
+    otherwise spin until the client's own limits, and the probe is supposed to answer
+    quickly with a sentence of advice, not hang.
+    """
+    import httpx
+
+    origin = urlsplit(base)
+    current = url
+    for _hop in range(settings.outbound_max_redirects + 1):
+        response = await client.get(current, follow_redirects=False)
+        if not response.is_redirect:
+            return response
+        location = response.headers.get("location", "")
+        if not location:
+            return response
+        if _hop == settings.outbound_max_redirects:
+            # Reporting the final 302 as "reachable" would be technically true and
+            # useless: the operator's URL does not serve the API, it redirects in a
+            # circle. Say so instead of showing a green tick.
+            raise httpx.TooManyRedirects(
+                f"redirect loop after {settings.outbound_max_redirects} hops",
+                request=response.request,
+            )
+        target = urlsplit(str(httpx.URL(current).join(location)))
+        if (target.scheme, target.netloc) != (origin.scheme, origin.netloc):
+            # Report the redirect itself rather than following it: the status is what
+            # the operator needs to see, and the far side does not get a second hop.
+            return response
+        current = str(httpx.URL(current).join(location))
+    return response
 
 
 async def probe_providers(
@@ -565,7 +610,10 @@ async def probe_providers(
     # rule itself testable on a host that intercepts loopback HTTP (CI containers, some
     # corporate images), where a real 401 never arrives.
     open_client = client_factory or httpx.AsyncClient
-    async with open_client(timeout=timeout, follow_redirects=True) as client:
+    # Redirects are handled per-probe by ``_get_same_host``, which re-checks the host on
+    # every hop. Turning them on here would let the client follow them first, past that
+    # check.
+    async with open_client(timeout=timeout, follow_redirects=False) as client:
         for item in providers:
             if not isinstance(item, dict):
                 continue
