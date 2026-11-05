@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -44,7 +44,7 @@ from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: How long SQLite waits for a competing writer before giving up, in seconds.
 #:
@@ -78,10 +78,20 @@ class MessageRow(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     image_desc: Mapped[str] = mapped_column(Text, default="")
     message_id: Mapped[str] = mapped_column(String(64), default="")
+    # Deliberately not indexed: no DB query filters on it (traces live in an in-memory
+    # ring, ``core/trace.py``). An index here would cost a write on every archived
+    # message and never be read.
     trace_id: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
 
-    __table_args__ = (Index("ix_messages_session_time", "session_key", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_session_time", "session_key", "created_at"),
+        # ``MemoryStore.find_message`` filters on exactly this pair and orders by id;
+        # without it the lookup used ``ix_messages_session_key`` and then scanned every
+        # message in that session to match message_id. Added in schema version 2, so
+        # ``migrations`` must create it for databases that already exist.
+        Index("ix_messages_session_message", "session_key", "message_id"),
+    )
 
 
 class MemoryRow(Base):
@@ -295,6 +305,13 @@ class Database:
         return int(found or 0)
 
     async def session(self) -> AsyncIterator[AsyncSession]:
+        """A read-only session for callers that only query.
+
+        Writes MUST go through :meth:`write`: this generator does not commit, so an
+        insert made here is rolled back by ``AsyncSession.__aexit__`` with no error —
+        exactly the silent-loss failure that ``write`` was changed to prevent. Kept as
+        a dependency-shaped helper for embedders, not used by the stores.
+        """
         async with self._session_factory() as session:
             yield session
 
@@ -303,7 +320,7 @@ class Database:
 
     @asynccontextmanager
     async def write(self) -> AsyncIterator[AsyncSession]:
-        """A session whose transaction is serialised against every other writer.
+        """One unit of work: a serialised session that commits or rolls back itself.
 
         SQLite admits exactly one writer. ``busy_timeout`` makes the *loser* wait, but
         under aiosqlite that wait happens on the connection's background thread while
@@ -313,14 +330,29 @@ class Database:
         failures even with ``busy_timeout=5000`` in force.
 
         One asyncio lock in front of the write path removes the contention instead of
-        negotiating it. Writes here are single-row inserts and commits, so the lock is
-        held for microseconds; readers are untouched and still run concurrently under
-        WAL. This is the same trade SQLite itself makes internally — the difference is
-        that the wait is now an ``await`` on the event loop rather than a thread
-        spinning on a file lock.
+        negotiating it. Readers are untouched and still run concurrently under WAL.
+
+        The transaction boundary is here, not in each caller. Previously every store
+        method had to remember ``await session.commit()``; forgetting it was silent —
+        ``AsyncSession.__aexit__`` closes the session and rolls the transaction back,
+        so the write simply vanished with no exception and no log line. Committing
+        centrally makes "a write happened" a property of the context manager rather
+        than of whichever method happened to be edited last. On any exception the
+        same boundary rolls back explicitly instead of relying on ``close()`` to do
+        it as a side effect.
         """
         async with self._write_lock, self._session_factory() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except BaseException:
+                # BaseException, not Exception: a cancelled archive must not leave a
+                # half-written transaction behind for the next writer to inherit.
+                # A rollback that itself fails (lost connection, cancellation already
+                # delivered) must not replace the original error with a confusing one.
+                with suppress(Exception):
+                    await session.rollback()
+                raise
 
     async def close(self) -> None:
         await self.engine.dispose()

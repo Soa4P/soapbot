@@ -43,12 +43,38 @@ logger = logging.getLogger(__name__)
 #: rolls back, so it re-runs from the version's starting state).
 MigrationStep = Callable[[Any], Awaitable[None]]
 
+async def _v2_message_lookup_index(conn: Any) -> None:
+    """Add the composite index used by ``MemoryStore.find_message``.
+
+    ``create_all`` only builds indexes when it *creates* the table. A database that
+    already has ``messages`` from version 1 keeps its old index set forever, no matter
+    how many times startup runs — so a declarative ``Index(...)`` alone would fix fresh
+    installs and quietly leave every existing installation doing a full session scan.
+    This is the first real step precisely because that gap is otherwise invisible.
+
+    ``IF NOT EXISTS`` makes re-running harmless. The table guard covers databases that
+    predate the messages table entirely; their next ``create_all`` builds it with the
+    index already declared.
+    """
+    exists = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'")
+    )
+    if exists.first() is None:
+        return
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_messages_session_message "
+            "ON messages (session_key, message_id)"
+        )
+    )
+
+
 #: ``{target_version: step}``. The step moves the database *to* ``target_version``.
 #:
-#: Empty today because version 1 is the first schema and there is nothing to change.
-#: It is not dead code: ``tests/test_migrations.py`` registers a step and asserts it
-#: runs exactly once, so the machinery is exercised rather than assumed.
-MIGRATIONS: dict[int, MigrationStep] = {}
+#: Version 1 was the first schema and needed no step. Version 2 adds the index above.
+#: ``tests/test_migrations.py`` monkeypatches this table to exercise the loop, the gap
+#: check and rollback independently of the real step.
+MIGRATIONS: dict[int, MigrationStep] = {2: _v2_message_lookup_index}
 
 
 class SchemaTooNewError(RuntimeError):
