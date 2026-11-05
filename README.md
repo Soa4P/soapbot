@@ -231,7 +231,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1265 项通过 / 10 项跳过）
+└── tests/              # pytest（1267 项通过 / 10 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
@@ -516,6 +516,21 @@ python scripts/bootstrap.py --dir D:\soapbot --port 6185
 
 已存在的同名 unit 若**不是**本安装器写的，一律不动（`--unit <名字>` 起第二份实例）——
 覆盖别人的 unit 会把它指向新目录，而数据还留在原处。
+
+> **Windows 上有两个长驻进程，都得交给计划任务托管，而且都要 `ExecutionTimeLimit=PT0S`。**
+> 机器人用 [`scripts/install_windows_task.ps1`](scripts/install_windows_task.ps1)，
+> 协议端 NapCat 用 [`scripts/install_napcat_task.ps1`](scripts/install_napcat_task.ps1)：
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\install_napcat_task.ps1 -QQNumber 你的QQ号 -Start
+> ```
+>
+> 从 WinRM/RDP 会话里起的进程会在会话空闲 2 小时后被 job object 回收；而计划任务如果
+> 保留默认的 `PT72H`，任务计划程序会在启动满 72 小时时**把任务连同 NapCat/QQ 整个进程树
+> 杀掉**。后者在真机上发生过：`LastRunTime 10/31 22:10:10` + 72h = `11/03 22:10:10`，
+> 首次拒连 `22:10:24`，`run.log` 停在 `22:10:20` 且没有退出记录，`LastTaskResult=267014`。
+> 强杀还会丢失 QQ 会话，重启后必须到 `:6099` 的 WebUI **扫码一次**；登录后脚本设置的
+> `autoLoginAccount` 与 `-q <QQ号>` 才会让之后的重启免扫码。
 
 完全没有 Linux 主机时也可一张命令：
 
