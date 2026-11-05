@@ -207,7 +207,10 @@ export const api = {
       { method: 'POST' },
     ),
   /** The QR **URL** (not an image — that is what NapCat returns). 409 = not ready yet. */
-  napcatQr: () => request<{ ok: boolean; url: string }>('/api/protocol/napcat/qr'),
+  napcatQr: () =>
+    request<{ ok: boolean; url: string; age_seconds?: number; stale?: boolean }>(
+      '/api/protocol/napcat/qr',
+    ),
 
   /**
    * Look for a protocol end on this machine (loopback only, fixed candidate ports).
