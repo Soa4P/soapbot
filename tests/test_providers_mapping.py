@@ -14,12 +14,12 @@ socket is replaced.
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 
+from soapbot.net import client as net_client
 from soapbot.providers import anthropic as anthropic_module
 from soapbot.providers import gemini as gemini_module
 from soapbot.providers import ollama as ollama_module
@@ -34,12 +34,13 @@ DATA_URL = "data:image/jpeg;base64,QUJD"
 def _route(monkeypatch: pytest.MonkeyPatch, module: Any, handler: Any) -> list[dict[str, Any]]:
     """Send the provider's HTTP through ``handler`` and record what it was asked.
 
-    The module-level ``httpx`` name is replaced by a shim carrying the two attributes the
-    providers use. That keeps the real ``AsyncClient`` (and therefore the real request
-    serialisation) while removing the socket.
+    Providers no longer build their own client — they draw from the shared pool in
+    ``soapbot.net``. So the seam is the registry, not the module's ``httpx`` name: the
+    stub below hands back a real ``AsyncClient`` backed by a mock transport, which keeps
+    request serialisation, headers and response parsing on the hook and removes only the
+    socket.
     """
     seen: list[dict[str, Any]] = []
-    real = httpx.AsyncClient
 
     def handler_wrapper(request: httpx.Request) -> httpx.Response:
         seen.append(
@@ -52,15 +53,16 @@ def _route(monkeypatch: pytest.MonkeyPatch, module: Any, handler: Any) -> list[d
         )
         return handler(request)
 
-    def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        kwargs.pop("timeout", None)
-        return real(*args, transport=httpx.MockTransport(handler_wrapper), timeout=5.0, **kwargs)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler_wrapper), timeout=5.0)
 
-    monkeypatch.setattr(
-        module,
-        "httpx",
-        SimpleNamespace(AsyncClient=factory, HTTPError=httpx.HTTPError),
-    )
+    class _StubRegistry:
+        def get(self) -> httpx.AsyncClient:
+            return client
+
+        async def aclose(self) -> None:
+            await client.aclose()
+
+    monkeypatch.setattr(net_client, "_registry", _StubRegistry())
     return seen
 
 

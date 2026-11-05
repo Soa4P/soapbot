@@ -15,6 +15,7 @@ from soapbot.providers.base import (
     ChatResponse,
     ProviderConfig,
     ProviderError,
+    retry_after_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,12 +61,21 @@ class GeminiProvider(BaseProvider):
         model = request.model or self.config.model or "gemini-2.0-flash"
         url = f"{self._base}/models/{model}:generateContent"
         headers = {"Content-Type": "application/json", "x-goog-api-key": self.config.api_key}
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+
+        async def attempt() -> dict[str, Any]:
+            resp = await self._request("POST", url, json=payload, headers=headers)
             if resp.status_code >= 400:
-                raise ProviderError(f"gemini HTTP {resp.status_code}: {resp.text[:400]}")
-            data = resp.json()
+                raise ProviderError(
+                    f"gemini HTTP {resp.status_code}: {resp.text[:400]}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
+                )
+            return resp.json()
+
+        try:
+            data = await self._with_retry(attempt, what="chat")
+        except ProviderError:
+            raise
         except httpx.HTTPError as exc:
             raise ProviderError(f"gemini request failed: {exc}") from exc
 
@@ -92,12 +102,21 @@ class GeminiProvider(BaseProvider):
         payload = {
             "requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}} for t in texts]
         }
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+
+        async def attempt() -> dict[str, Any]:
+            resp = await self._request("POST", url, json=payload, headers=headers)
             if resp.status_code >= 400:
-                raise ProviderError(f"gemini embed HTTP {resp.status_code}")
-            data = resp.json()
+                raise ProviderError(
+                    f"gemini embed HTTP {resp.status_code}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
+                )
+            return resp.json()
+
+        try:
+            data = await self._with_retry(attempt, what="embed")
+        except ProviderError:
+            raise
         except httpx.HTTPError as exc:
             raise ProviderError(f"gemini embed failed: {exc}") from exc
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from soapbot.net import outbound_client
 from soapbot.providers.base import (
     BaseProvider,
     CapabilitySlot,
@@ -19,6 +20,7 @@ from soapbot.providers.base import (
     ChatResponse,
     ProviderConfig,
     ProviderError,
+    retry_after_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,12 +70,21 @@ class OllamaProvider(BaseProvider):
             "options": {"temperature": request.temperature, "num_predict": request.max_tokens},
         }
         url = f"{self._base}/api/chat"
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(url, json=payload)
+
+        async def attempt() -> dict[str, Any]:
+            resp = await self._request("POST", url, json=payload)
             if resp.status_code >= 400:
-                raise ProviderError(f"ollama HTTP {resp.status_code}: {resp.text[:300]}")
-            data = resp.json()
+                raise ProviderError(
+                    f"ollama HTTP {resp.status_code}: {resp.text[:300]}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
+                )
+            return resp.json()
+
+        try:
+            data = await self._with_retry(attempt, what="chat")
+        except ProviderError:
+            raise
         except httpx.HTTPError as exc:
             raise ProviderError(f"ollama request failed: {exc}") from exc
 
@@ -98,24 +109,36 @@ class OllamaProvider(BaseProvider):
             "options": {"temperature": request.temperature, "num_predict": request.max_tokens},
         }
         url = f"{self._base}/api/chat"
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                stream_ctx = client.stream("POST", url, json=payload)
-                async with stream_ctx as resp:
-                    if resp.status_code >= 400:
-                        body = await resp.aread()
-                        raise ProviderError(f"ollama stream HTTP {resp.status_code}: {body[:200]!r}")
-                    async for line in resp.aiter_lines():
-                        if not line.strip():
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        piece = (obj.get("message") or {}).get("content")
-                        if piece:
-                            yield str(piece)
-                        if obj.get("done"):
-                            break
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"ollama stream failed: {exc}") from exc
+
+        async with outbound_client() as client:
+            try:
+                stream_ctx = client.stream("POST", url, json=payload, timeout=self._timeout())
+                resp = await stream_ctx.__aenter__()
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"ollama stream failed: {exc}") from exc
+
+            try:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise ProviderError(
+                        f"ollama stream HTTP {resp.status_code}: {body[:200]!r}",
+                        status=resp.status_code,
+                        retry_after=retry_after_of(resp),
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    piece = (obj.get("message") or {}).get("content")
+                    if piece:
+                        yield str(piece)
+                    if obj.get("done"):
+                        break
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"ollama stream failed: {exc}") from exc
+            finally:
+                await resp.aclose()
+                await stream_ctx.__aexit__(None, None, None)
