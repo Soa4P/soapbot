@@ -30,10 +30,12 @@ def _clear_credential_cache():
     napcat._credential_cache.update(
         {"value": "", "expires_at": 0.0, "retry_after": 0.0, "last_error": ""}
     )
+    napcat._last_qr.update({"url": "", "at": 0.0})
     yield
     napcat._credential_cache.update(
         {"value": "", "expires_at": 0.0, "retry_after": 0.0, "last_error": ""}
     )
+    napcat._last_qr.update({"url": "", "at": 0.0})
 
 
 def test_the_login_hash_is_sha256_of_token_plus_suffix(monkeypatch, tmp_path: Path) -> None:
@@ -85,7 +87,10 @@ def test_the_qr_is_returned_as_the_url_napcat_gives(monkeypatch) -> None:
     import asyncio
 
     result = asyncio.run(napcat.qr_code())
-    assert result == {"ok": True, "url": "https://txz.qq.com/p?k=xyz"}
+    assert result["ok"] is True
+    assert result["url"] == "https://txz.qq.com/p?k=xyz"
+    assert result["age_seconds"] == 0.0
+    assert "stale" not in result
 
 
 def test_polling_does_not_re_login_every_time(monkeypatch) -> None:
@@ -158,6 +163,84 @@ def test_qr_reports_rate_limit_immediately_without_waiting(monkeypatch) -> None:
     result = asyncio.run(napcat.qr_code(wait_seconds=5.0))
     assert result["error"] == "webui-rate-limited"
     assert result["retry_after"] > 0
+
+
+def test_a_qr_that_never_changes_is_reported_as_stale(monkeypatch) -> None:
+    """HTTP 200 is not proof the QR is scannable.
+
+    NapCat kept returning the same URL for hours after its login expired (ErrCode 10,
+    coreReady=false). The old code returned {"ok": true} every time, so the panel claimed
+    it had "refreshed" while handing the operator a dead picture.
+    """
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        if path == "/api/auth/login":
+            return {"code": 0, "data": {"Credential": "c"}}
+        return {"code": 0, "data": {"qrcode": "https://txz.qq.com/p?k=DEAD"}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    first = asyncio.run(napcat.qr_code())
+    assert first.get("stale") is None
+
+    # Simulate two minutes of polling with NapCat never minting a new URL.
+    napcat._last_qr["at"] -= napcat._QR_STALE_S + 1
+    later = asyncio.run(napcat.qr_code())
+    assert later["stale"] is True
+    assert later["age_seconds"] > napcat._QR_STALE_S
+
+
+def test_a_new_url_resets_the_stale_tracking(monkeypatch) -> None:
+    current = {"k": "AAA"}
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        if path == "/api/auth/login":
+            return {"code": 0, "data": {"Credential": "c"}}
+        return {"code": 0, "data": {"qrcode": f"https://txz.qq.com/p?k={current['k']}"}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    assert asyncio.run(napcat.qr_code())["age_seconds"] == 0.0
+    napcat._last_qr["at"] -= napcat._QR_STALE_S + 1
+    current["k"] = "BBB"
+    fresh = asyncio.run(napcat.qr_code())
+    assert "stale" not in fresh
+    assert fresh["age_seconds"] == 0.0
+    assert fresh["url"].endswith("BBB")
+
+
+def test_unauthorized_after_a_napcat_restart_re_logs_in_once(monkeypatch) -> None:
+    """A cached WebUI session dies with NapCat; retry with a fresh credential."""
+    calls: list[str] = []
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        calls.append(path)
+        if path == "/api/auth/login":
+            return {"code": 0, "data": {"Credential": "fresh"}}
+        # First QR call uses the old (stale) session, second succeeds.
+        if token == "old":
+            return {"code": -1, "message": "Unauthorized"}
+        return {"code": 0, "data": {"qrcode": "https://txz.qq.com/p?k=NEW"}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    # Seed a cached credential as though NapCat had been running for a while.
+    asyncio.run(napcat.login_token())
+    napcat._credential_cache["value"] = "old"
+    napcat._credential_cache["expires_at"] = napcat.time.monotonic() + 600
+
+    result = asyncio.run(napcat.qr_code())
+    assert result["ok"] is True
+    assert result["url"].endswith("NEW")
+    assert calls.count("/api/auth/login") == 2
 
 
 def test_login_state_carries_the_phase_when_not_logged_in(monkeypatch) -> None:

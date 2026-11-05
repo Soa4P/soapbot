@@ -273,6 +273,23 @@ def credential_cache_state() -> dict[str, Any]:
     }
 
 
+#: NapCat does not mint a new QR by itself after one expires. Measured on a real host:
+#: a QR printed at 13:58:48 failed with "Login Error ErrCode: 10" at 14:00:48, and every
+#: later GetQQLoginQrcode call — with any body — kept returning that same dead URL for
+#: hours, with ``coreReady: false``. So "refresh" can succeed (HTTP 200) and still hand the
+#: operator an unscannable picture. Track the URL and say so when it has stopped changing.
+_QR_STALE_S = 120.0
+_last_qr: dict[str, Any] = {"url": "", "at": 0.0}
+
+
+def invalidate_credential() -> None:
+    """Forget a session after NapCat restarts, without clearing the rate-limit backoff."""
+    _credential_cache["value"] = ""
+    _credential_cache["expires_at"] = 0.0
+    _last_qr["url"] = ""
+    _last_qr["at"] = 0.0
+
+
 async def login_token(*, force: bool = False) -> str:
     """Exchange the on-disk WebUI token for a credential, the way NapCat's own UI does.
 
@@ -383,14 +400,36 @@ async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
         payload = await _webui_post(
             "/api/QQLogin/GetQQLoginQrcode", {"qrcode": True}, token=credential
         )
+        # NapCat invalidates WebUI sessions when it restarts. A cached credential then
+        # answers "Unauthorized" forever; exchange a fresh one once before giving up.
+        if str(payload.get("message") or "").lower() == "unauthorized":
+            invalidate_credential()
+            credential = await login_token()
+            if credential:
+                payload = await _webui_post(
+                    "/api/QQLogin/GetQQLoginQrcode", {"qrcode": True}, token=credential
+                )
     except (httpx.HTTPError, OSError) as exc:
         return {"ok": False, "error": "webui-unreachable", "detail": str(exc)[:200]}
 
     data = payload.get("data")
     url = str(data.get("qrcode") or data.get("qrcodeurl") or "") if isinstance(data, dict) else ""
     if not url:
+        if str(payload.get("message") or "").lower() == "unauthorized":
+            return {"ok": False, "error": "webui-login-failed", "detail": "session-invalidated"}
         return {"ok": False, "error": "no-qrcode", "detail": json.dumps(payload)[:300]}
-    return {"ok": True, "url": url}
+
+    now = time.monotonic()
+    if url == _last_qr["url"]:
+        age = now - _last_qr["at"]
+    else:
+        _last_qr.update(url=url, at=now)
+        age = 0.0
+    result: dict[str, Any] = {"ok": True, "url": url, "age_seconds": round(age, 1)}
+    if age > _QR_STALE_S:
+        # Still return the picture (it may be the only one) but stop claiming it is fresh.
+        result["stale"] = True
+    return result
 
 
 async def login_state() -> dict[str, Any]:

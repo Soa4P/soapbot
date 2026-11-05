@@ -73,9 +73,12 @@ async function fetchQr(): Promise<void> {
     const body = await api.napcatQr()
     if (!body.url) throw new Error('no-qrcode')
     qrSvg.value = renderQr(body.url)
-    qrFetchedAt.value = Date.now()
-    qrAgeSeconds.value = 0
-    qrError.value = ''
+    // NapCat can answer 200 with the very same URL for hours after its QR expired
+    // (coreReady=false, ErrCode 10). The backend flags that; show it instead of claiming
+    // a successful refresh. The picture stays because it is the only one available.
+    qrFetchedAt.value = Date.now() - (body.age_seconds ?? 0) * 1000
+    qrAgeSeconds.value = Math.floor(body.age_seconds ?? 0)
+    qrError.value = body.stale ? t('napcat.qrStale') : ''
     qrNextAttemptAt.value = 0
   } catch (err) {
     // Do NOT swallow this. The old `catch { /* keep polling */ }` left a stale picture on

@@ -656,6 +656,8 @@ export default {
   'napcat.qrNotReady': 'NapCat 还在启动，暂时拿不到二维码，稍后会自动再试。',
   'napcat.qrUnreachable': '连不上 NapCat 的 WebUI（默认端口 6099），请确认它正在运行。',
   'napcat.qrFailed': '二维码获取失败：{reason}。稍后会自动再试。',
+  'napcat.qrStale':
+    '这张二维码已经失效：NapCat 没有生成新的（它过期后会停住）。请在 NapCat WebUI 里重新登录，或重启 NapCat 后再点「换一张」。',
   'napcat.tokenLabel': 'NapCat WebUI 的 Token（已自动读取，打开 WebUI 会自动带上）：',
   'napcat.tokenCopy': '复制',
   'napcat.tokenCopied': '已复制',
