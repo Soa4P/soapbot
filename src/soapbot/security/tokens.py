@@ -20,9 +20,14 @@ Design decisions worth stating
 * **The secret must be at least 32 bytes.** A short HMAC key is offline-brute-forced
   from a single captured token. Refusing to start with a weak one is the only
   moment the operator will actually fix it.
-* **The bootstrap token is single-use and dies with the process.** It exists to let a
-  fresh install obtain a token without a second channel. Keeping it valid forever
-  would make the file that logs it a permanent credential.
+* **The bootstrap token is single-use, and stays valid across restarts until used.**
+  It exists to let a fresh install obtain a token without a second channel. It used to
+  be recreated on *every* process start, which silently invalidated whatever the
+  operator had written down: six restarts produced six different tokens, each one
+  overwriting the file, with no log line saying the old value was dead. Now the
+  unredeemed value is reused from disk, and redeeming it deletes the file and leaves a
+  marker so a restart cannot resurrect it. A new one requires an explicit
+  ``soapbot token --reset`` on the host.
 * **Claims are not permissions.** The token says "this is the operator's API client".
   It never says "user 12345 is an owner in group 6789" — chat privileges are derived
   from configuration on every message (``soapbot.security.principal``), because a
@@ -196,19 +201,38 @@ class TokenService:
         return claims
 
 
-class BootstrapToken:
-    """Single-use initial credential.
+BOOTSTRAP_FILE = "init_token.txt"
+BOOTSTRAP_REDEEMED = "init_token.redeemed"
+"""`init_token.redeemed` is a marker, not a secret: it records that the credential was
+used, so a later process start does not treat "no token file" as a fresh install and
+mint a replacement. Without it, deleting the file after use would silently re-enable
+login on every restart — the one thing a single-use credential must never do.
+"""
 
-    Generated when ``SOAPBOT_INIT_TOKEN`` is not set and printed to the log once. The
-    alternative — requiring the operator to invent a secret before first start —
-    pushes people towards a hardcoded default, which is worse than a random value in
-    a log they already control.
+
+class BootstrapToken:
+    """Single-use initial credential, stable across restarts until redeemed.
+
+    ``path`` / ``redeemed_marker`` are optional so tests and callers that supply a
+    literal token (``BootstrapToken("b")``) keep exactly the old in-memory behaviour.
+    Only tokens created by :func:`bootstrap_for_data_dir` own files.
     """
 
-    def __init__(self, token: str = "") -> None:
+    def __init__(
+        self,
+        token: str = "",
+        *,
+        generated: bool | None = None,
+        enabled: bool = True,
+        path: Path | None = None,
+        redeemed_marker: Path | None = None,
+    ) -> None:
         self._token = token or secrets.token_urlsafe(24)
-        self._generated = not token
+        self._generated = (not token) if generated is None else generated
+        self._enabled = enabled
         self._consumed = False
+        self._path = path
+        self._redeemed_marker = redeemed_marker
 
     @property
     def generated(self) -> bool:
@@ -218,13 +242,23 @@ class BootstrapToken:
     def consumed(self) -> bool:
         return self._consumed
 
+    @property
+    def available(self) -> bool:
+        return self._enabled and not self._consumed
+
+    @property
+    def state(self) -> str:
+        """What the status endpoint may report — never the value itself."""
+        if self._consumed or not self._enabled:
+            return "redeemed"
+        return "available"
+
     def reveal(self) -> str:
         """Return the raw token.
 
-        Exists solely so the application can write it to a mode-0600 file on first
-        start. Nothing that serves an HTTP response may call it, and
-        ``/api/auth/status`` reports only whether login is still possible, never the
-        value.
+        Exists solely so the CLI can print it. Nothing that serves an HTTP response
+        may call it, and ``/api/auth/status`` reports only whether login is still
+        possible, never the value.
         """
         return self._token
 
@@ -234,12 +268,96 @@ class BootstrapToken:
         Constant-time comparison, and the token is marked consumed *before* returning,
         so two concurrent requests cannot both succeed on the same bootstrap secret.
         """
-        if self._consumed or not candidate:
+        if not self.available or not candidate:
             return False
         if not hmac.compare_digest(candidate.strip(), self._token):
             return False
         self._consumed = True
+        self._destroy_persisted_copy()
         return True
+
+    def _destroy_persisted_copy(self) -> None:
+        """Remove the on-disk credential and record that it was used.
+
+        Order matters: write the marker FIRST. If the marker cannot be written, leave
+        the token file in place rather than deleting it — otherwise the next start sees
+        "no file, no marker", concludes this is a fresh install, and mints a new
+        credential on its own. That would quietly undo the single-use guarantee.
+        """
+        if self._path is None:
+            return
+        if self._redeemed_marker is not None:
+            try:
+                write_private_file(
+                    self._redeemed_marker, b"redeemed\n", what="bootstrap redeemed marker"
+                )
+            except OSError as exc:  # pragma: no cover - full disk / ACL
+                logger.error(
+                    "could not record bootstrap redemption at %s (%s); keeping the "
+                    "token file so login is not silently re-enabled",
+                    self._redeemed_marker,
+                    exc,
+                )
+                return
+        try:
+            self._path.unlink(missing_ok=True)
+        except OSError as exc:  # pragma: no cover - Windows ACL / sharing violation
+            logger.warning(
+                "could not delete the redeemed bootstrap token at %s (%s); the "
+                "redeemed marker still prevents reuse after a restart",
+                self._path,
+                exc,
+            )
+
+
+def bootstrap_for_data_dir(data_dir: Path, configured: str = "") -> BootstrapToken:
+    """Load the credential for this install, creating one only on a *fresh* install.
+
+    The three states are deliberately distinguished by files, not by process memory:
+
+    * token file present, no marker  -> reuse it (a restart must not rotate the value)
+    * marker present                 -> already redeemed; login stays closed
+    * neither present                -> first start; generate and persist one
+
+    ``configured`` bypasses the files: an operator who set ``SOAPBOT_INIT_TOKEN``
+    explicitly owns that value and its lifecycle.
+    """
+    path = data_dir / BOOTSTRAP_FILE
+    marker = data_dir / BOOTSTRAP_REDEEMED
+
+    if configured:
+        return BootstrapToken(configured, generated=False)
+    if marker.exists():
+        return BootstrapToken("", generated=False, enabled=False)
+    if path.is_file():
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            value = ""
+        if value:
+            return BootstrapToken(
+                value, generated=False, path=path, redeemed_marker=marker
+            )
+        # An empty or unreadable file is not a credential; treat this as a fresh
+        # install and rewrite it rather than leaving the operator with no way in.
+
+    value = secrets.token_urlsafe(24)
+    write_private_file(path, value.encode("utf-8"), what="bootstrap token")
+    return BootstrapToken(value, generated=True, path=path, redeemed_marker=marker)
+
+
+def reset_bootstrap(data_dir: Path) -> str:
+    """Explicitly mint a new credential. The only way back in after redemption.
+
+    The running process still holds its old in-memory object, so the operator must
+    restart the service before the new value is accepted. The CLI says so.
+    """
+    path = data_dir / BOOTSTRAP_FILE
+    marker = data_dir / BOOTSTRAP_REDEEMED
+    marker.unlink(missing_ok=True)
+    value = secrets.token_urlsafe(24)
+    write_private_file(path, value.encode("utf-8"), what="bootstrap token")
+    return value
 
 
 __all__ = [

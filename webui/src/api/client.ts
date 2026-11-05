@@ -387,6 +387,7 @@ export interface AuthStatus {
   loopback: boolean
   login_available: boolean
   init_token_generated: boolean
+  bootstrap_state: 'available' | 'redeemed' | 'uninitialised'
   ttl_seconds: number
 }
 

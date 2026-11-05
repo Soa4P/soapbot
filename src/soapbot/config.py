@@ -391,7 +391,8 @@ class Settings(BaseSettings):
     jwt_ttl_hours: int = 72
 
     init_token: str = ""
-    """One-time bootstrap token printed on first start. Empty means auto-generate."""
+    """One-time bootstrap token. Empty means persist one in ``<data>/init_token.txt``
+    on first start and reuse it across restarts until it is redeemed."""
 
     # ---- authority (privilege lists) ----
     # These are the ONLY source of bot privileges. Nothing in a chat message may

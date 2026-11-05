@@ -2,9 +2,14 @@
 
 The command exists because ``.env.example`` told operators to run it while the argument
 parser had no such subcommand. These tests pin the behaviour that makes it useful rather
-than merely present: it must print the token, and it must say the token may be stale —
-the file is not deleted after redemption, so a bare value would send someone to the login
-form with a dead credential and no explanation.
+than merely present: stdout carries only the token (so ``TOKEN=$(soapbot token)`` works),
+and stderr explains the credential's state.
+
+The state text changed when the token became persistent: an existing file now means an
+*unredeemed* credential that survives restarts, and a missing file plus the
+``init_token.redeemed`` marker means it was spent. The old advice ("the file may be
+stale, delete it and restart") described a design that silently rotated the token on
+every start.
 """
 
 from __future__ import annotations
@@ -34,7 +39,8 @@ def test_prints_token_when_file_present(data_dir: Path, capsys: pytest.CaptureFi
     assert out.strip() == token, "stdout 必须只有令牌本身，便于 $(...) 或管道取值"
     # The caveat has to be on stderr so `TOKEN=$(soapbot token)` still works.
     assert "一次性" in err
-    assert "已被消费" in err
+    assert "重启服务不会改变" in err
+    assert "--reset" in err
     assert token[:4] in err
 
 
@@ -69,6 +75,56 @@ def test_token_subcommand_is_registered() -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main(["token", "--nope"])
     assert exc.value.code == 2, "参数解析应拒绝未知选项（说明 token 子命令已存在）"
+
+
+def test_missing_file_with_marker_points_at_reset(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The old text said "restarting mints a new one". It no longer does.
+
+    Without this distinction an operator who lost their token would keep restarting
+    the service and never get back in — which is the reported "令牌又没了" confusion
+    in its most frustrating form.
+    """
+    from soapbot.security.tokens import BOOTSTRAP_REDEEMED
+
+    (data_dir / BOOTSTRAP_REDEEMED).write_text("redeemed\n", encoding="utf-8")
+
+    assert cli.main(["token"]) == 1
+    out, err = capsys.readouterr()
+    assert out.strip() == ""
+    assert "已经用过" in err
+    assert "--reset" in err
+    assert "重启服务不会再自动生成" in err
+
+
+def test_reset_mints_a_new_token_and_clears_the_marker(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from soapbot.security.tokens import BOOTSTRAP_REDEEMED
+
+    marker = data_dir / BOOTSTRAP_REDEEMED
+    old = (data_dir / "init_token.txt")
+    old.write_text("old-token-value", encoding="utf-8")
+    marker.write_text("redeemed\n", encoding="utf-8")
+
+    assert cli.main(["token", "--reset"]) == 0
+    out, err = capsys.readouterr()
+
+    new = out.strip()
+    assert new and new != "old-token-value"
+    assert old.read_text(encoding="utf-8").strip() == new
+    assert not marker.exists()
+    assert "重启服务" in err, "the running process still holds the old in-memory value"
+
+
+def test_stdout_stays_machine_readable_after_reset(
+    data_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["token", "--reset"]) == 0
+    out, _err = capsys.readouterr()
+    assert len(out.splitlines()) == 1
+    assert len(out.strip()) >= 20
 
 
 def test_stdout_stays_machine_readable(data_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:

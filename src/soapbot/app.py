@@ -66,7 +66,11 @@ from soapbot.api.security import router as security_router
 from soapbot.api.settings import router as settings_router
 from soapbot.config import settings
 from soapbot.logging_setup import setup_logging
-from soapbot.security.tokens import BootstrapToken, TokenService
+from soapbot.security.tokens import (
+    BOOTSTRAP_FILE,
+    TokenService,
+    bootstrap_for_data_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,33 +136,30 @@ def _init_auth() -> None:
         ttl_hours=settings.jwt_ttl_hours,
         revocations=revocations,
     )
-    bootstrap = BootstrapToken(settings.init_token)
+    # The credential lives on disk, not in this process. It used to be regenerated on
+    # every start, so each deploy silently invalidated whatever the operator had saved;
+    # the log showed six startups and six "generated a one-time bootstrap token" lines.
+    # bootstrap_for_data_dir reuses an unredeemed value and refuses to mint a new one
+    # after it has been spent — that now requires an explicit `soapbot token --reset`.
+    bootstrap = bootstrap_for_data_dir(settings.data_dir, settings.init_token)
+    path = settings.data_dir / BOOTSTRAP_FILE
 
     if bootstrap.generated:
-        # Written to a file rather than only logged. A credential in the log stream
-        # ends up in whatever collects logs — often a shared system — and stays valid
-        # for as long as the process runs. A 0600 file next to the database is the same
-        # convenience without that reach.
-        path = settings.data_dir / "init_token.txt"
-        try:
-            _write_private_file(path, bootstrap.reveal())
-            logger.warning(
-                "generated a one-time bootstrap token at %s — POST it to /api/auth/login "
-                "to obtain an API token; the file is not a permanent credential",
-                path,
-            )
-        except OSError as exc:  # pragma: no cover - read-only or full filesystem
-            logger.error("could not write bootstrap token file (%s); it is lost", exc)
+        logger.warning(
+            "generated a one-time bootstrap token at %s — POST it to /api/auth/login "
+            "to obtain an API token; it stays valid across restarts until redeemed",
+            path,
+        )
+    elif not bootstrap.available:
+        logger.info(
+            "bootstrap token was already redeemed; login stays closed until "
+            "`soapbot token --reset` is run on the host and the service restarted"
+        )
+    else:
+        logger.info("reusing the unredeemed bootstrap token at %s", path)
 
     configure_auth(service=service, bootstrap=bootstrap, revocations=revocations)
     logger.info("auth ready (jwt secret from %s)", service.secret_source)
-
-
-def _write_private_file(path: Path, text: str) -> None:
-    """Write a secret with owner-only permissions from the moment it exists."""
-    from soapbot.security.files import write_private_file
-
-    write_private_file(path, text.encode("utf-8"), what="bootstrap token")
 
 
 # ---------------------------------------------------------------------- startup
