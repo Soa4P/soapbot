@@ -13,6 +13,7 @@ from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.memory.extractor import MemoryExtractor
+from soapbot.memory.scene import SceneMemory
 from soapbot.memory.store import KnowledgeBase, MemoryStore, RecallResult
 from soapbot.security.audit import AuditLog, get_audit_log
 from soapbot.security.injection import vet_memory
@@ -111,16 +112,45 @@ class RecallStage(Stage):
 
     name = "recall"
 
-    def __init__(self, store: MemoryStore, *, top_k: int = 6, min_chars: int = 4) -> None:
+    def __init__(
+        self,
+        store: MemoryStore,
+        *,
+        top_k: int = 6,
+        min_chars: int = 4,
+        scene: SceneMemory | None = None,
+    ) -> None:
         self.store = store
         self.top_k = top_k
         self.min_chars = min_chars
+        # Optional so existing construction sites keep working. When present, the scene
+        # card and portrait are injected alongside the recalled fragments — the map next
+        # to the territory. Without it, recall still works; it just has no sense of what
+        # the conversation *is*.
+        self.scene = scene
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         segments = ctx.extras.get("clean_segments") or ctx.event.segments
         query = "".join(s.plain() for s in segments if s.type is SegmentType.TEXT).strip()
         if len(query) < self.min_chars:
             return StageResult()
+
+        # The scene layer is read first and independently of recall: a card is cheap and
+        # always worth having, while recall may legitimately return nothing for a short
+        # or unusual query. Tying the card to recall's success would mean the bot forgets
+        # who it is talking to whenever it has nothing specific to recall.
+        if self.scene is not None:
+            try:
+                card = await self.scene.get_card(ctx.event.session_key)
+                if card is not None:
+                    ctx.extras["scene_card_prompt"] = card.to_prompt()
+                portrait = await self.scene.get_portrait(ctx.event.session_key)
+                # Only inject a portrait that rests on enough evidence. A thin portrait is
+                # a guess presented as fact, which is worse than silence.
+                if portrait is not None and portrait.confidence >= 0.2:
+                    ctx.extras["scene_portrait_prompt"] = portrait.to_prompt()
+            except Exception as exc:
+                logger.warning("scene layer unavailable, continuing: %s", exc)
 
         try:
             result: RecallResult = await self.store.recall(
@@ -195,10 +225,16 @@ class MemoryWriteStage(Stage):
         extractor: MemoryExtractor,
         *,
         audit: AuditLog | None = None,
+        scene: SceneMemory | None = None,
     ) -> None:
         self.store = store
         self.extractor = extractor
         self.audit = audit or get_audit_log()
+        # When present, the scene's card and portrait are rebuilt after new memories land
+        # — the "write back to the scene layer" half of the loop. Optional because
+        # rebuilding costs a query, and a caller that only wants storage should not pay
+        # for a summary nobody reads.
+        self.scene = scene
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         segments = ctx.extras.get("clean_segments") or ctx.event.segments
@@ -252,6 +288,18 @@ class MemoryWriteStage(Stage):
                 logger.warning("failed to store memory: %s", exc)
 
         ctx.extras["memories_stored"] = stored
+
+        # Rebuild the scene views only when something actually changed. A turn that stored
+        # nothing leaves the card exactly as it was, and recomputing it would be a query
+        # per message for a result identical to the stored one.
+        if stored and self.scene is not None:
+            try:
+                await self.scene.refresh(ctx.event.session_key)
+            except Exception as exc:
+                # Never fail the turn over a derived view. The memories are stored; the
+                # card is a convenience, and losing it costs a slightly worse next reply,
+                # not a lost message.
+                logger.warning("scene refresh failed after storing memories: %s", exc)
         ctx.extras["memories_quarantined"] = quarantined
         if stored:
             logger.info("stored %d memory item(s) trace=%s", stored, ctx.event.trace_id)

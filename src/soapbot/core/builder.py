@@ -40,6 +40,7 @@ from soapbot.core.stages import (
 from soapbot.core.trace import TraceStore
 from soapbot.memory.db import Database
 from soapbot.memory.extractor import MemoryExtractor
+from soapbot.memory.scene import SceneMemory
 from soapbot.memory.stages import (
     CommandStage,
     KnowledgeStage,
@@ -237,7 +238,10 @@ def build_pipeline(
     # --- context assembly ---
     pipeline.add(PersonaStage(personas))
     if memory is not None:
-        pipeline.add(RecallStage(memory))
+        # The scene layer rides with recall: it needs the same store, and a caller that
+        # has memories but no scene view is the case this exists to fix.
+        scene = SceneMemory(memory.db)
+        pipeline.add(RecallStage(memory, scene=scene))
     if kb is not None:
         pipeline.add(KnowledgeStage(kb))
 
@@ -288,7 +292,11 @@ def build_pipeline(
     if memory is not None:
         pipeline.add(PersistReplyStage(memory))
         if extractor is not None:
-            pipeline.add(MemoryWriteStage(memory, extractor, audit=audit_log))
+            pipeline.add(
+                MemoryWriteStage(
+                    memory, extractor, audit=audit_log, scene=SceneMemory(memory.db)
+                )
+            )
     return pipeline
 
 

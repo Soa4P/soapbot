@@ -219,6 +219,8 @@ class ModelStage(Stage):
                 group_name=ctx.event.group_name,
                 sender_name=ctx.event.sender.display_name,
                 recall_prompt=str(ctx.extras.get("recall_prompt") or ""),
+                scene_card_prompt=str(ctx.extras.get("scene_card_prompt") or ""),
+                scene_portrait_prompt=str(ctx.extras.get("scene_portrait_prompt") or ""),
                 knowledge_prompt=str(ctx.extras.get("knowledge_prompt") or ""),
                 # Tools are withdrawn on the final round: the model has had its
                 # chances, and the remaining job is to answer with what it has.

@@ -129,7 +129,7 @@ def get_secret_box(key_file: Path | None = None) -> SecretBox:
         if key_file is None:
             from soapbot.config import settings
 
-            key = settings.master_key or None
+            key = settings.master_key.get_secret_value() or None
             if not key and settings.master_key_file is not None:
                 # Read the key from a mounted secret rather than the environment.
                 # ``strip()`` matters: a key written by ``openssl rand -base64`` ends

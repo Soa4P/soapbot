@@ -31,6 +31,7 @@ Secret forms accepted anywhere a secret is expected::
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -56,6 +57,37 @@ would otherwise get a confusing "variable not set" instead of an auth failure.""
 SECRET_KEYS = frozenset(
     {"api_key", "access_token", "app_secret", "token", "secret", "password", "webhook_secret"}
 )
+
+#: Keys a ``providers:`` entry may carry. Anything else is rejected rather than ignored.
+#:
+#: This is the ``extra="forbid"`` the dataclass cannot express. ``ProviderConfig`` is a
+#: slots dataclass built by hand from ``item.get(...)``, so an unknown key was dropped in
+#: silence: ``base_urls`` (plural) or ``api-key`` (hyphen) produced a provider with an
+#: empty URL and the operator saw a connection error pointing at the wrong thing. The
+#: list is explicit so that adding a field to ``ProviderConfig`` without adding it here
+#: fails a test rather than a deployment.
+PROVIDER_KEYS = frozenset(
+    {
+        "id",
+        "kind",
+        "label",
+        "base_url",
+        "api_key",
+        "model",
+        "embed_model",
+        "vision_model",
+        "timeout",
+        "max_retries",
+        "priority",
+        "enabled",
+        "extra",
+    }
+)
+
+#: Top-level keys allowed in ``providers.yaml``. ``schema_version`` is accepted and
+#: currently unused beyond documentation; it exists so a future migration has a place to
+#: read the old format's version from.
+PROVIDERS_DOC_KEYS = frozenset({"schema_version", "providers"})
 
 
 class ConfigError(RuntimeError):
@@ -135,6 +167,15 @@ def parse_providers(data: dict[str, Any], source: str = "<memory>") -> list[Prov
     for the editor is how a panel ends up able to save a file the service then refuses
     to boot from — the one failure mode a config UI must never have.
     """
+    unknown_doc = sorted(set(data) - PROVIDERS_DOC_KEYS)
+    if unknown_doc:
+        raise ConfigError(
+            f"{source}: unknown top-level key(s) {unknown_doc}; "
+            f"expected {sorted(PROVIDERS_DOC_KEYS)}. A misspelled section is ignored by "
+            "``data.get('providers')``, which yields zero providers and a service that "
+            "boots green and answers nothing."
+        )
+
     entries = data.get("providers") or []
     if not isinstance(entries, list):
         raise ConfigError(f"{source}: 'providers' must be a list")
@@ -144,6 +185,20 @@ def parse_providers(data: dict[str, Any], source: str = "<memory>") -> list[Prov
     for index, item in enumerate(entries):
         if not isinstance(item, dict):
             raise ConfigError(f"{source}: providers[{index}] must be a mapping")
+        unknown = sorted(set(item) - PROVIDER_KEYS)
+        if unknown:
+            close = {
+                key: difflib.get_close_matches(key, PROVIDER_KEYS, n=1, cutoff=0.7)
+                for key in unknown
+            }
+            hints = ", ".join(
+                f"{key} (did you mean {close[key][0]}?)" if close[key] else key
+                for key in unknown
+            )
+            raise ConfigError(
+                f"{source}: providers[{index}] has unknown key(s): {hints}. "
+                f"Allowed: {sorted(PROVIDER_KEYS)}."
+            )
         pid = str(item.get("id") or "").strip()
         kind = str(item.get("kind") or "").strip()
         if not pid or not kind:
