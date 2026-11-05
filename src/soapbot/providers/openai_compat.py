@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from soapbot.net import outbound_client
 from soapbot.providers.base import (
     BaseProvider,
     CapabilitySlot,
@@ -20,6 +21,7 @@ from soapbot.providers.base import (
     ChatResponse,
     ProviderConfig,
     ProviderError,
+    retry_after_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,24 +57,29 @@ class OpenAICompatProvider(BaseProvider):
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         url = f"{self._base}/chat/completions"
-        last_error: Exception | None = None
+        payload = self._payload(request)
+        headers = self._headers()
 
-        for attempt in range(self.config.max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                    resp = await client.post(url, json=self._payload(request), headers=self._headers())
-                if resp.status_code >= 400:
-                    raise ProviderError(
-                        f"{self.kind} HTTP {resp.status_code}: {resp.text[:400]}"
-                    )
-                data = resp.json()
-                return self._parse(data)
-            except (httpx.HTTPError, ProviderError) as exc:
-                last_error = exc
-                logger.warning(
-                    "provider %s chat attempt %s failed: %s", self.id, attempt + 1, exc
+        async def attempt() -> ChatResponse:
+            resp = await self._request("POST", url, json=payload, headers=headers)
+            if resp.status_code >= 400:
+                # The status travels on the exception so the retry policy can tell a
+                # 503 (try again) from a 400 (do not).
+                raise ProviderError(
+                    f"{self.kind} HTTP {resp.status_code}: {resp.text[:400]}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
                 )
-        raise ProviderError(f"{self.kind} chat failed after retries: {last_error}")
+            return self._parse(resp.json())
+
+        try:
+            return await self._with_retry(attempt, what="chat")
+        except ProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"{self.kind} chat failed: {exc}") from exc
+        except ValueError as exc:  # malformed JSON from a relay
+            raise ProviderError(f"{self.kind} chat returned invalid JSON: {exc}") from exc
 
     def _parse(self, data: dict[str, Any]) -> ChatResponse:
         choices = data.get("choices") or []
@@ -103,34 +110,59 @@ class OpenAICompatProvider(BaseProvider):
         url = f"{self._base}/chat/completions"
         payload = self._payload(request)
         payload["stream"] = True
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+        headers = self._headers()
+
+        async with outbound_client() as client:
+            # The response is closed explicitly in ``finally`` rather than by an
+            # ``async with`` around the body. The difference matters when the consumer
+            # stops early — a caller that breaks out of ``async for``, or a reply that
+            # gets cancelled mid-sentence. In that case the generator is closed by
+            # ``GeneratorExit``, which unwinds ``finally`` but does *not* run the body
+            # of an ``async with`` that has not been entered yet... and more to the
+            # point, a half-read response left open holds its socket out of the pool
+            # until the server times it out. Closing here returns it immediately.
+            try:
+                # ``timeout`` is not optional here. Without it the stream inherits the
+                # process-wide read timeout instead of the budget this provider was
+                # configured with, so a provider told to give up after 20 s would keep
+                # a dead stream open for 60. Streaming is the chat hot path, which
+                # makes this the one place where the omission is most expensive.
                 stream_ctx = client.stream(
-                    "POST", url, json=payload, headers=self._headers()
+                    "POST", url, json=payload, headers=headers, timeout=self._timeout()
                 )
-                async with stream_ctx as resp:
-                    if resp.status_code >= 400:
-                        body = await resp.aread()
-                        raise ProviderError(
-                            f"{self.kind} stream HTTP {resp.status_code}: {body[:300]!r}"
-                        )
-                    async for line in resp.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        chunk = line[5:].strip()
-                        if chunk == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(chunk)
-                        except json.JSONDecodeError:
-                            continue
-                        for choice in obj.get("choices") or []:
-                            delta = choice.get("delta") or {}
-                            piece = delta.get("content")
-                            if piece:
-                                yield str(piece)
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"{self.kind} stream failed: {exc}") from exc
+                resp = await stream_ctx.__aenter__()
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"{self.kind} stream failed: {exc}") from exc
+
+            try:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise ProviderError(
+                        f"{self.kind} stream HTTP {resp.status_code}: {body[:300]!r}",
+                        status=resp.status_code,
+                        retry_after=retry_after_of(resp),
+                    )
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    for choice in obj.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        piece = delta.get("content")
+                        if piece:
+                            yield str(piece)
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"{self.kind} stream failed: {exc}") from exc
+            finally:
+                # ``aclose`` is idempotent; calling it after a clean [DONE] is free.
+                await resp.aclose()
+                await stream_ctx.__aexit__(None, None, None)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         url = f"{self._base}/embeddings"
@@ -138,12 +170,22 @@ class OpenAICompatProvider(BaseProvider):
             "model": self.config.embed_model or self.config.model,
             "input": texts,
         }
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(url, json=payload, headers=self._headers())
+        headers = self._headers()
+
+        async def attempt() -> dict[str, Any]:
+            resp = await self._request("POST", url, json=payload, headers=headers)
             if resp.status_code >= 400:
-                raise ProviderError(f"{self.kind} embed HTTP {resp.status_code}")
-            data = resp.json()
+                raise ProviderError(
+                    f"{self.kind} embed HTTP {resp.status_code}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
+                )
+            return resp.json()
+
+        try:
+            data = await self._with_retry(attempt, what="embed")
+        except ProviderError:
+            raise
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.kind} embed failed: {exc}") from exc
 
