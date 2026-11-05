@@ -26,7 +26,18 @@ import pytest
 
 from soapbot.config import Settings
 
-README = Path(__file__).resolve().parent.parent / "README.md"
+ROOT = Path(__file__).resolve().parent.parent
+README = ROOT / "README.md"
+CONFIG_DOC = ROOT / "docs" / "configuration.md"
+
+#: Where an operator-facing knob may be documented.
+#:
+#: The README used to carry the whole environment table. It now answers "what is this,
+#: how do I start it, what broke" and the reference material lives in ``docs/``. The
+#: guarantee this module provides is unchanged — a setting is either documented
+#: somewhere a person will look, or explicitly declared internal — so the check follows
+#: the content instead of pinning it to one filename.
+DOCS = (README, CONFIG_DOC)
 
 #: Settings that are deliberately undocumented in the operator table.
 #:
@@ -66,7 +77,8 @@ _INTERNAL = {
 
 
 def _readme_text() -> str:
-    return README.read_text(encoding="utf-8")
+    """Every document that may carry an operator-facing claim, concatenated."""
+    return "\n\n".join(path.read_text(encoding="utf-8") for path in DOCS if path.exists())
 
 
 def _documented_env_names() -> set[str]:

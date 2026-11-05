@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import { t } from '@/i18n'
 
+import { copyText } from '@/lib/clipboard'
 import { useFocusTrap } from '@/lib/useFocusTrap'
 import { useAuthStore } from '@/stores/auth'
 
@@ -36,17 +37,21 @@ async function submit(): Promise<void> {
 }
 
 const copied = ref('')
+const copyFailed = ref('')
 
 async function copy(value: string, which: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(value)
+  copyFailed.value = ''
+  // copyText falls back to execCommand, which still works over plain HTTP. If both
+  // refuse, say so and name the value — a button that does nothing is worse than a
+  // button that admits it and points at the text to select by hand.
+  if (await copyText(value)) {
     copied.value = which
     window.setTimeout(() => {
       copied.value = ''
     }, 2000)
-  } catch {
-    /* clipboard needs a secure context; the value stays on screen to select manually */
+    return
   }
+  copyFailed.value = t('login.copyFailed', { value })
 }
 
 /** The server resolves the real path (systemd, Docker and custom DATA_DIR all differ), so
@@ -133,6 +138,7 @@ const spent = computed(() => auth.status?.bootstrap_state === 'redeemed')
         </form>
 
         <div v-if="auth.error" class="error-banner" role="alert">{{ auth.error }}</div>
+        <div v-if="copyFailed" class="warn-banner" role="alert">{{ copyFailed }}</div>
 
         <p v-if="!auth.canLogin" class="warn-banner" style="margin: 0">
           {{ t('login.spent') }}

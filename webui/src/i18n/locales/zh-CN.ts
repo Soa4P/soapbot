@@ -9,8 +9,6 @@
  */
 export default {
   'app.console': '控制台',
-  'app.refresh': '刷新',
-  'app.refreshing': '刷新中…',
   'app.health.online': 'API 在线',
   'app.health.unreachable': 'API 不可达',
   'app.health.connecting': '连接中',
@@ -18,8 +16,6 @@ export default {
   'app.auth.loopback': '本机直连',
   'app.auth.invalid': '令牌失效',
   'app.auth.none': '未认证',
-  'app.footer.schema': 'schema',
-  'app.footer.version': '版本',
 
   'nav.01': '总览',
   'nav.02': '运行状态',
@@ -82,6 +78,7 @@ export default {
   // less typing: "状态" translated once cannot drift into "Status" on one page and
   // "State" on the next, which is exactly what happens when each page owns its copy.
   'common.all': '全部',
+  'common.copyFailed': '浏览器不允许自动复制，请手动选中这段文本复制：{value}',
   'common.status': '状态',
   'common.name': '名称',
   'common.time': '时间',
@@ -543,8 +540,6 @@ export default {
   'config.mcpEdit': '编辑',
   'config.mcpClose': '收起',
   'config.mcpDelete': '删除',
-  'config.mcpDeleteTitle': '删除 MCP 服务器',
-  'config.mcpDeleteDetail': '将从 mcp.yaml 移除 {name}，并停掉它的进程。它提供的工具会立刻从模型可见的工具表里消失。',
   'config.mcpConnected': '已连接 · {n} 个工具',
   'config.mcpNoTools': '已连接 · 0 个工具',
   'config.mcpFailed': '启动失败',
@@ -574,6 +569,7 @@ export default {
   'login.resetHint': '执行后重启服务才生效；重启不会自动再发一枚。',
   'login.copy': '复制',
   'login.copied': '已复制',
+  'login.copyFailed': '浏览器不允许自动复制，请手动选中这段文本复制：{value}',
   'login.detail': '令牌在首次启动时写入 data/init_token.txt；未使用前重启不会改变它。如果设置了 SOAPBOT_INIT_TOKEN，则用该值。',
   'login.label': '引导令牌',
   'login.checking': '校验中…',
@@ -661,6 +657,7 @@ export default {
   'napcat.tokenLabel': 'NapCat WebUI 的 Token（已自动读取，打开 WebUI 会自动带上）：',
   'napcat.tokenCopy': '复制',
   'napcat.tokenCopied': '已复制',
+  'napcat.tokenCopyFailed': '浏览器不允许自动复制，请手动选中这个令牌复制：{token}',
   'napcat.foundLocal': '检测到本机已有 NapCat（它的 WebUI 在监听），不需要 Docker。',
   'napcat.hintLocal':
     '这台机器上已经跑着 NapCat（多半是你自己装的）。点「显示登录二维码」，用手机 QQ 扫一下就完成登录；扫完卡片会变成「已登录」，再点「自动连上 QQ」。',
@@ -674,8 +671,6 @@ export default {
   'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
   'napcat.restartManual':
     '这个进程不是由 systemd 或容器托管的，无法自己重启。请在服务器上执行：systemctl restart soapbot（Linux）、docker restart <容器名>（容器）、或 schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（Windows 计划任务）。',
-  'napcat.loginFailed':
-    'NapCat 的 WebUI 有响应、但登录请求被它拒了——多半是它的进程卡住了。去服务器重启 NapCat（schtasks /End /TN NapCat && schtasks /Run /TN NapCat），几秒后回来再点一次。',
 
   // ------------------------------------------------------------ 扫描本机协议端
   'scan.button': '扫描本机协议端',
@@ -728,7 +723,6 @@ export default {
   'adapters.hint.ws': 'forward 时用：NapCat 的「WebSocket 服务器」地址',
   'adapters.hint.host': 'reverse 时用：本服务监听的地址。127.0.0.1 = 只收本机连接；0.0.0.0 = 也收其他机器',
   'adapters.hint.port': 'reverse 时用：本服务监听的端口，NapCat 的「WebSocket 客户端」连的就是它',
-  'adapters.hint.token': '两边必须完全一致；两边都留空 = 不校验 token',
   'adapters.hint.tokenKnown':
     '这台机器上的 NapCat 这条 OneBot 服务器设的 token 是「{token}」，已自动填好；保持两边一致即可。',
   'adapters.hint.tokenEmpty':

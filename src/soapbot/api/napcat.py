@@ -202,6 +202,11 @@ async def qr(
     # between eventually cuts. The card polls, so late answers are still delivered.
     result = await napcat.qr_code(wait_seconds=5.0)
     if not result.get("ok"):
+        # "Already logged in" is the goal of this screen, not a failure. Returning 409 for
+        # it produced an error banner the moment the scan succeeded, because the poller
+        # and the login completed in the same second. Answer 200 and let the card say so.
+        if result.get("error") == "already-logged-in":
+            return {"ok": False, "error": "already-logged-in"}
         # 409 rather than 500: "not ready yet" is the normal state two seconds after start.
         # The detail is a machine token the UI maps to a sentence, so the person sees "the
         # WebUI answered but the login was refused — restart NapCat", not "409".

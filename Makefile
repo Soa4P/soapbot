@@ -12,7 +12,7 @@ else
 	BIN := $(VENV)/bin
 endif
 
-.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check
+.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks
 
 help:
 	@echo "make install    创建虚拟环境并安装开发依赖"
@@ -23,7 +23,8 @@ help:
 	@echo "make contrast   WCAG 对比度校验（含在 check 内）"
 	@echo "make a11y       可访问性静态检查（含在 check 内）"
 	@echo "make gaps       测试断层扫描：孤儿模块与过期数字（含在 check 内）"
-	@echo "make check      lint + contrast + a11y + gaps + test（CI 阻断项同款）"
+	@echo "make doclinks   文档相对链接检查（含在 check 内）"
+	@echo "make check      lint + contrast + a11y + gaps + doclinks + test（CI 阻断项同款）"
 	@echo "make deploy-check 容器部署配置静态检查（不需要 docker）"
 	@echo "make ui         构建前端到 src/soapbot/webui/dist"
 	@echo "make progress   启动开发进度看板 http://127.0.0.1:8099/"
@@ -65,6 +66,11 @@ gaps:
 a11y:
 	$(BIN)/python scripts/check_a11y.py
 
+# A relative link that moved one directory deeper is invisible until someone clicks it.
+# The README split into docs/ broke four at once, so it is a gate now.
+doclinks:
+	$(BIN)/python scripts/check_doc_links.py
+
 # The board is a static page; this is the shortest way to look at it without
 # remembering the flags. Must be HTTP — `file://` blocks the fetch of progress.json.
 progress:
@@ -77,7 +83,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint contrast a11y gaps test
+check: lint contrast a11y gaps doclinks test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:
