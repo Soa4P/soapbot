@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 
 from soapbot.config import settings
 from soapbot.memory.db import (
@@ -170,6 +170,31 @@ async def _fts_index(session, table: str, content: str, row_id: int) -> None:
         logger.warning("FTS index insert failed for %s (row %s): %s", table, row_id, exc)
 
 
+async def _fts_index_many(session, table: str, items: list[tuple[str, int]]) -> None:
+    """Index many FTS rows in one statement instead of one per chunk.
+
+    ``add_document`` used to ``flush()`` + ``INSERT`` per chunk while holding the write
+    lock, so a long document stalled every other writer for as many round trips as it
+    had chunks. A single executemany keeps the lock hold proportional to the SQL work
+    rather than to the number of awaits.
+
+    The SAVEPOINT is still there: FTS indexing is best-effort, and a failure must not
+    poison the transaction that just wrote the real document rows.
+    """
+    if table not in _FTS_TABLES:
+        raise ValueError(f"unknown FTS table {table!r}; expected one of {sorted(_FTS_TABLES)}")
+    if not items:
+        return
+    try:
+        async with session.begin_nested():
+            await session.execute(
+                text(f"INSERT INTO {table}(content, row_id) VALUES (:c, :r)"),
+                [{"c": _index_text(content), "r": row_id} for content, row_id in items],
+            )
+    except Exception as exc:
+        logger.warning("FTS batch index insert failed for %s (%d rows): %s", table, len(items), exc)
+
+
 def _index_text(value: str) -> str:
     """Render text for the FTS5 index.
 
@@ -234,7 +259,6 @@ class MemoryStore:
             await session.flush()
             if content:
                 await self._fts_insert(session, "messages_fts", content, row.id)
-            await session.commit()
             return row.id
 
     async def add_memory(
@@ -280,7 +304,6 @@ class MemoryStore:
             # 「记忆存在但索引缺失」的中间态（曾导致 /recall 无结果）。
             await session.flush()
             await self._fts_insert(session, "memories_fts", content, row.id)
-            await session.commit()
             return row.id
 
     async def _fts_insert(self, session, table: str, content: str, row_id: int) -> None:
@@ -317,7 +340,6 @@ class MemoryStore:
                     created_at=time.time(),
                 )
             )
-            await session.commit()
 
     async def latest_summary(self, session_key: str) -> str:
         async with self.db.session_factory()() as session:
@@ -615,13 +637,16 @@ class MemoryStore:
     async def _touch(self, ids: list[int]) -> None:
         if not ids:
             return
+        # One UPDATE, not one SELECT + one UPDATE per recalled memory. ``recall`` can
+        # return up to ``MAX_RECALL_ITEMS`` rows and holds the write lock the whole
+        # time, so the old loop made every other writer wait for N round trips.
+        # ``in_`` binds each id as a parameter; nothing is interpolated into the SQL.
         async with self.db.write() as session:
-            for mid in ids:
-                row = await session.get(MemoryRow, mid)
-                if row is not None:
-                    row.access_count += 1
-                    row.accessed_at = time.time()
-            await session.commit()
+            await session.execute(
+                update(MemoryRow)
+                .where(MemoryRow.id.in_(ids))
+                .values(access_count=MemoryRow.access_count + 1, accessed_at=time.time())
+            )
 
     async def count_memories(self, layer: MemoryLayer | None = None) -> int:
         async with self.db.session_factory()() as session:
@@ -660,7 +685,6 @@ class MemoryStore:
                 text("DELETE FROM memories_fts WHERE row_id = :r"), {"r": memory_id}
             )
             await session.delete(row)
-            await session.commit()
             return True
 
 
@@ -711,23 +735,31 @@ class KnowledgeBase:
                 logger.warning("knowledge embedding failed, storing text only: %s", exc)
 
         async with self.db.write() as session:
-            ids: list[int] = []
+            now = time.time()
+            rows: list[KnowledgeRow] = []
             for i, chunk in enumerate(chunks):
                 vec = vectors[i] if i < len(vectors) else []
-                row = KnowledgeRow(
-                    doc_id=doc_id,
-                    title=title,
-                    chunk_index=i,
-                    content=chunk,
-                    embedding=vector_to_blob(vec) if vec else None,
-                    embedding_dim=len(vec),
-                    created_at=time.time(),
+                rows.append(
+                    KnowledgeRow(
+                        doc_id=doc_id,
+                        title=title,
+                        chunk_index=i,
+                        content=chunk,
+                        embedding=vector_to_blob(vec) if vec else None,
+                        embedding_dim=len(vec),
+                        created_at=now,
+                    )
                 )
-                session.add(row)
-                await session.flush()
-                ids.append(row.id)
-                await _fts_index(session, "knowledge_fts", chunk, row.id)
-            await session.commit()
+            session.add_all(rows)
+            # One flush for the whole document. SQLAlchemy still emits one INSERT per
+            # row to collect autoincrement ids, but that is one unit of work rather
+            # than N awaited flush/FTS pairs — the difference that held the write lock
+            # for as long as the document was long.
+            await session.flush()
+            ids = [row.id for row in rows]
+            await _fts_index_many(
+                session, "knowledge_fts", list(zip(chunks, ids, strict=True))
+            )
             return len(ids)
 
     async def ingest_document(
@@ -868,12 +900,17 @@ class KnowledgeBase:
                     select(KnowledgeRow.id).where(KnowledgeRow.doc_id == doc_id)
                 )
             ).scalars().all()
-            for kid in ids:
-                await session.execute(
-                    text("DELETE FROM knowledge_fts WHERE row_id = :r"), {"r": kid}
-                )
+            # One DELETE with an IN subquery, not one per chunk. The document is still
+            # present at this point, so the subquery resolves exactly the rows that are
+            # about to be removed — no need to ship their ids back to Python first.
+            await session.execute(
+                text(
+                    "DELETE FROM knowledge_fts WHERE row_id IN "
+                    "(SELECT id FROM knowledge WHERE doc_id = :doc)"
+                ),
+                {"doc": doc_id},
+            )
             await session.execute(delete(KnowledgeRow).where(KnowledgeRow.doc_id == doc_id))
-            await session.commit()
             return len(ids)
 
 

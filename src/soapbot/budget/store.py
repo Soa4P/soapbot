@@ -140,17 +140,14 @@ class BudgetStore:
         )
         return int(committed or 0), int(reserved or 0), int(pending or 0)
 
-    async def snapshot(
-        self, *, session_key: str, period: str | None = None, now: float | None = None
+    def _make_snapshot(
+        self,
+        *,
+        session_key: str,
+        period: str,
+        totals: tuple[int, int, int],
     ) -> BudgetSnapshot:
-        """Current usage, after sweeping expired requests."""
-        period = period or self.policy.period_key(now=now)
-        async with self.db.session_factory()() as session:
-            await self._sweep_expired_in(session, session_key=session_key, period=period, now=now)
-            committed, reserved, pending = await self._totals(
-                session, session_key=session_key, period=period
-            )
-            await session.commit()
+        committed, reserved, pending = totals
         return BudgetSnapshot(
             session_key=session_key,
             period=period,
@@ -160,6 +157,51 @@ class BudgetStore:
             reserved_minor=reserved,
             pending_count=pending,
         )
+
+    async def snapshot(
+        self, *, session_key: str, period: str | None = None, now: float | None = None
+    ) -> BudgetSnapshot:
+        """Current usage, after sweeping expired requests.
+
+        This used to be the one write path that bypassed ``Database.write``: the
+        expiry sweep is an ``UPDATE`` and it was committed on a plain session, so a
+        snapshot could collide with a reserve/approve and fail with
+        ``database is locked`` — or, worse, win the race against the lock's whole
+        purpose. The obvious fix (always take the write lock) makes every quota read
+        queue behind every write, and this endpoint is hit on each command.
+
+        So: a read-only fast path when there is nothing to expire, and the write lock
+        only for the rare sweep. WAL gives the fast path a consistent view without
+        blocking anybody.
+        """
+        period = period or self.policy.period_key(now=now)
+        ts = time.time() if now is None else now
+
+        async with self.db.session_factory()() as session:
+            stale = int(
+                (
+                    await session.scalar(
+                        select(func.count(SpendRequestRow.id)).where(
+                            SpendRequestRow.session_key == session_key,
+                            SpendRequestRow.period == period,
+                            SpendRequestRow.status == str(SpendStatus.PENDING),
+                            SpendRequestRow.expires_at > 0,
+                            SpendRequestRow.expires_at < ts,
+                        )
+                    )
+                )
+                or 0
+            )
+            if stale == 0:
+                totals = await self._totals(session, session_key=session_key, period=period)
+                return self._make_snapshot(session_key=session_key, period=period, totals=totals)
+
+        # Something is stale: sweep and read the balance in one serialised write
+        # transaction, so the reported balance never includes an already-expired row.
+        async with self.db.write() as session:
+            await self._sweep_expired_in(session, session_key=session_key, period=period, now=ts)
+            totals = await self._totals(session, session_key=session_key, period=period)
+        return self._make_snapshot(session_key=session_key, period=period, totals=totals)
 
     async def get(self, request_id: int, *, session_key: str) -> SpendRequest:
         """Fetch one request **scoped to the caller**.
