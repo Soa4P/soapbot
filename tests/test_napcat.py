@@ -24,6 +24,18 @@ import pytest
 import soapbot.protocol.napcat as napcat
 
 
+@pytest.fixture(autouse=True)
+def _clear_credential_cache():
+    """The credential cache is module state; every test starts from a cold WebUI."""
+    napcat._credential_cache.update(
+        {"value": "", "expires_at": 0.0, "retry_after": 0.0, "last_error": ""}
+    )
+    yield
+    napcat._credential_cache.update(
+        {"value": "", "expires_at": 0.0, "retry_after": 0.0, "last_error": ""}
+    )
+
+
 def test_the_login_hash_is_sha256_of_token_plus_suffix(monkeypatch, tmp_path: Path) -> None:
     """Pinned because the wrong shape is not an error message a user can act on."""
     seen: dict[str, object] = {}
@@ -74,6 +86,78 @@ def test_the_qr_is_returned_as_the_url_napcat_gives(monkeypatch) -> None:
 
     result = asyncio.run(napcat.qr_code())
     assert result == {"ok": True, "url": "https://txz.qq.com/p?k=xyz"}
+
+
+def test_polling_does_not_re_login_every_time(monkeypatch) -> None:
+    """The production outage: 3s polling re-logged-in on every call and NapCat (loginRate=10)
+    answered "login rate limit" for ever, so no QR was ever fetched. One credential is a
+    session, so the panel must reuse it."""
+    logins = 0
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        nonlocal logins
+        if path == "/api/auth/login":
+            logins += 1
+            return {"code": 0, "data": {"Credential": "session-abc"}}
+        return {"code": 0, "data": {"qrcode": "https://txz.qq.com/p?k=xyz"}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    results = [asyncio.run(napcat.login_token()) for _ in range(6)]
+
+    assert all(c == "session-abc" for c in results)
+    assert logins == 1, f"expected one login for six polls, got {logins}"
+
+
+def test_a_rate_limited_webui_backs_off_instead_of_retry_storming(monkeypatch) -> None:
+    """Once limited, further polls must not hit /api/auth/login again."""
+    logins = 0
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        nonlocal logins
+        if path == "/api/auth/login":
+            logins += 1
+            return {"code": -1, "message": "login rate limit"}
+        return {"code": 0, "data": {}}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+    monkeypatch.setattr(napcat, "webui_reachable", lambda: True)
+
+    import asyncio
+
+    first = asyncio.run(napcat.qr_code())
+    again = asyncio.run(napcat.qr_code())
+
+    assert first["error"] == "webui-rate-limited"
+    assert again["error"] == "webui-rate-limited"
+    assert logins == 1, f"backoff must suppress retries, got {logins} logins"
+    assert napcat.credential_cache_state()["backoff_remaining"] > 0
+    # The diagnostic view must never leak the credential itself.
+    assert "value" not in napcat.credential_cache_state()
+
+
+def test_qr_reports_rate_limit_immediately_without_waiting(monkeypatch) -> None:
+    """Holding each poll for wait_seconds while limited piles up requests that all fail."""
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        return {"code": -1, "message": "login rate limit"}
+
+    async def should_not_wait(*_args, **_kwargs):  # pragma: no cover - must not be called
+        raise AssertionError("do not wait out a rate limit inside the request")
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+    monkeypatch.setattr(napcat, "wait_until_ready", should_not_wait)
+
+    import asyncio
+
+    result = asyncio.run(napcat.qr_code(wait_seconds=5.0))
+    assert result["error"] == "webui-rate-limited"
+    assert result["retry_after"] > 0
 
 
 def test_login_state_carries_the_phase_when_not_logged_in(monkeypatch) -> None:

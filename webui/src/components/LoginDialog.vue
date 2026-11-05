@@ -34,6 +34,27 @@ async function submit(): Promise<void> {
   if (!token.value.trim() || auth.busy) return
   await auth.login(token.value)
 }
+
+const copied = ref('')
+
+async function copy(value: string, which: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value)
+    copied.value = which
+    window.setTimeout(() => {
+      copied.value = ''
+    }, 2000)
+  } catch {
+    /* clipboard needs a secure context; the value stays on screen to select manually */
+  }
+}
+
+/** The server resolves the real path (systemd, Docker and custom DATA_DIR all differ), so
+ * the operator never has to guess where the file went. Show the command too: on a remote
+ * host the fastest route is `soapbot token`, not hunting through directories. */
+const tokenCommand = 'soapbot token'
+const resetCommand = 'soapbot token --reset'
+const spent = computed(() => auth.status?.bootstrap_state === 'redeemed')
 </script>
 
 <template>
@@ -55,6 +76,41 @@ async function submit(): Promise<void> {
         <p id="login-detail" class="muted" style="margin: 0">
           {{ t('login.detail') }}
         </p>
+
+        <!-- The point of this card: nobody should have to know where the file lives. The
+             server sends its real absolute path, and the command works on a remote host
+             where there is no file explorer at all. -->
+        <div class="login__where" role="group" :aria-label="t('login.whereTitle')">
+          <div class="eyebrow">{{ t('login.whereTitle') }}</div>
+          <p class="muted" style="margin: 4px 0 8px">{{ t('login.whereHint') }}</p>
+
+          <div v-if="spent" class="login__cmd">
+            <code>{{ resetCommand }}</code>
+            <button class="btn ghost" type="button" @click="copy(resetCommand, 'reset')">
+              {{ copied === 'reset' ? t('login.copied') : t('login.copy') }}
+            </button>
+          </div>
+          <p v-if="spent" class="muted" style="margin: 4px 0 8px">{{ t('login.resetHint') }}</p>
+
+          <template v-else>
+            <div v-if="auth.status?.bootstrap_path" class="login__cmd">
+              <code>{{ auth.status.bootstrap_path }}</code>
+              <button
+                class="btn ghost"
+                type="button"
+                @click="copy(auth.status.bootstrap_path, 'path')"
+              >
+                {{ copied === 'path' ? t('login.copied') : t('login.copy') }}
+              </button>
+            </div>
+            <div class="login__cmd">
+              <code>{{ tokenCommand }}</code>
+              <button class="btn ghost" type="button" @click="copy(tokenCommand, 'cmd')">
+                {{ copied === 'cmd' ? t('login.copied') : t('login.copy') }}
+              </button>
+            </div>
+          </template>
+        </div>
 
         <form class="stack" @submit.prevent="submit">
           <label class="eyebrow" for="login-token">{{ t('login.label') }}</label>
@@ -85,3 +141,24 @@ async function submit(): Promise<void> {
     </div>
   </div>
 </template>
+
+<style scoped>
+.login__where {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  padding: 10px 12px;
+  margin: 0 0 14px;
+  background: var(--surface-2, transparent);
+}
+.login__cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+.login__cmd code {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+</style>

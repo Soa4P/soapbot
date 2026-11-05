@@ -569,6 +569,11 @@ export default {
   'api.timeout': '请求超时（{seconds} 秒无响应）：服务可能正在重启，刷新重试。',
   'shell.unauthenticated': '当前会话未认证。远程访问必须先在右上角登录，否则所有管理接口都会返回 401。',
   'login.title': '用一次性令牌换取访问令牌',
+  'login.whereTitle': '去哪里拿令牌',
+  'login.whereHint': '在这台服务器上，用下面任一方式取得令牌，不用去猜文件路径。',
+  'login.resetHint': '执行后重启服务才生效；重启不会自动再发一枚。',
+  'login.copy': '复制',
+  'login.copied': '已复制',
   'login.detail': '令牌在首次启动时写入 data/init_token.txt；未使用前重启不会改变它。如果设置了 SOAPBOT_INIT_TOKEN，则用该值。',
   'login.label': '引导令牌',
   'login.checking': '校验中…',
@@ -642,7 +647,15 @@ export default {
   'napcat.showQr': '显示登录二维码',
   'napcat.openWebui': '打开 NapCat WebUI',
   'napcat.qrHint':
-    '用手机 QQ 扫码（这张码约 2 分钟会过期，过期自动换新的）。扫码时 QQ 若提示「异地登录」——因为服务器的出口 IP 在境外机房——确认是本人即可继续。',
+    '用手机 QQ 扫码。二维码有效期很短，下方显示这张码的更新时间；到时会自动换一张，也可以点「换一张」立即重取。若 QQ 提示「异地登录」，确认是本人即可继续。',
+  'napcat.qrAge': '这张二维码更新于 {seconds} 秒前，每 {ttl} 秒自动换一张。',
+  'napcat.qrRefreshNow': '换一张',
+  'napcat.qrRateLimited':
+    'NapCat WebUI 的登录请求过于频繁，已被它限流；正在暂停重试，稍后会自动再试。也可以点「换一张」手动重试。',
+  'napcat.qrLoginFailed': 'NapCat WebUI 拒绝了登录凭证交换。请重启 NapCat 后重试。',
+  'napcat.qrNotReady': 'NapCat 还在启动，暂时拿不到二维码，稍后会自动再试。',
+  'napcat.qrUnreachable': '连不上 NapCat 的 WebUI（默认端口 6099），请确认它正在运行。',
+  'napcat.qrFailed': '二维码获取失败：{reason}。稍后会自动再试。',
   'napcat.tokenLabel': 'NapCat WebUI 的 Token（已自动读取，打开 WebUI 会自动带上）：',
   'napcat.tokenCopy': '复制',
   'napcat.tokenCopied': '已复制',
@@ -659,7 +672,6 @@ export default {
   'napcat.restarting': '正在重启…页面会在几秒后自己刷新。',
   'napcat.restartManual':
     '这个进程不是由 systemd 或容器托管的，无法自己重启。请在服务器上执行：systemctl restart soapbot（Linux）、docker restart <容器名>（容器）、或 schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（Windows 计划任务）。',
-  'napcat.qrNotReady': '二维码还没准备好：等它启动完再点一次。',
   'napcat.loginFailed':
     'NapCat 的 WebUI 有响应、但登录请求被它拒了——多半是它的进程卡住了。去服务器重启 NapCat（schtasks /End /TN NapCat && schtasks /Run /TN NapCat），几秒后回来再点一次。',
 

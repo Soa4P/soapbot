@@ -28,9 +28,15 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from soapbot.config import settings
 from soapbot.security.audit import get_audit_log
 from soapbot.security.ratelimit import SlidingWindowLimiter
-from soapbot.security.tokens import BootstrapToken, TokenError, TokenService
+from soapbot.security.tokens import (
+    BOOTSTRAP_FILE,
+    BootstrapToken,
+    TokenError,
+    TokenService,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -324,6 +330,13 @@ async def auth_status(request: Request) -> dict:
         # distinguish "wrong token typed" from "spent, and a restart will NOT mint a
         # new one". The operator needs the latter state to know the recovery command.
         "bootstrap_state": bootstrap.state if bootstrap is not None else "uninitialised",
+        # Where to find the credential, resolved from the *actual* data dir rather than a
+        # hard-coded "data/init_token.txt" that is wrong for systemd, Docker and custom
+        # SOAPBOT_DATA_DIR installs. A path is not a secret: it tells an operator where to
+        # look without making them guess or read the source. The value itself is never
+        # returned — putting a live credential on an unauthenticated endpoint would let
+        # anyone who can reach the panel log in.
+        "bootstrap_path": str(settings.data_dir / BOOTSTRAP_FILE),
         "ttl_seconds": _token_service.ttl_seconds if _token_service else 0,
     }
 

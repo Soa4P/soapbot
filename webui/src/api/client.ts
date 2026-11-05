@@ -388,6 +388,7 @@ export interface AuthStatus {
   login_available: boolean
   init_token_generated: boolean
   bootstrap_state: 'available' | 'redeemed' | 'uninitialised'
+  bootstrap_path: string
   ttl_seconds: number
 }
 
