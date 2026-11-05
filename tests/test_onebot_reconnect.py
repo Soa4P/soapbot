@@ -238,6 +238,7 @@ async def test_a_half_open_socket_is_detected_by_the_liveness_probe(
     reconnect.
     """
     attempts: list[str] = []
+    redialled = asyncio.Event()
 
     class _Silent:
         """Accepts the connection and then says nothing, ever."""
@@ -259,6 +260,8 @@ async def test_a_half_open_socket_is_detected_by_the_liveness_probe(
 
     async def fake_connect(url: str, **_kwargs: Any) -> _Silent:
         attempts.append(url)
+        if len(attempts) >= 2:
+            redialled.set()
         return _Silent()
 
     monkeypatch.setattr(onebot11, "ws_connect", fake_connect)
@@ -278,14 +281,13 @@ async def test_a_half_open_socket_is_detected_by_the_liveness_probe(
 
     await adapter.start()
     try:
-        # Poll the counter the operator would read, not the internal attempt count:
-        # the dial happens before the counter is incremented, so waiting on the dial
-        # races the assertion by one scheduling tick.
-        for _ in range(150):
-            if adapter.health.reconnect_attempts >= 1:
-                break
-            await asyncio.sleep(0.02)
-        assert adapter.health.reconnect_attempts >= 1, "a silent socket never triggered a reconnect"
+        # An event, not a polling loop.  fake_connect sets it synchronously on the
+        # second dial, so there is no scheduling gap between "the dial happened" and
+        # "the test can see it" — the race that made this flaky under full-suite load.
+        await asyncio.wait_for(redialled.wait(), timeout=5.0)
+        assert adapter.health.reconnect_attempts >= 1, (
+            "a silent socket never triggered a reconnect"
+        )
         assert len(attempts) >= 2, "the adapter never dialled a second connection"
     finally:
         await adapter.stop()
