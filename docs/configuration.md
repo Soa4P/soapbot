@@ -65,6 +65,15 @@
 | `BUSY_NOTICE` | `忙不过来啦，稍后再试一次` | 因上限被丢弃的 @ 消息收到的回复。**沉默不是可接受的回答**：在成员看来，被无视的 @ 和机器人挂了没有区别。设为空字符串则连 @ 也静默丢弃 |
 | `BREAKER_BASE_SECONDS` | `15` | 暂停的首次时长，之后按指数增长 |
 | `BREAKER_MAX_SECONDS` | `300` | 暂停时长上限 |
+| `OUTBOUND_CONNECT_TIMEOUT` | `5` | 建连超时（秒），**与读取超时分开**。合并成一个值时，一个挂掉的端点要耗掉整段生成预算才触发故障转移 |
+| `OUTBOUND_READ_TIMEOUT` | `60` | 读取超时（秒）默认值。Provider 在 `providers.yaml` 里配了 `timeout` 时以它为准 |
+| `OUTBOUND_WRITE_TIMEOUT` | `10` | 发送请求体超时（秒） |
+| `OUTBOUND_POOL_TIMEOUT` | `5` | 连接池满时等待空闲连接的时长（秒）。短是刻意的：排在池后面一分钟和挂死无法区分 |
+| `OUTBOUND_MAX_CONNECTIONS` | `32` | 出站并发连接上限（所有主机合计）。不设上限时，一个热闹的群会为每条并发回复各开一条连接 |
+| `OUTBOUND_MAX_KEEPALIVE` | `16` | 保留的空闲连接数。让同一会话里两条消息之间能复用连接与 TLS 会话 |
+| `OUTBOUND_KEEPALIVE_EXPIRY` | `30` | 空闲连接保留秒数 |
+| `OUTBOUND_MAX_REDIRECTS` | `3` | 允许的重定向跳数。**默认不自动跟随重定向**，每一跳都要重新校验目标 |
+| `OUTBOUND_USER_AGENT` | `soapbot/0.1 (+https://github.com/soapbot/soapbot)` | 出站 UA。默认值标识的是库而不是部署，会让本机器人的流量在提供方的滥用看板上和任何 httpx 客户端无法区分 |
 | `MODEL_ERROR_NOTICE` | 见下 | 所有提供方不可用时回复用户的降级话术 |
 | `VOICE_ENABLED` | `false` | 入站语音转写。需要 Provider 声明 `transcribe` 槽位 |
 | `VOICE_TTS_ENABLED` / `VOICE_TTS_VOICE` | `false` / `zh-CN-XiaoxiaoNeural` | 回复转语音。需要 `pip install -e ".[voice]"` |

@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from soapbot.config import settings
+from soapbot.net import build_timeout, outbound_client
 
 logger = logging.getLogger(__name__)
 
@@ -230,16 +231,23 @@ def stop_container() -> dict[str, Any]:
 
 
 async def _webui_post(path: str, body: dict[str, Any], *, token: str = "") -> dict[str, Any]:
-    """One call to NapCat's own WebUI API, without a system proxy in the way."""
+    """One call to NapCat's own WebUI API, without a system proxy in the way.
+
+    On the shared pool, which is built with ``trust_env=False`` for exactly this reason:
+    a loopback call must never be routed through a proxy. This runs on the panel's 3 s
+    QR poll, so a fresh client per call meant a new socket every three seconds for as
+    long as the login page was open.
+    """
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    async with httpx.AsyncClient(
-        base_url=f"http://127.0.0.1:{WEBUI_PORT}",
-        timeout=HTTP_TIMEOUT,
-        trust_env=False,  # a loopback call must never consult proxy settings
-    ) as client:
-        response = await client.post(path, json=body, headers=headers)
+    async with outbound_client() as client:
+        response = await client.post(
+            f"http://127.0.0.1:{WEBUI_PORT}{path}",
+            json=body,
+            headers=headers,
+            timeout=build_timeout(HTTP_TIMEOUT),
+        )
     try:
         payload = response.json()
     except ValueError:

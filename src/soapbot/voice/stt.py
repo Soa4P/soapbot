@@ -26,9 +26,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
-import httpx
-
 from soapbot.i18n import t
+from soapbot.net import build_timeout, outbound_client
 
 logger = logging.getLogger(__name__)
 
@@ -143,26 +142,31 @@ async def http_fetch(
 ) -> tuple[bytes, str]:
     """Download with a hard size cap applied while reading, not after."""
     await async_check_audio_url(url, allow_hosts=allow_hosts)
-    async with (
-        httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client,
-        client.stream("GET", url) as response,
-    ):
-        if response.status_code != 200:
-            raise VoiceError(f"audio fetch failed: HTTP {response.status_code}")
-        # A redirect would let a public URL bounce to a private one after the check
-        # above has already passed, so redirects are not followed at all.
-        declared = int(response.headers.get("content-length") or 0)
-        if declared > max_bytes:
-            raise VoiceError(f"audio too large: {declared} bytes")
-        chunks: list[bytes] = []
-        total = 0
-        async for chunk in response.aiter_bytes():
-            total += len(chunk)
-            if total > max_bytes:
-                raise VoiceError(f"audio exceeded {max_bytes} bytes while reading")
-            chunks.append(chunk)
-        mime = response.headers.get("content-type", "audio/silk").split(";")[0]
-        return b"".join(chunks), mime
+    # Shared pool. The response is closed in ``finally`` so an over-size abort mid-read
+    # returns the socket instead of leaving a half-consumed body holding it.
+    async with outbound_client() as client:
+        stream_ctx = client.stream("GET", url, timeout=build_timeout(15.0))
+        response = await stream_ctx.__aenter__()
+        try:
+            if response.status_code != 200:
+                raise VoiceError(f"audio fetch failed: HTTP {response.status_code}")
+            # A redirect would let a public URL bounce to a private one after the check
+            # above has already passed, so redirects are not followed at all.
+            declared = int(response.headers.get("content-length") or 0)
+            if declared > max_bytes:
+                raise VoiceError(f"audio too large: {declared} bytes")
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise VoiceError(f"audio exceeded {max_bytes} bytes while reading")
+                chunks.append(chunk)
+            mime = response.headers.get("content-type", "audio/silk").split(";")[0]
+            return b"".join(chunks), mime
+        finally:
+            await response.aclose()
+            await stream_ctx.__aexit__(None, None, None)
 
 
 class ProviderTranscriber:

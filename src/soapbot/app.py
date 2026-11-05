@@ -337,6 +337,16 @@ async def _shutdown() -> None:
         except Exception as exc:  # pragma: no cover
             logger.warning("database shutdown failed: %s", exc)
 
+    # Last, after everything that might still be mid-request. Closing the shared pool
+    # earlier would turn an in-flight provider call into a "client has been closed"
+    # error during shutdown, which reads like a bug in the reply path.
+    from soapbot.net import reset_outbound
+
+    try:
+        await reset_outbound()
+    except Exception as exc:  # pragma: no cover - shutdown must not raise
+        logger.warning("outbound client close failed: %s", exc)
+
     logger.info("soapbot stopped")
 
 

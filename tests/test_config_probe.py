@@ -91,6 +91,67 @@ async def test_an_empty_base_url_is_refused_before_any_socket() -> None:
     assert result["error"]
 
 
+async def test_a_redirect_to_another_host_is_not_followed() -> None:
+    """The probe dials an address the operator typed. It must not dial a second one.
+
+    Private addresses are allowed on purpose (Ollama and NapCat are same-host), so the
+    interesting attack is not "point at 127.0.0.1" — the operator can do that already —
+    but "point at a public host that answers ``302 -> 169.254.169.254``". Following that
+    turns a reachability check into a metadata read.
+    """
+    followed: list[str] = []
+
+    def build(**kwargs):
+        def handler(request: httpx.Request) -> httpx.Response:
+            followed.append(str(request.url))
+            if str(request.url).startswith("https://api.example.com"):
+                return httpx.Response(
+                    302, headers={"location": "http://169.254.169.254/latest/meta-data/"}
+                )
+            return httpx.Response(200, json={"data": []})
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+
+    result = await probe_endpoint("https://api.example.com/v1", timeout=3.0, client_factory=build)
+
+    assert followed == ["https://api.example.com/v1/models"], "the second host was dialled"
+    assert result["status_code"] == 302
+
+
+async def test_a_same_host_redirect_is_followed() -> None:
+    """http->https and trailing-slash normalisation are the redirects that really occur."""
+    seen: list[str] = []
+
+    def build(**kwargs):
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            if str(request.url) == "https://api.example.com/v1/models":
+                return httpx.Response(301, headers={"location": "/v1/models/"})
+            return httpx.Response(200, json={"data": []})
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+
+    result = await probe_endpoint("https://api.example.com/v1", timeout=3.0, client_factory=build)
+
+    assert len(seen) == 2
+    assert result["ok"] is True
+
+
+async def test_a_same_host_redirect_loop_terminates() -> None:
+    """Bounded as well as restricted: a loop must not hang the probe."""
+
+    def build(**kwargs):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(302, headers={"location": "/v1/models"})
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+
+    result = await probe_endpoint("https://api.example.com/v1", timeout=3.0, client_factory=build)
+
+    assert result["ok"] is False
+    assert "TooManyRedirects" in result["error"]
+
+
 # ------------------------------------------------------------------- adapter probe
 async def test_forward_probe_asks_for_login_info_on_a_real_socket() -> None:
     """A WebSocket that echoes the handshake but is not OneBot must not be called "ok"."""
