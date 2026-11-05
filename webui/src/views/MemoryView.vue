@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
+import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { datetime, fromNow, num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -182,7 +183,13 @@ function resetDraft(): void {
               </tr>
             </tbody>
           </table>
-          <div v-else class="empty">{{ t('memory.noSessions') }}</div>
+          <EmptyState
+            v-else
+            :lead="t('memory.noSessions')"
+            :hint="t('memory.noSessionsHint')"
+            to="/settings"
+            :action="t('memory.noSessionsAction')"
+          />
         </div>
       </div>
     </section>
@@ -217,7 +224,7 @@ function resetDraft(): void {
         <div class="error-banner">{{ timelineError }}</div>
       </div>
       <div v-else-if="timelineLoading" class="empty">{{ t('common.loading') }}</div>
-      <div v-else-if="!selected" class="empty">{{ t('memory.pickSession') }}</div>
+      <EmptyState v-else-if="!selected" :lead="t('memory.pickSession')" :hint="t('memory.pickSessionHint')" />
       <div v-else-if="!timeline.length" class="empty">{{ t('memory.emptySession') }}</div>
       <div v-else class="scroll">
         <table class="data"><caption class="visually-hidden">{{ t('memory.timeline') }}</caption>

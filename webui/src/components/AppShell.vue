@@ -4,9 +4,11 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 
 import { UNAUTHORIZED_EVENT } from '@/api/client'
 import LoginDialog from '@/components/LoginDialog.vue'
+import PageIntro from '@/components/PageIntro.vue'
 import { t } from '@/i18n'
 import { bumpRefresh } from '@/lib/refresh'
 import { uptime as fmtUptime } from '@/lib/format'
+import { usePolling } from '@/lib/polling'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -17,7 +19,6 @@ const healthError = ref('')
 /** 502/503/504 during an install or upgrade is a restart, not a broken deployment —
  * the banner should say which, because the two need different reactions. */
 const healthStatus = ref(0)
-let timer: number | undefined
 
 /**
  * The numbers are stable identifiers, not sort order. An operator on a support call
@@ -95,12 +96,14 @@ function onUnauthorized(): void {
 onMounted(() => {
   void loadHealth()
   void auth.refresh()
-  timer = window.setInterval(() => void loadHealth(), 20_000)
   window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
 })
 
+// 60 s, not 20: this is a process-alive indicator, not a live counter, and it is the one
+// request every open tab makes.
+usePolling(loadHealth, 60_000)
+
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
   window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
 })
 </script>
@@ -163,6 +166,9 @@ onBeforeUnmount(() => {
           {{ t('shell.unauthenticated') }}
         </div>
 
+        <!-- One sentence per page saying what it is for. Rendered here rather than in
+             twelve views so a new page cannot ship without that sentence existing. -->
+        <PageIntro />
         <RouterView />
       </div>
     </main>

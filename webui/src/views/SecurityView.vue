@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api, setToken } from '@/api/client'
+import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { datetime, num } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -86,11 +87,37 @@ function addEntry(): void {
     return
   }
   authorityError.value = ''
+  // One account, one role. Permission resolution takes the highest rank, so adding the
+  // same number to a second list changes nothing except to make the page lie: it would
+  // show "member" for someone the runtime still treats as owner, and removing them from
+  // that list would appear to do nothing.
+  const other = (['owner', 'admin', 'member'] as const).find(
+    (role) => role !== addRole.value && draft.value[roleKey[role]].includes(id),
+  )
+  if (other) {
+    authorityError.value = t('security.roleConflictAdd', {
+      id,
+      role: other,
+    })
+    return
+  }
   const list = draft.value[roleKey[addRole.value]]
   if (!list.includes(id)) list.push(id)
   addId.value = ''
   dirty.value = true
 }
+
+/** Every QQ that appears in more than one list, with the roles it holds. */
+const conflicts = computed(() => {
+  const seen = new Map<string, string[]>()
+  const add = (qq: string, role: string) => {
+    seen.set(qq, [...(seen.get(qq) ?? []), role])
+  }
+  draft.value.owners.forEach((qq) => add(qq, 'owner'))
+  draft.value.admins.forEach((qq) => add(qq, 'admin'))
+  draft.value.members.forEach((qq) => add(qq, 'member'))
+  return [...seen.entries()].filter(([, roles]) => roles.length > 1)
+})
 
 /** Role names are singular; the list keys (and the API fields) are plural. */
 const roleKey = {
@@ -108,6 +135,14 @@ function removeEntry(role: 'owner' | 'admin' | 'member', id: string): void {
 async function saveAuthority(): Promise<void> {
   if (noOwnerLeft.value) {
     authorityError.value = t('security.lastOwnerGuard')
+    return
+  }
+  if (conflicts.value.length) {
+    // The server refuses this too; saying it here means the person sees which number
+    // and which roles before a failed round trip.
+    authorityError.value = t('security.roleConflictSave', {
+      detail: conflicts.value.map(([qq, roles]) => `${qq}(${roles.join('/')})`).join(', '),
+    })
     return
   }
   authorityBusy.value = true
@@ -230,6 +265,14 @@ async function revokeEveryToken(): Promise<void> {
         <option v-for="item in kinds" :key="item" :value="item">{{ item }}</option>
       </select>
     </div>
+    <!-- The page used to be a table with no explanation of what gets recorded. Answering
+         "what counts as an event" on the page itself is cheaper than making someone read
+         the source to find out. -->
+    <details class="audit-help">
+      <summary>{{ t('security.auditWhat') }}</summary>
+      <p class="hint" style="margin: 6px 0 0">{{ t('security.auditWhatBody') }}</p>
+      <p class="hint" style="margin: 4px 0 0">{{ t('security.auditKinds') }}</p>
+    </details>
     <div class="panel__body flush">
       <div class="scroll">
         <table v-if="events.length" class="data"><caption class="visually-hidden">{{ t('security.auditStream') }}</caption>
@@ -260,7 +303,13 @@ async function revokeEveryToken(): Promise<void> {
             </tr>
           </tbody>
         </table>
-        <div v-else class="empty">{{ t('security.noEvents') }}</div>
+        <EmptyState
+          v-else
+          :lead="t('security.noEvents')"
+          :hint="t('security.noEventsHint')"
+          to="/settings"
+          :action="t('security.noEventsAction')"
+        />
       </div>
     </div>
   </section>
@@ -362,7 +411,7 @@ async function revokeEveryToken(): Promise<void> {
           <button
             class="btn"
             type="button"
-            :disabled="authorityBusy || (!dirty && !noOwnerLeft)"
+            :disabled="authorityBusy || (!dirty && !noOwnerLeft) || conflicts.length > 0"
             @click="saveAuthority"
           >
             {{ authorityBusy ? t('security.saving') : t('security.save') }}

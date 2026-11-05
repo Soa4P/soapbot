@@ -41,7 +41,10 @@
 | `CONFIG_TEMPLATE_DIR` | `./config` | 镜像自带的默认值，**只读**；文件缺失时复制到 `CONFIG_DIR`，已有文件永不覆盖 |
 | `MASTER_KEY` / `MASTER_KEY_FILE` | 空（自动生成到 `data/master.key`） | 容器优先用文件：环境变量对 `docker inspect` 可见 |
 | `OWNER_IDS` / `ADMIN_IDS` / `MEMBER_IDS` | 空 | **唯一**的权限来源，逗号分隔 |
-| `GROUP_ALLOWLIST` / `GROUP_BLACKLIST` | 空 | 群准入。空名单 = 允许所有被拉进的群 |
+| `REPLY_GROUPS` | 空 | 在哪些群回话。空 = 所有群都回 |
+| `MEMORY_COLLECT_GROUPS` | 空 | 在哪些群归档消息、写记忆。空 = 所有群都采集 |
+| `GROUP_PERSONAS` | 空 | 按群绑定人格卡，`群号:人格ID`，逗号分隔。不列出的群走默认卡 |
+| `GROUP_ALLOWLIST` / `GROUP_BLACKLIST` | 空 | `GROUP_ALLOWLIST` 是 `REPLY_GROUPS` 的旧名，仍可用但会告警；`GROUP_BLACKLIST` 是硬拒绝，优先于两者 |
 | `PRIVATE_ALLOWLIST` | 空 | 私聊范围。**空 = 谁都不行**，不是谁都行 |
 | `ALLOW_UNKNOWN_PRIVATE` | `false` | 「任何人都能私聊」的显式开关 |
 | `ALLOW_UNTRUSTED_PLUGINS` | `false` | 允许 `trust: untrusted` 插件持有敏感能力 |

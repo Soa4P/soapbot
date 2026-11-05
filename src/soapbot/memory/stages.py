@@ -41,6 +41,14 @@ class PersistStage(Stage):
         self.store = store
 
     async def run(self, ctx: PipelineContext) -> StageResult:
+        # The collect list decides this, not the wake check. An un-mentioned message in
+        # a collected group is history worth keeping; one in a reply-only group is not
+        # written at all. ``WhitelistStage`` recorded the answer, so this stage does not
+        # need the policy object.
+        if not ctx.extras.get("memory_collect", True):
+            ctx.extras["persist_skipped"] = "group_not_collected"
+            return StageResult()
+
         segments = ctx.extras.get("clean_segments") or ctx.event.segments
         text = "".join(s.plain() for s in segments if s.type is SegmentType.TEXT).strip()
         images = [s for s in segments if s.type is SegmentType.IMAGE]

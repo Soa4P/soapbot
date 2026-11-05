@@ -66,13 +66,52 @@ class AccessPolicy:
     """
 
     group_allowlist: set[str] = field(default_factory=set)
+    """Groups the bot replies in. Empty means every group."""
+
+    memory_collect_groups: set[str] = field(default_factory=set)
+    """Groups whose messages are archived. Empty means every group.
+
+    Independent of ``group_allowlist`` on purpose: "learn here" and "speak here" are
+    different decisions, and an operator may want the bot to sit quietly in a busy
+    group and still build up its history.
+    """
+
     private_allowlist: set[str] = field(default_factory=set)
     group_blacklist: set[str] = field(default_factory=set)
     user_blacklist: set[str] = field(default_factory=set)
     allow_all_private: bool = False
     """Explicit opt-in for 'anyone may DM the bot'. Off by default."""
 
+    def replies_in(self, gid: str) -> bool:
+        return not self.group_allowlist or normalize_id(gid) in {
+            normalize_id(g) for g in self.group_allowlist
+        }
+
+    def collects_from(self, scene: MessageScene, gid: str) -> bool:
+        """Whether messages here may be written to memory.
+
+        Empty means every group, exactly like ``replies_in``. The two lists are
+        deliberately symmetric so that each one can be read on its own: "empty = all"
+        everywhere, and narrowing one never changes the other behind the operator's
+        back. An earlier version made an empty collect list inherit the reply list,
+        which meant narrowing replies silently stopped archiving — a side effect the
+        operator never asked for and could not see in the panel.
+        """
+        if scene is MessageScene.PRIVATE:
+            # A DM is allow-listed at the user level before this is consulted, and the
+            # group lists say nothing about it.
+            return True
+        return not self.memory_collect_groups or normalize_id(gid) in {
+            normalize_id(g) for g in self.memory_collect_groups
+        }
+
     def allows(self, scene: MessageScene, group_id: str, user_id: str) -> tuple[bool, str]:
+        """Whether this message enters the pipeline at all.
+
+        Groups pass when they are in *either* scope. A message from a collected-only
+        group must still be admitted, otherwise its history is never archived — it is
+        the reply that gets skipped later, not the admission.
+        """
         uid = normalize_id(user_id)
         gid = normalize_id(group_id)
         banned = {normalize_id(u) for u in self.user_blacklist}
@@ -83,9 +122,7 @@ class AccessPolicy:
         if scene is MessageScene.GROUP:
             if gid in {normalize_id(g) for g in self.group_blacklist}:
                 return False, "group_blacklisted"
-            if self.group_allowlist and gid not in {
-                normalize_id(g) for g in self.group_allowlist
-            }:
+            if not self.replies_in(gid) and not self.collects_from(scene, gid):
                 return False, "group_not_allowed"
             return True, ""
 
@@ -110,6 +147,12 @@ class WhitelistStage(Stage):
         )
         if not ok:
             return StageResult(halt=True, reason=reason)
+        # Carry the archive decision forward: ``PersistStage`` runs later in the
+        # pipeline and must not re-derive it from configuration it does not hold.
+        ctx.extras["memory_collect"] = self.policy.collects_from(
+            ctx.event.scene, ctx.event.group_id
+        )
+        ctx.extras["replies_here"] = self.policy.replies_in(ctx.event.group_id)
         return StageResult()
 
 
@@ -147,6 +190,19 @@ class WakePolicy:
 
 
 class WakeStage(Stage):
+    """Decide whether this message is addressed to the bot — without ending it.
+
+    It used to halt on ``not_woken``, which also stopped ``persist`` further down: the
+    archive step sat behind the wake check, so a group message nobody @-ed was never
+    written to memory. That made "collect this group's history" impossible — the bot
+    only remembered the messages it was asked about.
+
+    Now the decision is recorded and the pipeline continues to the archive step, which
+    consults the collect list; ``SkipReplyStage`` stops the turn afterwards. Everything
+    before it is cheap and idempotent (strip, sanitize, injection screening), and the
+    injection screen still runs *before* anything is stored.
+    """
+
     name = "wake"
 
     def __init__(self, policy: WakePolicy | None = None) -> None:
@@ -155,8 +211,43 @@ class WakeStage(Stage):
     async def run(self, ctx: PipelineContext) -> StageResult:
         woken, how = self.policy.is_woken(ctx)
         if not woken:
-            return StageResult(halt=True, reason="not_woken")
+            ctx.extras["skip_reply"] = True
+            return StageResult()
         ctx.extras["wake_reason"] = how
+        return StageResult()
+
+
+class SkipReplyStage(Stage):
+    """Stop a turn that has been archived but must not be answered.
+
+    Two reasons land here, and they are different questions:
+
+    - ``not_woken``: nobody addressed the bot. Same reason the wake stage used to
+      report, so the metrics and the "why didn't it answer" trail are unchanged.
+    - ``group_not_replied``: somebody did address it, but this group is collected
+      without being a reply group. Collecting and replying are separate settings, and
+      without this check the reply list would only affect admission — a group the
+      operator muted would still answer.
+
+    Placed after ``PersistStage`` and before commands and plugin hooks: an un-mentioned
+    group message must be archived, not handed to code that acts on it.
+    """
+
+    name = "skip_reply"
+
+    async def run(self, ctx: PipelineContext) -> StageResult:
+        if ctx.extras.get("skip_reply"):
+            return StageResult(halt=True, reason="not_woken")
+        # Collecting a group and replying in it are separate decisions, so a group that
+        # is only collected must not get an answer even when somebody @-s the bot. The
+        # archive above has already happened; this stops the turn before commands, the
+        # model, and delivery.
+        #
+        # ``is False`` rather than a falsy check: an embedder or an older test that never
+        # ran ``WhitelistStage`` has no key at all, and a missing key must mean "no
+        # restriction" instead of silently muting every group.
+        if ctx.event.scene is MessageScene.GROUP and ctx.extras.get("replies_here") is False:
+            return StageResult(halt=True, reason="group_not_replied")
         return StageResult()
 
 

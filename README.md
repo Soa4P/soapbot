@@ -12,12 +12,15 @@ QQ 群里的 AI 机器人。有人 @ 它，它就用人格卡设定的语气回�
 
 ```text
 dedup → guard → whitelist → wake → strip → sanitize
-      → injection_screen → authorization → command → plugin_cmd → plugin_hook
-      → persist → persona → recall → knowledge → model(+tools) → safety
+      → injection_screen → persist → skip_reply → authorization
+      → command → plugin_cmd → plugin_hook
+      → persona → recall → knowledge → model(+tools) → safety
       → reply → persist_reply → memory_write
 ```
 
-**顺序就是安全边界**：`guard` 必须先于白名单，白名单才能判断「谁在哪儿说话」；`command` 和 `persist` 排在所有准入之后，没权限的人永远碰不到数据库。改顺序等于改安全模型——细节在 [docs/architecture.md](docs/architecture.md)。
+**顺序就是安全边界**：`guard` 必须先于白名单，白名单才能判断「谁在哪儿说话」；`command` 排在准入之后，没权限的人永远碰不到它。改顺序等于改安全模型——细节在 [docs/architecture.md](docs/architecture.md)。
+
+`persist` 特意排在 `skip_reply` 前面：**先记事，再决定要不要开口**。这样「只在 A 群采集、在 B 群回复」才成立——没被 @ 的消息照样进记忆，只是不会得到回复。
 
 ---
 
@@ -47,6 +50,21 @@ python -m soapbot.cli start        # → http://127.0.0.1:6185
 第 07 页填「模型 Key」和「QQ 接入」，两行各点一次「测试」，两个都变绿，回群里发一句话。
 
 不用手改任何 YAML。`config/` 里是模板，首次启动播种到 `data/config`，之后面板改的都是 `data/config` 那一份，所以 `git pull` 不会把你的配置改回去。
+
+### 它只在哪些群说话、在哪些群记事
+
+默认全开：进哪个群就在哪个群回，也把消息记进记忆。想收窄，去**第 12 页 → 群范围**填两行群号：
+
+- **回复群**：只在列出的群回话。留空 = 全都回。
+- **采集群**：只在列出的群存档、写记忆。留空 = 全都记。
+
+两行互相独立，所以可以让它在热闹的大群里只听不说，或者只回某几个群但不记东西。改动写进 `.env`，**重启后生效**。
+
+### 语音是真的能用的
+
+语音转写（把群友的语音变成文字）和语音回复（把回复合成语音发出去）都已经实装，默认关着。在哪开：**第 12 页 → 语音**。
+
+两个开关分别控制「听懂语音」和「用语音回答」，另外可以选音色。合成失败会自动退回文字，不会让整条回复丢掉。它需要系统里有可用的语音合成后端；缺了会在第 12 页直接告诉你缺什么，而不是静默降级。
 
 ### 面板在别的机器上
 
@@ -81,7 +99,7 @@ python -m soapbot.cli token --reset    # 重启服务后生效
 
 ## 面板有 12 页
 
-编号是**稳定标识符**——电话里说「04 页」永远指同一件事，所以只追加不重排。
+编号是固定的，不会因为加了新页面就重排。所以「第 04 页」这个说法可以一直用。
 
 | 页 | 内容 |
 |---|---|
@@ -137,6 +155,10 @@ python -m soapbot.cli token --reset    # 重启服务后生效
 
 | 想看什么 | 去哪 |
 |---|---|
+| 从零接上 QQ：NapCat 怎么起、二维码怎么扫、连不上怎么查 | [docs/qq-napcat-setup.md](docs/qq-napcat-setup.md) |
+| 人格卡怎么写、怎么绑到某个群 | [docs/personas.md](docs/personas.md) |
+| MCP 是什么、要不要开、怎么配 | [docs/mcp.md](docs/mcp.md) |
+| 语音转写与语音回复怎么开 | [docs/configuration.md](docs/configuration.md) 的语音一节 |
 | 架构、模块划分、一条消息走完全程 | [docs/architecture.md](docs/architecture.md) |
 | 每一个环境变量、配置文件、依赖 | [docs/configuration.md](docs/configuration.md) |
 | systemd / 容器 / Windows 计划任务 / 反向代理 / 升级 | [docs/deployment.md](docs/deployment.md) |

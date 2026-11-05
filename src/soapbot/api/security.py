@@ -137,6 +137,13 @@ class AuthorityPatch(BaseModel):
     members: list[str] = []
 
 
+class GroupScopePatch(BaseModel):
+    """Where the bot speaks, and where it learns. Empty list means "everywhere"."""
+
+    reply_groups: list[str] = []
+    memory_collect_groups: list[str] = []
+
+
 def _clean_ids(raw: list[str]) -> list[str]:
     """Normalize, de-duplicate, and require actual account numbers.
 
@@ -188,9 +195,52 @@ async def write_authority(
     admins = _clean_ids(payload.admins)
     members = _clean_ids(payload.members)
 
+    # The first-run owner is re-inserted on every write so the panel can never lock
+    # itself out. It has to happen *before* the conflict check: inserting it afterwards
+    # could put the same account in ``owners`` and ``admins`` — the exact state this
+    # check exists to prevent — and the operator would have no way to fix it, because
+    # that account is not in their payload.
     inherited = normalize_id(settings.first_run_owner)
-    if inherited and inherited not in owners:
-        owners.insert(0, inherited)
+    if inherited:
+        if inherited not in owners:
+            owners.insert(0, inherited)
+        # Owner outranks both, so a stale entry in a lower list is dropped rather than
+        # reported as a conflict the operator cannot resolve.
+        admins = [qq for qq in admins if qq != inherited]
+        members = [qq for qq in members if qq != inherited]
+
+    # One account, one role. Permission resolution takes the highest rank, so a number
+    # in both ``owners`` and ``members`` behaves as owner — but the list then reads as
+    # "this person is a member", and removing them from the lower list appears to do
+    # nothing. The write is refused instead of silently producing a self-contradicting
+    # file.
+    conflicts = sorted(
+        (set(owners) & set(admins))
+        | (set(owners) & set(members))
+        | (set(admins) & set(members))
+    )
+    if conflicts:
+        detail = ", ".join(
+            f"{qq}("
+            + "/".join(
+                name
+                for name, group in (("owner", owners), ("admin", admins), ("member", members))
+                if qq in group
+            )
+            + ")"
+            for qq in conflicts
+        )
+        _get_audit_log().record(
+            kind="authz",
+            action="authority_write",
+            outcome="deny",
+            role=role.value,
+            detail=f"role_conflict {detail}",
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=t("api.authorityRoleConflict", locale, detail=detail),
+        )
 
     if not owners:
         raise HTTPException(status_code=400, detail=t("api.authorityLastOwner", locale))
@@ -225,4 +275,97 @@ async def write_authority(
         "admins": admins,
         "members": members,
         "inherited_owner": inherited,
+    }
+
+
+@router.get("/group-scope")
+async def read_group_scope(request: Request, _: dict = Depends(require_api_auth)) -> dict:
+    """What the *running* process currently uses, not just what the file says.
+
+    Empty means every group, for each list independently — the same rule in the policy,
+    the panel and the docs. ``effective_collect`` is kept as an alias of the collect list
+    so older panel builds do not break, but it no longer inherits from the reply list:
+    that inheritance made narrowing replies silently stop archiving.
+    """
+    from soapbot.config import settings
+
+    reply = list(settings.reply_groups or [])
+    legacy = list(settings.group_allowlist or [])
+    if not reply and legacy:
+        reply = legacy
+    collect = list(settings.memory_collect_groups or [])
+
+    return {
+        "reply_groups": reply,
+        "memory_collect_groups": collect,
+        "effective_collect": collect,
+        "legacy_alias_in_use": bool(legacy and not settings.reply_groups),
+        "reply_scope": "all" if not reply else "listed",
+        "collect_scope": "all" if not collect else "listed",
+    }
+
+
+@router.post("/group-scope")
+async def write_group_scope(
+    payload: GroupScopePatch, request: Request, auth: dict = Depends(require_api_auth)
+) -> dict:
+    """Persist the two lists into ``.env``; the running process picks them up on restart.
+
+    Admin rather than owner: this narrows where the bot is *seen*, it cannot grant
+    anyone a role or open a private channel.
+    """
+    from soapbot.api.settings import _env_path, _rewrite_env
+    from soapbot.core.config_write import write_atomic
+
+    role = _role_of(auth)
+    locale = request_locale(request)
+    if role.rank < Role.ADMIN.rank:
+        _get_audit_log().record(
+            kind="authz",
+            action="group_scope_write",
+            outcome="deny",
+            role=role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(status_code=403, detail=t("api.role_required", locale, role="admin"))
+
+    reply = _clean_ids(payload.reply_groups)
+    collect = _clean_ids(payload.memory_collect_groups)
+
+    # A group that is collected but never replied to is a legitimate combination, so it
+    # is not rejected. A group that is neither cannot be expressed here — it simply stays
+    # out of both lists.
+    updates = {
+        "SOAPBOT_REPLY_GROUPS": ",".join(reply),
+        "SOAPBOT_MEMORY_COLLECT_GROUPS": ",".join(collect),
+    }
+    path = _env_path()
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
+
+    _get_audit_log().record(
+        kind="config",
+        action="group_scope_write",
+        outcome="allow",
+        role=role.value,
+        detail=(
+            f"reply={len(reply)} collect={len(collect)} "
+            f"from={request.client.host if request.client else '-'}"
+        ),
+    )
+    write_atomic(path, _rewrite_env(existing, updates))
+
+    # Same shape as the GET, computed the same way. Reporting `collect or reply` here
+    # while the GET reports only `collect` made the panel show "all groups" right after
+    # saving two groups, and "listed" after a reload.
+    return {
+        "ok": True,
+        "restart_required": True,
+        "reply_groups": reply,
+        "memory_collect_groups": collect,
+        "effective_collect": collect,
+        "reply_scope": "all" if not reply else "listed",
+        "collect_scope": "all" if not collect else "listed",
     }

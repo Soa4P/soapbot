@@ -21,6 +21,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, type NapcatStatus } from '@/api/client'
 import { t } from '@/i18n'
 import { copyText } from '@/lib/clipboard'
+import { refreshWouldDisrupt } from '@/lib/polling'
 
 const state = ref<NapcatStatus | null>(null)
 const error = ref('')
@@ -268,7 +269,11 @@ const statusText = computed(() => {
 onMounted(async () => {
   await refresh()
   // One second would hammer docker on a laptop; three keeps the QR step responsive.
+  // The QR step is exactly where someone is typing a token into another window, so the
+  // shared "would this be disruptive" rule applies here too — a refresh mid-typing used
+  // to repaint the card and drop the caret.
   timer = window.setInterval(() => {
+    if (refreshWouldDisrupt()) return
     void refresh()
   }, 3000)
 })

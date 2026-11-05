@@ -474,7 +474,35 @@ class Settings(BaseSettings):
     """
 
     group_allowlist: IdList = []
-    """Groups the bot will answer in. Empty means "any group it is invited to"."""
+    """Deprecated alias for ``reply_groups``.
+
+    Kept so an existing ``.env`` keeps working after the upgrade. When both are set,
+    ``reply_groups`` wins; ``build_access_policy`` logs once when it falls back.
+    """
+
+    reply_groups: IdList = []
+    """Groups the bot replies in. Empty means every group it is invited to.
+
+    Separately configurable from ``memory_collect_groups`` so an operator can have the
+    bot learn in one set of groups while only speaking in another.
+    """
+
+    memory_collect_groups: IdList = []
+    """Groups whose messages are archived into memory. Empty means every group.
+
+    Archiving used to happen only after the wake check, so an un-mentioned message was
+    never stored. That made "remember this group" impossible to configure: the bot only
+    remembered what it was asked about. This list decouples the two.
+    """
+
+    group_personas: str = ""
+    """Per-group persona cards, ``群号:人格ID`` pairs separated by commas.
+
+    ``PersonaStore.bind_group`` existed but nothing loaded or saved it, so a binding
+    made at runtime vanished on the next restart and there was no way to set one from
+    the panel. Keeping it in ``.env`` reuses the write path the authority lists already
+    use, including the "restart to apply" contract.
+    """
 
     group_blacklist: IdList = []
     """Groups to refuse even if ``group_allowlist`` is empty or contains them."""
@@ -496,6 +524,8 @@ class Settings(BaseSettings):
         "member_ids",
         "private_allowlist",
         "group_allowlist",
+        "reply_groups",
+        "memory_collect_groups",
         "group_blacklist",
         "user_blacklist",
         mode="before",

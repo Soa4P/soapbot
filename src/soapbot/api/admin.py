@@ -346,6 +346,80 @@ async def list_personas(
     }
 
 
+class PersonaBindingPatch(BaseModel):
+    """Which card applies in which group: ``群号:人格ID`` pairs, comma separated.
+
+    A string rather than a map because that is the shape ``.env`` can hold, and the
+    panel's write path goes through ``_rewrite_env`` like every other setting. Keeping
+    one representation avoids a second parser that would accept what the first rejects.
+    """
+
+    group_personas: str = ""
+
+
+@router.post("/personas/binding")
+async def write_persona_binding(
+    payload: PersonaBindingPatch, request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
+    """Persist the per-group bindings; they take effect on the next start.
+
+    Validated against the cards that actually exist before writing. A typo used to be
+    dropped silently at load time, which reads as "the binding does not work" — the
+    person has no way to tell a wrong ID from a broken feature.
+    """
+    from soapbot.api.settings import _env_path, _rewrite_env
+    from soapbot.core.config_write import write_atomic
+    from soapbot.security.principal import Role
+
+    role = _role_of(auth)
+    locale = request_locale(request)
+    if role.rank < Role.ADMIN.rank:
+        raise HTTPException(status_code=403, detail=t("api.role_required", locale, role="admin"))
+
+    raw = payload.group_personas.strip()
+    runtime = _runtime()
+    known = {p.id for p in runtime.personas.all()} if runtime.personas else set()
+
+    pairs: list[str] = []
+    for pair in raw.replace("；", ";").replace(",", ";").split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if ":" not in pair:
+            raise HTTPException(
+                status_code=400, detail=t("api.personaBindingFormat", locale, pair=pair)
+            )
+        group_id, _, persona_id = pair.partition(":")
+        group_id = group_id.strip()
+        persona_id = persona_id.strip()
+        if not group_id.isdigit():
+            raise HTTPException(
+                status_code=400, detail=t("api.personaBindingGroup", locale, pair=pair)
+            )
+        if known and persona_id not in known:
+            raise HTTPException(
+                status_code=400, detail=t("api.personaBindingUnknown", locale, id=persona_id)
+            )
+        pairs.append(f"{group_id}:{persona_id}")
+
+    value = ",".join(pairs)
+    path = _env_path()
+    try:
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
+
+    get_audit_log().record(
+        kind="config",
+        action="persona_binding_write",
+        outcome="allow",
+        role=role.value,
+        detail=f"bindings={len(pairs)}",
+    )
+    write_atomic(path, _rewrite_env(existing, {"SOAPBOT_GROUP_PERSONAS": value}))
+    return {"ok": True, "restart_required": True, "group_personas": value}
+
+
 class PersonaWrite(BaseModel):
     """One persona card, as the panel's editor holds it.
 
