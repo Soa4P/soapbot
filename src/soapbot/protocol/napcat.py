@@ -31,6 +31,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -246,27 +247,94 @@ async def _webui_post(path: str, body: dict[str, Any], *, token: str = "") -> di
     return payload if isinstance(payload, dict) else {"code": 0, "data": payload}
 
 
-async def login_token() -> str:
+#: NapCat's WebUI applies ``loginRate`` (10 in the shipped config) to POST /api/auth/login.
+#: The panel polls every three seconds and BOTH the status and QR routes used to exchange a
+#: fresh credential on every call, so it locked itself out of the WebUI: every login returned
+#: "login rate limit", no credential was ever obtained, and the QR sat on screen stale while
+#: the UI kept promising it would refresh. The credential is a session, not a one-shot nonce,
+#: so caching it is both correct and the only way the polling loop can work.
+_CREDENTIAL_TTL_S = 600.0
+_RATE_LIMIT_BACKOFF_S = 30.0
+_credential_cache: dict[str, Any] = {
+    "value": "",
+    "expires_at": 0.0,
+    "retry_after": 0.0,
+    "last_error": "",
+}
+
+
+def credential_cache_state() -> dict[str, Any]:
+    """Read-only view for diagnostics: never returns the credential itself."""
+    now = time.monotonic()
+    return {
+        "cached": bool(_credential_cache["value"] and now < _credential_cache["expires_at"]),
+        "backoff_remaining": max(0.0, _credential_cache["retry_after"] - now),
+        "last_error": str(_credential_cache["last_error"]),
+    }
+
+
+async def login_token(*, force: bool = False) -> str:
     """Exchange the on-disk WebUI token for a credential, the way NapCat's own UI does.
 
     Not ``{"token": raw}``: the WebUI posts ``sha256(token + ".napcat")`` as ``hash``, and
     the raw token is rejected with "token is empty". This was read out of the bundle NapCat
     ships (``static/assets/*.js``: ``SHA256(t+".napcat").toString()``) and then confirmed
     against a running container — guessing the shape produced exactly that error.
+
+    Cached for ``_CREDENTIAL_TTL_S``. On "login rate limit" the exchange backs off rather
+    than retrying every poll: hammering the endpoint is what caused the lockout in the first
+    place, and a retry storm would keep the WebUI unusable even after the window expires.
     """
+    now = time.monotonic()
+    cache = _credential_cache
+    if not force and cache["value"] and now < cache["expires_at"]:
+        return str(cache["value"])
+    if not force and now < cache["retry_after"]:
+        return ""
+
     raw = webui_token()
     if not raw:
+        cache["last_error"] = "webui-token-missing"
         return ""
     digest = hashlib.sha256(f"{raw}.napcat".encode()).hexdigest()
-    payload = await _webui_post("/api/auth/login", {"hash": digest})
+    try:
+        payload = await _webui_post("/api/auth/login", {"hash": digest})
+    except (httpx.HTTPError, OSError) as exc:
+        cache["last_error"] = f"webui-unreachable: {type(exc).__name__}"
+        return ""
+
+    message = str(payload.get("message") or "")
+    if "rate limit" in message.lower():
+        cache["value"] = ""
+        cache["expires_at"] = 0.0
+        cache["retry_after"] = now + _RATE_LIMIT_BACKOFF_S
+        cache["last_error"] = "webui-rate-limited"
+        logger.warning(
+            "NapCat WebUI login rate limited; backing off %.0fs instead of retrying each poll",
+            _RATE_LIMIT_BACKOFF_S,
+        )
+        return ""
+
     data = payload.get("data") or {}
+    credential = ""
     if isinstance(data, dict):
         for key in ("Credential", "credential"):
             if data.get(key):
-                return str(data[key])
-    if isinstance(data, str):
-        return data
-    return ""
+                credential = str(data[key])
+                break
+    elif isinstance(data, str):
+        credential = data
+
+    if credential:
+        cache["value"] = credential
+        cache["expires_at"] = now + _CREDENTIAL_TTL_S
+        cache["retry_after"] = 0.0
+        cache["last_error"] = ""
+    else:
+        cache["value"] = ""
+        cache["expires_at"] = 0.0
+        cache["last_error"] = message or "webui-login-failed"
+    return credential
 
 
 async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
@@ -284,16 +352,31 @@ async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
     credential = ""
     with contextlib.suppress(httpx.HTTPError, OSError):
         credential = await login_token()
-    if not credential and wait_seconds > 0:
-        await wait_until_ready(wait_seconds)
-        with contextlib.suppress(httpx.HTTPError, OSError):
-            credential = await login_token()
+    if not credential:
+        cache_state = credential_cache_state()
+        # A rate-limited WebUI must be reported immediately, not waited out inside this
+        # request: the card polls, and holding each poll for wait_seconds while backing off
+        # would pile up HTTP requests that all fail for the same reason.
+        if cache_state["last_error"] == "webui-rate-limited":
+            return {
+                "ok": False,
+                "error": "webui-rate-limited",
+                "retry_after": round(cache_state["backoff_remaining"], 1),
+            }
+        if wait_seconds > 0:
+            await wait_until_ready(wait_seconds)
+            with contextlib.suppress(httpx.HTTPError, OSError):
+                credential = await login_token()
     if not credential:
         # Distinguish "still booting" from "booting finished but the login exchange failed".
         # The latter is the state that reads as "准备不好" forever: the WebUI answers, the
         # token is there, and still no credential — a stale NapCat process, fixed by restart.
         if webui_reachable():
-            return {"ok": False, "error": "webui-login-failed"}
+            return {
+                "ok": False,
+                "error": "webui-login-failed",
+                "detail": credential_cache_state()["last_error"],
+            }
         return {"ok": False, "error": "webui-not-ready"}
 
     try:
