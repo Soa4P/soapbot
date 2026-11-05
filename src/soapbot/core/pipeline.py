@@ -29,6 +29,7 @@ from typing import Any
 from soapbot.core.adapter import Adapter
 from soapbot.core.message import IncomingMessage, OutgoingMessage
 from soapbot.i18n import DEFAULT_LOCALE
+from soapbot.net import reset_trace_id, set_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,18 @@ class Pipeline:
         self._observers.append(fn)
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
+        # Bind the message's trace id for the duration of the run so every outbound
+        # request made on its behalf carries it as ``X-Request-Id``. Bound here rather
+        # than in each stage because this is the one place every message passes
+        # through, and a provider call made from a stage that forgot to bind would
+        # otherwise be untraceable — which is exactly the bug being fixed.
+        token = set_trace_id(ctx.event.trace_id)
+        try:
+            return await self._run_stages(ctx)
+        finally:
+            reset_trace_id(token)
+
+    async def _run_stages(self, ctx: PipelineContext) -> PipelineContext:
         for stage in self.stages:
             t0 = time.perf_counter()
             try:
