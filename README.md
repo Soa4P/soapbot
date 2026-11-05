@@ -111,11 +111,14 @@ python -m soapbot.cli setup
 
 ```bash
 # 4. 首次登录
-# 引导令牌写在 data/init_token.txt（权限 0600）。本机访问面板无需令牌；
-# 远程访问必须先换取访问令牌：
+# 引导令牌写在 data/init_token.txt（权限 0600）。未使用前重启服务不会改变它；
+# 兑换后文件会被删除，磁盘上不留凭据。本机访问面板无需令牌；远程访问必须先换取：
 curl -X POST http://127.0.0.1:6185/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"init_token": "<文件中的值>"}'
+
+# 忘记/用过了？在服务器本机重新发一枚（重启服务才生效）：
+#   soapbot token --reset
 ```
 
 ```bash
@@ -231,7 +234,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1267 项通过 / 10 项跳过）
+└── tests/              # pytest（1284 项通过 / 10 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
