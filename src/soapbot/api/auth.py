@@ -318,8 +318,12 @@ async def auth_status(request: Request) -> dict:
         "subject": subject,
         "expires_at": expires_at,
         "loopback": is_loopback(request),
-        "login_available": bool(bootstrap is not None and not bootstrap.consumed),
+        "login_available": bool(bootstrap is not None and bootstrap.available),
         "init_token_generated": bool(bootstrap is not None and bootstrap.generated),
+        # The panel used to say only "login_available: false", which gave no way to
+        # distinguish "wrong token typed" from "spent, and a restart will NOT mint a
+        # new one". The operator needs the latter state to know the recovery command.
+        "bootstrap_state": bootstrap.state if bootstrap is not None else "uninitialised",
         "ttl_seconds": _token_service.ttl_seconds if _token_service else 0,
     }
 

@@ -23,7 +23,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("version", help="print version")
 
-    sub.add_parser("token", help="print the one-time bootstrap login token")
+    p_token = sub.add_parser("token", help="print the one-time bootstrap login token")
+    p_token.add_argument(
+        "--reset",
+        action="store_true",
+        help="mint a new bootstrap token (the only way in after the old one was used)",
+    )
 
     p_doctor = sub.add_parser(
         "doctor", help="check deployment security posture"
@@ -85,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "token":
-        return _run_token()
+        return _run_token(reset=args.reset)
 
     if args.cmd == "doctor":
         return _run_doctor(args)
@@ -112,23 +117,18 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _run_token() -> int:
-    """Print the bootstrap token from ``<data>/init_token.txt``.
+def _run_token(*, reset: bool = False) -> int:
+    """Print the bootstrap token from ``<data>/init_token.txt``, or mint a new one.
 
-    ``.env.example`` promised this command ("``soapbot token`` reprints it") while the
-    parser had no such subcommand, so the one documented recovery path for a lost login
-    token was a dead end. Adding the command is the smaller change than rewriting the
-    documentation, and the file already exists — it is written mode 0600 on first start.
-
-    The file is a *bootstrap* credential, not a session token, and it is single-use:
-    once redeemed, the in-memory copy is marked consumed and the file is left behind,
-    stale. So this command prints the value **and** says which state it is in, rather
-    than letting someone paste a dead token into the login form and conclude the
-    service is broken. Detecting "already consumed" reliably is not possible from
-    outside the running process (the flag is in memory), so the honest thing is to
-    state that the file may be stale and how to reset it.
+    The file is now the authority, not the running process: an unredeemed token is
+    reused across restarts, and redeeming it deletes the file and leaves a
+    ``init_token.redeemed`` marker. That makes "file missing" an unambiguous state —
+    either first start or already spent — which the old in-memory-only design could
+    never answer. The old hint ("delete the file and restart") was also wrong: every
+    restart silently regenerated the token whether or not the file was deleted.
     """
     from soapbot.config import settings
+    from soapbot.security.tokens import BOOTSTRAP_REDEEMED, reset_bootstrap
 
     # Match ``doctor``: the console encoding on Windows is cp936 by default, and a
     # Chinese hint written to stderr with ``errors="strict"`` either raises or renders
@@ -137,17 +137,40 @@ def _run_token() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-    path = settings.data_dir / "init_token.txt"
-    if not path.is_file():
+    data_dir = settings.data_dir
+    path = data_dir / "init_token.txt"
+    marker = data_dir / BOOTSTRAP_REDEEMED
+
+    if reset:
+        token = reset_bootstrap(data_dir)
+        print(token)
         print(
-            f"没有找到引导令牌文件：{path}\n"
-            "\n"
-            "可能的原因：\n"
-            "  · 服务还没启动过（该文件在首次启动时生成）\n"
-            "  · 已通过 SOAPBOT_INIT_TOKEN 自行指定了令牌，此时不会写文件\n"
-            "  · 使用了不同的 SOAPBOT_DATA_DIR\n",
+            "\n已生成新的引导令牌。"
+            "正在运行的服务仍持有旧的内存对象，必须重启服务后新令牌才生效。\n"
+            "  POST /api/auth/login  用它换取访问令牌；兑换后文件会被删除。",
             file=sys.stderr,
         )
+        return 0
+
+    if not path.is_file():
+        if marker.exists():
+            print(
+                "引导令牌已经用过，文件已删除。重启服务不会再自动生成新的令牌。\n"
+                "重新获得入口（需要在服务器本机执行）：\n"
+                "  soapbot token --reset\n"
+                "然后重启服务。",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"没有找到引导令牌文件：{path}\n"
+                "\n"
+                "可能的原因：\n"
+                "  · 服务还没启动过（该文件在首次启动时生成）\n"
+                "  · 已通过 SOAPBOT_INIT_TOKEN 自行指定了令牌，此时不会写文件\n"
+                "  · 使用了不同的 SOAPBOT_DATA_DIR\n",
+                file=sys.stderr,
+            )
         return 1
 
     try:
@@ -157,7 +180,10 @@ def _run_token() -> int:
         return 1
 
     if not token:
-        print(f"{path} 是空文件；删除它并重启服务可重新生成。", file=sys.stderr)
+        print(
+            f"{path} 是空文件；执行 soapbot token --reset 可重新生成。",
+            file=sys.stderr,
+        )
         return 1
 
     print(token)
@@ -168,8 +194,8 @@ def _run_token() -> int:
         '    -H "Content-Type: application/json" \\\n'
         f'    -d \'{{"init_token": "{token[:4]}…"}}\'\n'
         "\n"
-        "如果登录返回 401，说明该令牌已被消费过（文件不会自动删除，仍留在磁盘上）。\n"
-        "重置方法：删除该文件并重启服务。",
+        "未使用前，重启服务不会改变这个值；兑换后文件会被删除，磁盘上不留凭据。\n"
+        "如果登录返回 401，说明它已被用过：执行 soapbot token --reset 并重启服务。",
         file=sys.stderr,
     )
     return 0

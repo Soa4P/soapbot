@@ -367,7 +367,7 @@ def _print_next_steps(interactive: bool) -> None:
     print("== 下一步 ==")
     print("1. 启动服务：soapbot start")
     print(f"2. 打开面板：{url}")
-    print("3. 登录令牌：soapbot token  # 一次性凭据，登录后即失效")
+    print("3. 登录令牌：soapbot token  # 一次性凭据；未用前重启不变，用后需 --reset")
     print("4. 改动需要重启进程才生效（配置在启动时读取）。")
     if interactive:
         print("\n提示：面板的「测试」按钮可以在保存前验证地址是否可达，不必反复重启试错。")
