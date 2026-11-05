@@ -21,6 +21,7 @@ from soapbot.providers.base import (
     ChatResponse,
     ProviderConfig,
     ProviderError,
+    retry_after_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,12 +67,22 @@ class AnthropicProvider(BaseProvider):
         payload.update(request.extra)
 
         url = f"{self._base}/messages"
-        try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                resp = await client.post(url, json=payload, headers=self._headers())
+        headers = self._headers()
+
+        async def attempt() -> dict[str, Any]:
+            resp = await self._request("POST", url, json=payload, headers=headers)
             if resp.status_code >= 400:
-                raise ProviderError(f"anthropic HTTP {resp.status_code}: {resp.text[:400]}")
-            data = resp.json()
+                raise ProviderError(
+                    f"anthropic HTTP {resp.status_code}: {resp.text[:400]}",
+                    status=resp.status_code,
+                    retry_after=retry_after_of(resp),
+                )
+            return resp.json()
+
+        try:
+            data = await self._with_retry(attempt, what="chat")
+        except ProviderError:
+            raise
         except httpx.HTTPError as exc:
             raise ProviderError(f"anthropic request failed: {exc}") from exc
 
