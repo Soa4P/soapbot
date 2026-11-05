@@ -75,6 +75,11 @@ jobs:
       - name: Accessibility (static rules)
         run: python scripts/check_a11y.py
 
+      - name: Doc links
+        # Splitting README into docs/ broke four links in one commit; a dead link is
+        # invisible until somebody clicks it.
+        run: python scripts/check_doc_links.py
+
       - name: Test gaps
         # Two static rules: modules no test names, and a "N passed" in prose that
         # disagrees with the board. Deliberately not coverage — see the script header.
@@ -132,6 +137,21 @@ jobs:
 
       - name: Type check
         run: cd webui && npm run typecheck
+
+      # The panel is a static bundle: a bad translation key or a route that does not
+      # exist type-checks and builds cleanly, then shows the operator a raw key or a
+      # 404. Both shipped that way, so both are now build failures.
+      - name: Translation keys
+        run: cd webui && npm run check:i18n
+
+      - name: API paths exist
+        run: cd webui && npm run check:api
+
+      - name: Lint
+        run: cd webui && npm run lint
+
+      - name: Unit tests
+        run: cd webui && npm test
 
       - name: Build panel
         run: cd webui && npm run build

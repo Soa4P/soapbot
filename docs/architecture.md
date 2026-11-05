@@ -193,3 +193,153 @@
 6. `security/principal.py` → 权限从哪来（只有配置）
 7. `plugins/loader.py` + `plugins/approvals.py` → 插件生命周期
 8. `plugins/dispatch.py` → 插件如何被调用
+
+---
+
+## 附录：模块一览与一条消息的旅程
+
+> 原来放在 `README.md`，因为篇幅挪到这里。正文回答「为什么这样分层」，这部分回答「代码在哪」和「消息怎么走」。
+
+### 模块一览
+
+```text
+soapbot/
+├── src/soapbot/
+│   ├── core/           # 编排层：消息模型、适配器契约、流水线、运行时、调度器
+│   ├── adapters/       # 接入层：OneBot v11、QQ 官方、mock（测试用协议端）
+│   ├── providers/      # 模型层：能力槽、OpenAI 兼容实现、故障转移路由
+│   ├── ai/             # 智能层：人格卡、上下文压缩、视觉、引擎、AI Stage
+│   ├── memory/         # 数据层：消息归档、三层记忆、知识库、检索、命令 Stage
+│   ├── security/       # 防护层：主体与权限、审计、注入防护、密钥、令牌
+│   ├── plugins/        # 扩展层：清单、沙箱、加载器、进程隔离、命令/工具分发
+│   ├── budget/         # 可选：额度账本与二次审批
+│   ├── bilibili/       # 可选：公开元数据、wbi 签名、观后感
+│   ├── api/            # 对外：FastAPI 路由（鉴权 / 管理 / 插件 / B 站 / 安全 / 配置写入 / 流水线）
+│   ├── examples/       # 随包发布的示例插件（不是内置功能，仍需批准）
+│   └── webui/dist/     # 前端构建产物（随 wheel 发布）
+├── webui/              # 前端源码（Vite + Vue 3 + TypeScript）
+├── config/             # **模板**（providers/adapters/mcp/personas），首次启动播种到 data/config，之后不再读它
+├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录，以及 data/config（面板真正编辑的那份，gitignore）
+├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
+├── docs/               # 设计记录、安全模型、交付评估
+├── scripts/            # check_deps.py 等仓库工具
+└── tests/              # pytest（1290 项通过 / 10 项跳过）
+```
+
+### 各模块的功能定位与实现要点
+
+**`core/` — 编排层**
+
+| 文件 | 功能定位 | 实现要点 |
+|---|---|---|
+| `message.py` | 跨平台统一消息模型 | `MessageSegment` 是最小单位（text/image/at/reply/face/record/file/forward）；`transport_authenticated` 默认 `True` 仅因为是进程内构造，网络适配器必须显式设置 |
+| `adapter.py` | 适配器契约 + 能力协商 | 能力集声明式（`Capability`），不支持的分段在 `degrade()` 里降级为文字而不是让整条回复失败；群管动作有默认实现，声明了却没实现会返回明确失败而非 `AttributeError` |
+| `pipeline.py` | Stage 链执行器 | `StageResult(halt=True, reason=...)` 终止并记录原因；`PipelineContext` 承载事件、适配器、回复、`extras` 与 token 用量 |
+| `stages.py` | 准入类 Stage | `AccessPolicy`（群空=全开、私聊空=全关的不对称是有意的）、`WakePolicy`、`StripWakeWordStage`、`DedupStage`、`ReplyStage` |
+| `builder.py` | 唯一装配点 | `build_pipeline` / `build_runtime` / `build_plugin_manager`。测试与生产走同一条装配路径，否则「测试通过」不说明部署可用 |
+| `runtime.py` | 适配器 ↔ 流水线 | 按会话加锁保证同群串行；`NOTICE` 事件绕过流水线直接分发（通知不需要准入判断）；插件发消息只给 `session_key`，由运行时决定目标 |
+| `scheduler.py` | 周期任务 | 插件 cron、过期额度清扫、保留位回收 |
+| `config_files.py` | 配置加载 | YAML 严格解析，引用了未设置的 `env:` 变量时**启动失败**——带着空 key 运行会变成一串 401 并被归咎于上游 |
+
+**`adapters/` — 接入层**
+
+- `onebot11.py`：WebSocket 客户端 + 动作调用。事件覆盖 `message` / `notice` /
+  `meta_event`；API 响应用 `echo` 关联 Future。**注意**：`emit` 用 `create_task`
+  派发而不内联等待，否则 `send()` 等待回执时会与自己的读循环死锁。
+- `qq_official.py`：群聊 + 私聊（C2C），无频道。`split_leading_at` 返回
+  `(是否 @了机器人, 正文)`——只返回正文会导致「消息被正确 @ 却完全不应答」。
+- `mock_onebot.py`：真实 socket 的模拟协议端，让端到端测试不必依赖外部程序。
+
+**`providers/` — 模型层**
+
+- `base.py`：`CapabilitySlot` 四槽（chat/stream/vision/embed）。一个 Provider 只声明
+  自己真的实现的能力，路由据此选，而不是假设所有端点都能干所有事。
+- `openai_compat.py`：httpx 直连，含 `tools` 与多模态 parts 序列化。
+- `router.py`：按优先级故障转移 + 冷却窗口。失败一次的上游不会在下一秒被反复重试。
+
+**`ai/` — 智能层**
+
+- `persona.py`：人格卡加载、群/用户绑定解析、`build_system_prompt`。
+- `compressor.py`：分层压缩（折叠轮次 → 摘要），保底 token 预算。
+- `vision.py`：图片预处理与描述缓存（按内容哈希），历史重放不再重复付费。
+- `engine.py`：把人格、历史、记忆、知识、图片编成一次请求；工具结果以不可信数据块
+  回灌。
+- `stages.py`：`PersonaStage` / `ModelStage`（含有界工具循环）/ `SafetyStage`
+  （不可见字符清理、提示词泄漏标记、canary 复述检测、凭据脱敏、字数截断）。
+
+**`memory/` — 数据层**
+
+- `db.py`：SQLAlchemy 异步 + SQLite；向量以 BLOB 存储，numpy 暴力余弦——单群语料是
+  几千行，不是几百万行，可用性优先于理论最优。
+- `store.py`：`archive_message`（只追加）、`history`（带摘要拼接）、`recall`
+  （FTS5 与向量双路融合 + RRF）、`KnowledgeBase`（`ingest_document` 覆盖语义）。
+- `extractor.py` / `stages.py`：记忆抽取、`PersistStage`、`RecallStage`、
+  `KnowledgeStage`、以及全部斜杠命令（含群管）。
+
+**`security/` — 防护层**
+
+- `principal.py`：`Role` / `Permission` / `AuthorityConfig`。权限表只从配置来，
+  聊天内容不能增加权限。读与写、审批与查看、配置与群管都是**分开的**权限。
+- `stages.py`：`GuardStage`（建身份）、`InjectionScreenStage`、`AuthorizationStage`。
+- `injection.py`：不可信内容边界标记 + canary；记忆入库前 `vet_memory`。
+- `audit.py`：有界环形审计日志，细节脱敏（插件异常只记类型，不记消息）。
+- `crypto.py` / `tokens.py` / `files.py`：Fernet 主密钥、JWT、私密文件写入。
+
+**`plugins/` — 扩展层**
+
+- `manifest.py`：清单校验。名称/入口/依赖/能力全部是攻击者可控文本，逐项校验后才
+  触碰文件系统与 import 机制。
+- `sandbox.py`：`CapabilityGrant`（冻结）+ `CapabilityGuard`（密封）。冻结是因为
+  「是否允许 HTTP」的答案不能在授权后被改；密封是因为 guard 若能写就等于自我提权。
+- `loader.py`：发现 → 批准 → 加载三步分离；`load_approved()` 只加载**有持久批准记录**
+  的插件。
+- `approvals.py`：批准记录持久化（原子写入、单文件）。与清单分开存放，因为清单由插件
+  作者写、批准由运维写——插件更新不能把自己的授权带过来。
+- `supervisor.py` / `isolation.py` / `worker.py`：子进程隔离。宿主侧保留命令表，
+  worker 只上报名字；否则 worker 可以注册 `/forget` 顶掉核心命令。
+- `dispatch.py`：`PluginCommandStage`、`PluginMessageHookStage`、`PluginToolRegistry`、
+  `dispatch_notice`、`PluginCronRunner`。工具可见性按角色**过滤**而非「列出再拒绝」。
+
+**`budget/`、`bilibili/` — 可选能力**
+
+- `budget/`：整数最小单位记账（浮点会让配额漂移）、保留位、二次审批（不能批准自己
+  发起的申请）。
+- `bilibili/`：L1 免签名 / L2 wbi 签名（有固定向量测试）/ L3 显式拒绝而非静默降级；
+  短链不跟随跳转、固定 UA、限速。
+
+**`api/` — 对外接口**
+
+鉴权（`auth.py`）、管理只读视图 + 知识库写入（`admin.py`）、插件管理
+（`plugins.py`）、B 站（`bilibili.py`）、安全审计（`security.py`）。
+除知识库内容外，配置类写入一律不做——见 `admin.py` 模块注释里的取舍说明。
+
+---
+
+### 一条消息的完整旅程
+
+以群里有个人 @机器人 说「这张图里是什么」为例：
+
+1. `adapters/onebot11.py` 收到 WebSocket 帧，转成 `IncomingMessage`
+   （AT 段 + 文字段 + 图片段），`emit` 派发。
+2. `BotRuntime._on_event` 按 `session_key` 加锁，进入 `Pipeline`。
+3. `DedupStage` 丢掉重复投递；`GuardStage` 解析出 `Principal`（角色只来自配置）。
+4. `WhitelistStage` 判断这个群是否允许（空名单 = 全开）。
+5. `WakeStage` 看到 AT 段指向自己 → 通过，记录 `wake_reason=at`。
+6. `StripWakeWordStage` 去掉 AT 段与唤醒词；`SanitizeStage` 去控制字符。
+7. `InjectionScreenStage` 检查越权指令；`AuthorizationStage` 确认能聊天。
+8. `CommandStage` / 插件命令 / 插件钩子：不是命令，继续。
+9. `PersistStage` 归档这条消息（模型调用失败也要留下，否则历史有洞）。
+10. `PersonaStage` 按群 + 用户解析人格卡；`RecallStage` 检索记忆；
+    `KnowledgeStage` 检索知识库——两者都以**不可信数据块**注入系统提示。
+11. `ModelStage`：语音段先转写（转写文本**同样过注入筛查**——嘴说出来的不是可信输入），
+    图片按内容哈希查缓存，未命中才调用视觉模型；随后带工具列表请求主模型；
+    若模型要求调用工具，执行后把结果作为不可信数据块回灌，最多两轮。
+    开了 `STREAM_REPLY` 且没有工具待调用时，改为边生成边按句发送。
+12. `SafetyStage`：清理不可见字符、拦截提示词泄漏、检测 canary 复述、
+    脱敏疑似凭据、按人格卡截断。
+13. `ReplyStage` 通过适配器 `degrade()` 降级不支持的段落后发送；开了
+    `VOICE_TTS_ENABLED` 时先合成为语音，失败或过长则回退为文本。
+14. `PersistReplyStage` 归档回复；`MemoryWriteStage` 异步抽取值得记住的事实。
+
+任何一步都可以 `StageResult(halt=True, reason="...")` 终止——终止原因会进指标和审计，
+这是排查「机器人为什么不回我」的第一手材料。

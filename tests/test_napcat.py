@@ -214,6 +214,29 @@ def test_a_new_url_resets_the_stale_tracking(monkeypatch) -> None:
     assert fresh["url"].endswith("BBB")
 
 
+def test_a_logged_in_qq_is_not_reported_as_a_qr_failure(monkeypatch) -> None:
+    """NapCat answers the QR request with "QQ Is Logined" once a scan succeeds.
+
+    That is the success state for this screen. It used to fall through to
+    ``no-qrcode``, which the panel rendered as "could not fetch the QR" — an error
+    banner at the exact moment everything started working.
+    """
+
+    async def fake_post(path: str, body: dict, *, token: str = "") -> dict:
+        if path == "/api/auth/login":
+            return {"code": 0, "data": {"Credential": "c"}}
+        return {"code": -1, "message": "QQ Is Logined"}
+
+    monkeypatch.setattr(napcat, "_webui_post", fake_post)
+    monkeypatch.setattr(napcat, "webui_token", lambda: "t")
+
+    import asyncio
+
+    result = asyncio.run(napcat.qr_code(wait_seconds=0))
+    assert result["ok"] is False
+    assert result["error"] == "already-logged-in"
+
+
 def test_unauthorized_after_a_napcat_restart_re_logs_in_once(monkeypatch) -> None:
     """A cached WebUI session dies with NapCat; retry with a fresh credential."""
     calls: list[str] = []

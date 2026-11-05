@@ -415,8 +415,16 @@ async def qr_code(wait_seconds: float = 0.0) -> dict[str, Any]:
     data = payload.get("data")
     url = str(data.get("qrcode") or data.get("qrcodeurl") or "") if isinstance(data, dict) else ""
     if not url:
-        if str(payload.get("message") or "").lower() == "unauthorized":
+        message = str(payload.get("message") or "")
+        lowered = message.lower()
+        if lowered == "unauthorized":
             return {"ok": False, "error": "webui-login-failed", "detail": "session-invalidated"}
+        # A logged-in QQ is the success state for this screen, not a failure. NapCat
+        # answers the QR request with {"code": -1, "message": "QQ Is Logined"} once a
+        # scan has completed, and the panel used to render that as "could not fetch the
+        # QR" — an error banner at the exact moment everything started working.
+        if "is logined" in lowered or "is logged in" in lowered:
+            return {"ok": False, "error": "already-logged-in"}
         return {"ok": False, "error": "no-qrcode", "detail": json.dumps(payload)[:300]}
 
     now = time.monotonic()

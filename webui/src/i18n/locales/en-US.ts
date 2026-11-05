@@ -4,8 +4,6 @@
  */
 export default {
   'app.console': 'Console',
-  'app.refresh': 'Refresh',
-  'app.refreshing': 'Refreshing…',
   'app.health.online': 'API online',
   'app.health.unreachable': 'API unreachable',
   'app.health.connecting': 'Connecting',
@@ -13,8 +11,6 @@ export default {
   'app.auth.loopback': 'Local',
   'app.auth.invalid': 'Token expired',
   'app.auth.none': 'Not signed in',
-  'app.footer.schema': 'schema',
-  'app.footer.version': 'version',
 
   'nav.01': 'Overview',
   'nav.02': 'Runtime',
@@ -74,6 +70,7 @@ export default {
 
   // ---------------------------------------------------------------- shared
   'common.all': 'All',
+  'common.copyFailed': 'This browser blocks automatic copying — select and copy this text by hand: {value}',
   'common.status': 'Status',
   'common.name': 'Name',
   'common.time': 'Time',
@@ -530,8 +527,6 @@ export default {
   'config.mcpEdit': 'Edit',
   'config.mcpClose': 'Collapse',
   'config.mcpDelete': 'Delete',
-  'config.mcpDeleteTitle': 'Delete MCP server',
-  'config.mcpDeleteDetail': 'Removes {name} from mcp.yaml and stops its process. Its tools disappear from what the model can see immediately.',
   'config.mcpConnected': 'Connected · {n} tools',
   'config.mcpNoTools': 'Connected · 0 tools',
   'config.mcpFailed': 'Failed to start',
@@ -560,6 +555,7 @@ export default {
   'login.resetHint': 'Restart the service afterwards; restarting alone does not mint a new one.',
   'login.copy': 'Copy',
   'login.copied': 'Copied',
+  'login.copyFailed': 'This browser blocks automatic copying — select and copy this text by hand: {value}',
   'login.detail': 'Written to data/init_token.txt on first start; restarting does not change it until it is used. If SOAPBOT_INIT_TOKEN is set, that value is used instead.',
   'login.label': 'Bootstrap token',
   'login.checking': 'Checking…',
@@ -635,6 +631,8 @@ export default {
   'napcat.tokenLabel': "NapCat WebUI token (read automatically; the button opens with it attached):",
   'napcat.tokenCopy': 'Copy',
   'napcat.tokenCopied': 'Copied',
+  'napcat.tokenCopyFailed':
+    'This browser blocks automatic copying — select and copy this token by hand: {token}',
   'napcat.qrHint': 'Scan with mobile QQ. This code is short-lived; the timestamp below shows when it was last refreshed, and a new one is fetched automatically (or click Refresh now). If QQ warns about an unusual sign-in location, confirm it is you.',
   'napcat.qrAge': 'This QR was refreshed {seconds}s ago; a new one is fetched every {ttl}s.',
   'napcat.qrRefreshNow': 'Refresh now',
@@ -658,12 +656,9 @@ export default {
   'napcat.restarting': 'Restarting… the page will come back in a few seconds.',
   'napcat.restartManual':
     'This process is not supervised by systemd or a container, so it cannot restart itself. On the host run: systemctl restart soapbot (Linux), docker restart <name> (container), or schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (Windows scheduled task).',
-  'napcat.loginFailed':
-    "NapCat's WebUI answers but refused the login — its process is likely stuck. Restart NapCat on the host (schtasks /End /TN NapCat && schtasks /Run /TN NapCat), then try again in a few seconds.",
-
+  'scan.scanning': 'Scanning…',
   // ------------------------------------------------------ find the local protocol end
   'scan.button': 'Scan this machine',
-  'scan.scanning': 'Scanning…',
   'scan.hint':
     'Use this when the panel and NapCat run on the same machine: it finds the port NapCat opened for you.',
   'scan.failed': 'scan failed: {reason}',
@@ -719,7 +714,6 @@ export default {
     'reverse only: address this service listens on. 127.0.0.1 = local connections only; 0.0.0.0 = also accept other machines',
   'adapters.hint.port':
     'reverse only: port this service listens on — this is what the "WebSocket client" in NapCat connects to',
-  'adapters.hint.token': 'must match on both sides; empty on both = no token check',
   'adapters.hint.tokenKnown':
     "The NapCat on this host uses \"{token}\" for this OneBot server; it is filled in already — just keep both sides equal.",
   'adapters.hint.tokenEmpty':

@@ -44,9 +44,11 @@ export function setToken(token: string): void {
     if (token) localStorage.setItem(TOKEN_KEY, token)
     else localStorage.removeItem(TOKEN_KEY)
   } catch {
-    /* private mode: the session simply will not survive a reload */
+    // Private mode: the session will not survive a reload. Nothing to recover — the
+    // token is already in memory and every request reads it from there.
+    return
   }
-}
+  }
 
 export function clearToken(): void {
   setToken('')
@@ -99,7 +101,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (typeof body?.detail === 'string') detail = body.detail
       else if (Array.isArray(body?.detail)) detail = body.detail.map((d: any) => d.msg).join('; ')
     } catch {
-      /* non-JSON error body: keep the status line */
+      // A non-JSON body (a proxy's HTML error page, an empty 502) keeps the status line
+      // above. That fallback is the point, so there is nothing else to do here.
+      detail = detail || `HTTP ${response.status}`
     }
     throw new ApiError(response.status, detail)
   }
@@ -208,9 +212,13 @@ export const api = {
     ),
   /** The QR **URL** (not an image — that is what NapCat returns). 409 = not ready yet. */
   napcatQr: () =>
-    request<{ ok: boolean; url: string; age_seconds?: number; stale?: boolean }>(
-      '/api/protocol/napcat/qr',
-    ),
+    request<{
+      ok: boolean
+      url?: string
+      age_seconds?: number
+      stale?: boolean
+      error?: string
+    }>('/api/protocol/napcat/qr'),
 
   /**
    * Look for a protocol end on this machine (loopback only, fixed candidate ports).

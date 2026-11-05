@@ -20,6 +20,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { api, type NapcatStatus } from '@/api/client'
 import { t } from '@/i18n'
+import { copyText } from '@/lib/clipboard'
 
 const state = ref<NapcatStatus | null>(null)
 const error = ref('')
@@ -56,6 +57,10 @@ function renderQr(url: string): string {
  * WebUI: each QR call used to drive a fresh /api/auth/login, and NapCat rate-limits that
  * endpoint (loginRate=10). Three-second polling locked the panel out of its own WebUI. */
 const QR_TTL_MS = 60_000
+/** How long to wait before asking again when the code cannot change by itself.
+ * NapCat stops minting new QR codes after one expires; re-asking every 3 seconds only
+ * adds load without ever producing a different URL. */
+const QR_STALE_RETRY_MS = 30_000
 const QR_RETRY_MS = 5_000
 
 function describeQrFailure(reason: string): string {
@@ -71,7 +76,17 @@ async function fetchQr(): Promise<void> {
   qrInFlight = true
   try {
     const body = await api.napcatQr()
-    if (!body.url) throw new Error('no-qrcode')
+    if (body.error === 'already-logged-in') {
+      // Not a failure: the scan completed while this poll was in flight. Clear the
+      // picture instead of painting an error over a success.
+      qrSvg.value = ''
+      qrFetchedAt.value = 0
+      qrAgeSeconds.value = 0
+      qrError.value = ''
+      qrNextAttemptAt.value = 0
+      return
+    }
+    if (!body.url) throw new Error(body.error ?? 'no-qrcode')
     qrSvg.value = renderQr(body.url)
     // NapCat can answer 200 with the very same URL for hours after its QR expired
     // (coreReady=false, ErrCode 10). The backend flags that; show it instead of claiming
@@ -79,7 +94,9 @@ async function fetchQr(): Promise<void> {
     qrFetchedAt.value = Date.now() - (body.age_seconds ?? 0) * 1000
     qrAgeSeconds.value = Math.floor(body.age_seconds ?? 0)
     qrError.value = body.stale ? t('napcat.qrStale') : ''
-    qrNextAttemptAt.value = 0
+    // A stale code will stay stale on the next tick — NapCat is not minting new ones —
+    // so back off. Resetting this to 0 made the 3s poller re-ask forever.
+    qrNextAttemptAt.value = body.stale ? Date.now() + QR_STALE_RETRY_MS : 0
   } catch (err) {
     // Do NOT swallow this. The old `catch { /* keep polling */ }` left a stale picture on
     // screen with a caption claiming it would refresh, which is why nobody could log in.
@@ -206,19 +223,20 @@ async function restart(): Promise<void> {
 /** Open NapCat's WebUI *with its token*: without it the page is a login form asking for a
  * secret that lives in a log the operator has never read. */
 const tokenCopied = ref(false)
+const tokenCopyFailed = ref('')
 
 async function copyToken(): Promise<void> {
   const token = state.value?.webui_token ?? ''
   if (!token) return
-  try {
-    await navigator.clipboard.writeText(token)
+  tokenCopyFailed.value = ''
+  if (await copyText(token)) {
     tokenCopied.value = true
     window.setTimeout(() => {
       tokenCopied.value = false
     }, 2000)
-  } catch {
-    /* clipboard needs a secure context; the token is on screen to select manually */
+    return
   }
+  tokenCopyFailed.value = t('napcat.tokenCopyFailed', { token })
 }
 
 function openWebui(): void {
@@ -305,7 +323,11 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- Generated locally from NapCat's login URL, so no third party ever sees the token. -->
+    <!-- `v-html` is safe here by construction: the string is produced by
+         qrcode-generator's `createSvgTag` from a URL we fetched ourselves, never from
+         user input or a server response body. Drawing it locally is also the point —
+         sending the login URL to an image service would leak a live credential. -->
+    <!-- eslint-disable-next-line vue/no-v-html -->
     <div v-if="qrSvg" class="napcat__qr" v-html="qrSvg" />
     <p v-if="qrSvg" class="muted">{{ t('napcat.qrHint') }}</p>
 
@@ -334,6 +356,7 @@ onBeforeUnmount(() => {
         {{ tokenCopied ? t('napcat.tokenCopied') : t('napcat.tokenCopy') }}
       </button>
     </div>
+    <p v-if="tokenCopyFailed" class="warn-banner" role="alert">{{ tokenCopyFailed }}</p>
     <p v-if="connectNote" class="muted">{{ connectNote }}</p>
     <p v-if="error" class="muted">{{ error }}</p>
   </section>

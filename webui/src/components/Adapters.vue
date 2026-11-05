@@ -13,6 +13,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api, type AdapterProbeResult, type ScanEntry } from '@/api/client'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
+import { copyText } from '@/lib/clipboard'
 
 interface Draft {
   kind: string
@@ -205,17 +206,16 @@ function peerTarget(draft: Draft): string {
 async function copyTarget(draft: Draft, index: number): Promise<void> {
   const text = peerTarget(draft)
   copyError.value = ''
-  try {
-    await navigator.clipboard.writeText(text)
+  // copyText handles the plain-HTTP case with a selection fallback; only a real failure
+  // reaches the error path, and it names the value so it can be copied by hand.
+  if (await copyText(text)) {
     copied.value = { ...copied.value, [index]: true }
     window.setTimeout(() => {
       copied.value = { ...copied.value, [index]: false }
     }, 2000)
-  } catch {
-    // Clipboard access needs a secure context; over plain HTTP on a LAN address it is
-    // refused, and silently failing would look like nothing happened.
-    copyError.value = t('adapters.copyFailed', { text })
+    return
   }
+  copyError.value = t('adapters.copyFailed', { text })
 }
 
 /** The paste-into-NapCat line only means something for OneBot. A QQ-official adapter is
