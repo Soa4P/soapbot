@@ -41,11 +41,12 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,6 +76,15 @@ from soapbot.security.tokens import (
 logger = logging.getLogger(__name__)
 
 _STARTED_AT: dict[str, Any] = {}
+
+#: Largest request body the API will read, in bytes.
+#:
+#: 8 MiB is chosen against the largest legitimate body this API receives — a plugin
+#: upload — with room to spare, and far below anything that would matter to RSS. The
+#: point is not a precise quota but a ceiling: before this, a JSON endpoint would buffer
+#: whatever it was sent, so "how much memory can a stranger make this process allocate"
+#: had no answer.
+MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024
 _PLUGIN_MANAGER: Any = None
 _RUNTIME: Any = None
 _SCHEDULER: Any = None
@@ -132,7 +142,7 @@ def _init_auth() -> None:
         raise
 
     service = TokenService(
-        secret=settings.jwt_secret,
+        secret=settings.jwt_secret.get_secret_value(),
         ttl_hours=settings.jwt_ttl_hours,
         revocations=revocations,
     )
@@ -141,7 +151,9 @@ def _init_auth() -> None:
     # the log showed six startups and six "generated a one-time bootstrap token" lines.
     # bootstrap_for_data_dir reuses an unredeemed value and refuses to mint a new one
     # after it has been spent — that now requires an explicit `soapbot token --reset`.
-    bootstrap = bootstrap_for_data_dir(settings.data_dir, settings.init_token)
+    bootstrap = bootstrap_for_data_dir(
+        settings.data_dir, settings.init_token.get_secret_value()
+    )
     path = settings.data_dir / BOOTSTRAP_FILE
 
     if bootstrap.generated:
@@ -350,6 +362,36 @@ async def _shutdown() -> None:
     logger.info("soapbot stopped")
 
 
+def _audit_env_file() -> None:
+    """Report misspelled ``SOAPBOT_*`` keys in the ``.env`` this process reads.
+
+    ``Settings`` validates ``os.environ``, but the file is loaded into the environment by
+    ``load_dotenv_if_present`` — after the settings object exists. A typo written into the
+    file was therefore never checked by anything, and the operator's symptom was the one
+    this whole hardening pass exists to remove: the process starts, reports healthy, and
+    the value they set does nothing.
+
+    A warning rather than a crash: the panel rewrites this file, and refusing to boot over
+    a stray line would turn a cosmetic mistake into an outage. The message goes into the
+    startup errors the panel already surfaces, so it is visible without reading logs.
+    """
+    from soapbot.config import unknown_env_keys
+
+    path = Path(os.environ.get("SOAPBOT_ENV_FILE", ".env"))
+    try:
+        findings = unknown_env_keys(path)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("env file audit skipped: %s", exc)
+        return
+    if not findings:
+        return
+    message = (
+        f"{path}: 未知的 SOAPBOT_ 配置项，改了也不会生效 — " + ", ".join(findings)
+    )
+    logger.warning("%s", message)
+    _STARTUP_ERRORS.append(message)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -357,6 +399,7 @@ async def lifespan(app: FastAPI):
     _STARTED_AT["ts"] = time.time()
     _STARTUP_ERRORS.clear()
 
+    _audit_env_file()
     _init_auth()
 
     # Seed regardless of the runtime switch. The panel edits providers/adapters whether or
@@ -410,6 +453,73 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def _limit_body_size(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """Refuse an oversized request body before it is parsed.
+
+        Starlette reads the whole body into memory for a JSON endpoint, so a 500 MB POST
+        was 500 MB of RSS before any validator ran. The per-route checks that exist
+        (``plugins`` upload) are the exception, not the rule: every other endpoint trusted
+        ``Content-Length`` to be reasonable.
+
+        ``Content-Length`` is checked first because it is free. It is also a claim, not a
+        fact — a chunked request has none — so the header check is a fast rejection, not
+        the boundary. The boundary is the streamed read below, which counts actual bytes
+        and aborts mid-body rather than after buffering it.
+        """
+        limit = MAX_REQUEST_BODY_BYTES
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                if int(declared) > limit:
+                    return JSONResponse(
+                        {"detail": f"request body exceeds {limit} bytes"},
+                        status_code=413,
+                    )
+            except ValueError:
+                # A malformed Content-Length is the server's problem to reject, not to
+                # guess at; let the ASGI layer decide.
+                pass
+
+        # Every method that can carry a body is guarded, not just POST/PUT/PATCH. A
+        # DELETE with a body is legal HTTP, and leaving it unguarded made the one method
+        # with no cap the one nobody thinks to test.
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            received = 0
+            chunks: list[bytes] = []
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > limit:
+                    return JSONResponse(
+                        {"detail": f"request body exceeds {limit} bytes"},
+                        status_code=413,
+                    )
+                chunks.append(chunk)
+            body = b"".join(chunks)
+
+            # Two separate caches, because Starlette has two separate readers and filling
+            # only one is a silent data-loss bug:
+            #
+            # * ``request.body()`` reads ``_body``.
+            # * ``request.stream()`` reads ``_stream``, falling back to the ASGI
+            #   ``receive`` channel — which we just drained to empty.
+            #
+            # Setting only ``_body`` meant a handler written against ``stream()`` (an
+            # upload, a proxy) saw zero chunks and processed an empty request. Nothing
+            # raised; the handler simply received nothing.
+            # Both are private Starlette attributes, which is the point: they are the
+            # documented cache slots ``body()`` and ``stream()`` read from, and there is
+            # no public API to refill them after a middleware has consumed the channel.
+            request._body = body
+
+            async def _replay() -> AsyncIterator[bytes]:
+                if body:
+                    yield body
+
+            request._stream = _replay()
+
+        return await call_next(request)
 
     @app.get("/api/health", tags=["system"])
     async def health() -> JSONResponse:

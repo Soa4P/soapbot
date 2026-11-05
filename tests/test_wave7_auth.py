@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import jwt
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from soapbot.api.auth import BootstrapToken, configure_auth, reset_auth
 from soapbot.config import settings
@@ -267,7 +268,7 @@ def app_client(tmp_path, monkeypatch):
     from soapbot.app import create_app
 
     reset_auth()
-    monkeypatch.setattr(settings, "init_token", "bootstrap-abc")
+    monkeypatch.setattr(settings, "init_token", SecretStr("bootstrap-abc"))
     with TestClient(create_app()) as client:
         yield client
     reset_auth()
@@ -338,7 +339,7 @@ def test_generated_bootstrap_token_is_written_to_a_private_file(
     from soapbot.security.files import is_owner_only
 
     reset_auth()
-    monkeypatch.setattr(settings, "init_token", "")
+    monkeypatch.setattr(settings, "init_token", SecretStr(""))
     with TestClient(create_app()):
         path = settings.data_dir / "init_token.txt"
         assert path.exists()

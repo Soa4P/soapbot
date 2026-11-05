@@ -7,12 +7,13 @@ provider API keys live in the encrypted database (see ``soapbot.security.crypto`
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -63,6 +64,15 @@ class Settings(BaseSettings):
         env_prefix="SOAPBOT_",
         env_file=os.environ.get("SOAPBOT_ENV_FILE", ".env"),
         env_file_encoding="utf-8",
+        # ``ignore`` at the pydantic level, with a targeted check on top (see
+        # ``_reject_unknown_soapbot_keys``). ``forbid`` here looked right and was not:
+        # a shared ``.env`` legitimately carries keys for other tools, and this project's
+        # own file contains ``DEEPSEEK_API_KEY``. Forbidding extras turned a working
+        # install into an ImportError on the first line of ``conftest`` — the failure
+        # named a key the operator never meant for us.
+        #
+        # The typo this was meant to catch (``SOAPBOT_OWNER_ID`` for ``..._IDS``) is
+        # still caught, and only for our own prefix, which is the actual blast radius.
         extra="ignore",
     )
 
@@ -96,11 +106,14 @@ class Settings(BaseSettings):
     The container path the panel starts itself needs no setting.
     """
 
-    napcat_webui_token: str = ""
+    napcat_webui_token: SecretStr = SecretStr("")
     """NapCat WebUI token, if it was set by hand or lives somewhere unusual.
 
     Takes precedence over discovery, because guessing a path is fine until it is not — and
     the failure ("no QR") looks identical either way.
+
+    ``SecretStr``: this token authorises the WebUI that controls the QQ account, so it is
+    a credential in every sense, not a display string.
     """
 
     napcat_ws_port: int = 3001
@@ -402,8 +415,15 @@ class Settings(BaseSettings):
     """
 
     # ---- security ----
-    master_key: str = ""
-    """Fernet master key (base64). Empty means auto-generate into keyfile."""
+    master_key: SecretStr = SecretStr("")
+    """Fernet master key (base64). Empty means auto-generate into keyfile.
+
+    ``SecretStr`` rather than ``str`` so the value cannot leak by accident. A plain
+    string shows up in ``repr(settings)``, in a traceback's local variables, and in any
+    ``logger.debug("%s", settings)`` someone adds while debugging — and this particular
+    string decrypts every provider API key in the database. Call sites use
+    ``.get_secret_value()``, which is a deliberate, greppable act.
+    """
 
     master_key_file: Path | None = None
     """Read the master key from this file instead of the environment.
@@ -421,8 +441,14 @@ class Settings(BaseSettings):
     enable_budget: bool = False
     budget_currency: str = "CNY"
     """Single accounting currency. The ledger never converts between currencies."""
-    budget_period: str = "month"
-    """``day`` / ``week`` / ``month`` — the window the cap applies to."""
+    budget_period: Literal["day", "week", "month"] = "month"
+    """The window the cap applies to.
+
+    ``Literal`` rather than ``str`` so a typo is rejected at startup with the accepted
+    values in the message. As a plain string, ``SOAPBOT_BUDGET_PERIOD=weekly`` was
+    accepted and then silently matched no branch in the ledger, which is a spend cap
+    that governs nothing.
+    """
     budget_period_cap_minor: int = 50_000
     """Per-period cap in **minor units** (fen). ¥500.00 by default.
 
@@ -440,11 +466,13 @@ class Settings(BaseSettings):
     # collection, and a feature that is on unless switched off would make every user
     # party to that by default.
     enable_bilibili: bool = False
-    bilibili_tier: str = "l1"
+    bilibili_tier: Literal["l1", "l2"] = "l1"
     """``l1`` (unsigned public metadata) or ``l2`` (adds wbi signing).
 
-    ``l3`` is rejected at construction: it needs a logged-in session cookie, and the
-    project holds no Bilibili account.
+    ``l3`` is not in the type at all: it needs a logged-in session cookie, and the
+    project holds no Bilibili account. Encoding that in the type means the rejection
+    happens while the settings are parsed, with the accepted values named, instead of
+    surfacing later as an authentication failure against Bilibili.
     """
     bilibili_timeout_seconds: float = 10.0
     bilibili_min_interval_seconds: float = 1.0
@@ -453,12 +481,22 @@ class Settings(BaseSettings):
     bilibili_max_comments: int = 8
     """How many hot comments to feed the impression prompt."""
 
-    jwt_secret: str = ""
+    jwt_secret: SecretStr = SecretStr("")
+    """Signing key for admin tokens.
+
+    ``SecretStr`` for the same reason as :attr:`master_key`, and one more: this is the
+    value that mints an ``owner`` session. A leaked log line here is a leaked login.
+    """
     jwt_ttl_hours: int = 72
 
-    init_token: str = ""
+    init_token: SecretStr = SecretStr("")
     """One-time bootstrap token. Empty means persist one in ``<data>/init_token.txt``
-    on first start and reuse it across restarts until it is redeemed."""
+    on first start and reuse it across restarts until it is redeemed.
+
+    ``SecretStr`` because this string *is* the first login: whoever reads it becomes
+    owner. It is compared against a submitted value, so the only legitimate consumer is
+    a constant-time comparison, not a format string.
+    """
 
     # ---- authority (privilege lists) ----
     # These are the ONLY source of bot privileges. Nothing in a chat message may
@@ -493,7 +531,7 @@ class Settings(BaseSettings):
     "run code from anyone in-process" and should be temporary, for review only.
     """
 
-    plugin_integrity_mode: str = "block"
+    plugin_integrity_mode: Literal["block", "warn", "off"] = "block"
     """What to do when a plugin's code changed after it was approved.
 
     ``block`` (default) refuses to load it: approval was a decision about code the
@@ -577,7 +615,11 @@ class Settings(BaseSettings):
     """Users refused everywhere, before any other rule is consulted."""
 
     # ---- logging ----
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    """``Literal`` because ``logging_setup`` calls ``.upper()`` on it and hands the result
+    to ``setLevel``. A typo there raises ``ValueError: Unknown level`` at import time —
+    a bare traceback from inside the logging module, naming neither the setting nor the
+    file it came from. Rejecting it here names the field and the accepted values."""
     log_json: bool = True
     log_ring_size: int = 2000
 
@@ -602,21 +644,62 @@ class Settings(BaseSettings):
 
     @field_validator("plugin_integrity_mode", mode="before")
     @classmethod
-    def _check_integrity_mode(cls, value: Any) -> Any:
-        """Reject a typo instead of silently falling back to the default.
+    def _normalise_integrity_mode(cls, value: Any) -> Any:
+        """Lower-case and strip before the ``Literal`` check runs.
 
-        ``SOAPBOT_PLUGIN_INTEGRITY_MODE=blok`` would otherwise leave the operator
-        believing the check is enforced when the value is merely unrecognised. Naming the
-        accepted values in the error is the whole point: the failure mode of a security
-        switch is not "it crashed", it is "it looked like it worked".
+        The rejection itself is the type's job now (``Literal["block", "warn", "off"]``),
+        which is why the accepted values appear in the error without being restated here.
+        What the type cannot do is accept ``BLOCK`` or `` block ``, and an operator who
+        writes either means the same thing — so normalisation stays, validation does not.
+
+        The failure mode this guards is worth keeping in view: a security switch that
+        silently falls back to its default is worse than one that crashes, because
+        "it looked like it worked" is indistinguishable from "it worked".
         """
-        allowed = {"block", "warn", "off"}
-        text = str(value or "").strip().lower()
-        if text not in allowed:
-            raise ValueError(
-                f"plugin_integrity_mode must be one of {sorted(allowed)}, got {value!r}"
+        return str(value or "").strip().lower()
+
+    @model_validator(mode="after")
+    def _reject_unknown_soapbot_keys(self) -> Settings:
+        """Fail on a misspelled ``SOAPBOT_*`` key, ignore everything else.
+
+        ``extra="ignore"`` is right for a shared ``.env`` — other tools' keys are none of
+        our business — but it also swallows our own typos. ``SOAPBOT_OWNER_ID`` (singular)
+        used to start the process with an empty authority list, and the operator's only
+        symptom was "the bot ignores me"; nothing in the logs named the mistake.
+
+        So the check is scoped to the prefix we own. Keys without it are left alone, and
+        the error names the offending key and the closest real field, because "did you
+        mean" is the difference between a five-second fix and an hour of reading source.
+        """
+        known = {name.upper() for name in type(self).model_fields}
+        prefix = "SOAPBOT_"
+        # ``SOAPBOT_ENV_FILE`` is read by ``model_config`` above to decide *which* file to
+        # load. It is a bootstrap variable for the settings machinery, not a setting, so it
+        # is legitimately absent from ``model_fields`` and must not be reported as a typo.
+        unknown = sorted(
+            key
+            for key in os.environ
+            if key.startswith(prefix)
+            and key[len(prefix) :] not in known
+            and key[len(prefix) :] not in _BOOTSTRAP_KEYS
+        )
+        if not unknown:
+            return self
+
+        hints = []
+        for key in unknown:
+            stem = key[len(prefix) :]
+            close = difflib.get_close_matches(stem, known, n=1, cutoff=0.7)
+            hints.append(
+                f"{key} (did you mean SOAPBOT_{close[0]}?)" if close else key
             )
-        return text
+        raise ValueError(
+            "unknown SOAPBOT_ setting(s): "
+            + ", ".join(hints)
+            + ". Remove them, or fix the spelling — a setting that is silently ignored "
+            "is worse than one that is rejected, because the process starts and looks "
+            "healthy while the value you set does nothing."
+        )
 
     @property
     def resolved_db_url(self) -> str:
@@ -642,6 +725,51 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for sub in ("", "logs", "uploads", "plugins", "avatars"):
             (self.data_dir / sub).mkdir(parents=True, exist_ok=True)
+
+
+#: Keys that are machinery rather than settings, so their absence from ``model_fields``
+#: is correct. Shared by the validator and the file audit so the two cannot disagree.
+_BOOTSTRAP_KEYS = frozenset({"ENV_FILE"})
+
+
+def unknown_env_keys(path: Path) -> list[str]:
+    """Misspelled ``SOAPBOT_*`` keys in an ``.env`` file, with a suggestion each.
+
+    The validator above can only see ``os.environ``, and it deliberately does no IO — a
+    validator that reads files runs on every construction, including in tests, and makes
+    ``Settings()`` depend on the working directory. That left a real hole: a typo written
+    into ``.env`` (the documented way to configure this) was loaded into the environment
+    by ``load_dotenv_if_present`` *after* the settings object already existed, so nothing
+    ever validated it and the operator saw the same silent "the setting does nothing".
+
+    So the file is audited separately, at startup, where reading a file is expected.
+    Returns human-readable findings rather than raising: a typo in a file the panel
+    rewrites is worth a loud warning, not a process that refuses to boot.
+    """
+    if not path.is_file():
+        return []
+    known = {name.upper() for name in Settings.model_fields}
+    prefix = "SOAPBOT_"
+    findings: list[str] = []
+    seen: set[str] = set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return [f"无法读取 {path}：{exc}"]
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.partition("=")[0].strip()
+        if not key.startswith(prefix) or key in seen:
+            continue
+        seen.add(key)
+        stem = key[len(prefix) :]
+        if stem in known or stem in _BOOTSTRAP_KEYS:
+            continue
+        close = difflib.get_close_matches(stem, known, n=1, cutoff=0.7)
+        findings.append(f"{key} (did you mean SOAPBOT_{close[0]}?)" if close else key)
+    return findings
 
 
 settings = Settings()

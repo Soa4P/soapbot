@@ -51,6 +51,17 @@ class AIRequest:
     extra_note: str = ""
     recall_prompt: str = ""
     """Long-term memory snippets injected as a system note."""
+    scene_card_prompt: str = ""
+    """The scene's index card: what this conversation is about, at a glance.
+
+    Separate from ``recall_prompt`` because it is not retrieved — it is always present,
+    and it is *trusted* in a way recall is not. The card is assembled from counts the host
+    computed (topics, participants), so it carries no user-authored prose and does not
+    need the untrusted-data wrapper. Recall is fragments of what people said; the card is
+    the host's own summary of them.
+    """
+    scene_portrait_prompt: str = ""
+    """The scene's portrait: slow-changing understanding, injected when confident enough."""
     knowledge_prompt: str = ""
     """RAG snippets injected as a system note."""
 
@@ -231,6 +242,14 @@ class AIEngine:
             notes.append(f"当前群：{req.group_name}")
         if req.sender_name:
             notes.append(f"对话者昵称：{req.sender_name}")
+        # The card goes first, before recall. It is the map: a few lines saying what this
+        # conversation is about, so the fragments below have somewhere to land. Placed
+        # after recall it would read as an afterthought and the model would weight the
+        # fragments more heavily than the summary.
+        if req.scene_card_prompt:
+            notes.append(req.scene_card_prompt)
+        if req.scene_portrait_prompt:
+            notes.append(req.scene_portrait_prompt)
         if req.recall_prompt:
             # Memory is advisory, not authoritative: a stale memory must never
             # outrank what the user says right now.

@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
 from soapbot.security.tokens import (
     BOOTSTRAP_FILE,
@@ -170,7 +171,7 @@ def persistent_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     reset_auth()
     monkeypatch.setattr(settings, "data_dir", tmp_path, raising=False)
-    monkeypatch.setattr(settings, "init_token", "", raising=False)
+    monkeypatch.setattr(settings, "init_token", SecretStr(""), raising=False)
     yield create_app, tmp_path
     reset_auth()
 
