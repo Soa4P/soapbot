@@ -845,6 +845,12 @@ class PluginWorker:
                 cwd=str(self.config.plugin_dir),
                 start_new_session=(sys.platform != "win32"),
             )
+            # Windows has no process group that survives a hard kill of the host, so a
+            # crash would leave the worker running and holding its pipes. A job object
+            # with kill-on-close is the OS-level equivalent; a no-op elsewhere.
+            from soapbot.plugins.job_object import assign as _assign_to_job
+
+            _assign_to_job(self._proc.pid)
         except OSError as exc:  # pragma: no cover - environment dependent
             raise IsolationError(f"could not start plugin worker: {exc}") from exc
 
