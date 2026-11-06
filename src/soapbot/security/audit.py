@@ -32,16 +32,22 @@ _INLINE_SECRET_RE = re.compile(
     r"\s*[=:]\s*[^\s&,;\"']{4,})"
 )
 
+#: Newlines and C0 controls let a caller forge a second, plausible log line.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
 
 def _redact_detail(text: str) -> str:
-    """Mask credentials in a free-text detail field, and cap its length.
+    """Mask credentials, neutralise control characters, and cap the length.
 
-    Kept local (not imported from ``security.injection``) so this module has no
-    import cycle with the plugin layer, which imports the audit log.
+    Kept local (not imported from ``security.injection`` or ``logging_setup``) so
+    this module has no import cycle with the plugin layer, which imports the audit
+    log. ``detail`` is mirrored into the WebUI log stream, where a raw newline
+    would let an attacker append a line that looks like a real denial event.
     """
     if not text:
         return ""
     out = _INLINE_SECRET_RE.sub("***REDACTED***", str(text))
+    out = _CONTROL_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", out)
     return out[:500]
 
 
@@ -68,6 +74,10 @@ class AuditEvent:
 
     detail: str = ""
     trace_id: str = ""
+    message_id: str = ""
+    """Adapter message id, when the event belongs to one inbound message."""
+    provider: str = ""
+    """Model provider id, when the event concerns an upstream call."""
     meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,6 +106,8 @@ class AuditLog:
         detail: str = "",
         trace_id: str = "",
         plugin: str = "",
+        message_id: str = "",
+        provider: str = "",
         **meta: Any,
     ) -> AuditEvent:
         # ``detail`` is free text assembled by callers from runtime data: URLs with
@@ -105,6 +117,14 @@ class AuditLog:
         # in ``detail`` would otherwise be published by the very component meant to
         # record security events.
         safe_detail = _redact_detail(detail)
+        # Fall back to the request context for callers that only know about their
+        # own exception. This is what makes a log line grep-able across layers.
+        from soapbot.core import log_context
+
+        context = log_context.fields()
+        trace_id = trace_id or context.get("trace_id", "")
+        message_id = message_id or context.get("message_id", "")
+        provider = provider or context.get("provider", "")
         event = AuditEvent(
             ts=time.time(),
             kind=kind,
@@ -117,6 +137,8 @@ class AuditLog:
             plugin=plugin or "",
             detail=safe_detail,
             trace_id=trace_id,
+            message_id=message_id,
+            provider=provider,
             meta=meta,
         )
         self._events.append(event)
@@ -124,7 +146,8 @@ class AuditLog:
         if outcome == "deny":
             self.denials += 1
             logger.warning(
-                "AUTHZ DENY action=%s user=%s role=%s scene=%s group=%s detail=%s trace=%s",
+                "AUTHZ DENY action=%s user=%s role=%s scene=%s group=%s detail=%s "
+                "trace=%s message=%s provider=%s",
                 action,
                 event.user_id or "?",
                 event.role,
@@ -132,6 +155,8 @@ class AuditLog:
                 event.group_id,
                 event.detail,
                 trace_id,
+                message_id,
+                provider,
             )
         elif outcome in ("block", "quarantine"):
             self.blocks += 1

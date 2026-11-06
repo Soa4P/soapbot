@@ -714,6 +714,9 @@ async def wait_until_ready(seconds: float = 120.0) -> dict[str, Any]:
                 if await login_token():
                     return {"ok": True}
             except (httpx.HTTPError, OSError):
-                pass
+                # The bridge is still starting. Retrying is the point of this loop;
+                # the log line is what makes a permanently failing bridge visible
+                # instead of looking like an unexplained timeout.
+                logger.debug("napcat login probe failed; retrying", exc_info=True)
         await asyncio.sleep(2.0)
     return {"ok": False, "error": "timeout"}

@@ -75,7 +75,7 @@ class OllamaProvider(BaseProvider):
             resp = await self._request("POST", url, json=payload)
             if resp.status_code >= 400:
                 raise ProviderError(
-                    f"ollama HTTP {resp.status_code}: {resp.text[:300]}",
+                    f"ollama HTTP {resp.status_code}",
                     status=resp.status_code,
                     retry_after=retry_after_of(resp),
                 )

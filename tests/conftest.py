@@ -13,9 +13,29 @@ import pytest
 import respx
 from httpx import Response
 
+from soapbot.config import settings
 from soapbot.providers.base import ProviderConfig
 from soapbot.providers.openai_compat import OpenAICompatProvider
 from soapbot.providers.router import ProviderRouter
+
+
+@pytest.fixture(autouse=True)
+def _business_tests_are_not_login_scripts(monkeypatch):
+    """Keep the ~200 HTTP assertions in this suite about the feature under test.
+
+    Production defaults to ``strict_loopback_auth=True``: a loopback client may read
+    but needs a credential to change state. Several hundred existing assertions send
+    unauthenticated POSTs from TestClient to exercise config merging, plugin loading,
+    memory scopes and so on. Rewriting each one to log in first would test the login
+    helper far more often than it tests the thing the file is named after.
+
+    The strict boundary itself is not exempted from testing — tests/test_auth_cookie.py
+    turns the setting back on explicitly and pins login, CSRF, role floors and the
+    loopback read/write split. ``strict_startup`` is off here for the same reason:
+    many fixtures deliberately install a broken or absent adapter to test the panel.
+    """
+    monkeypatch.setattr(settings, "strict_loopback_auth", False)
+    monkeypatch.setattr(settings, "strict_startup", False)
 
 
 class RecordedCall:

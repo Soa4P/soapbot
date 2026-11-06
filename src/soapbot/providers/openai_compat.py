@@ -66,7 +66,10 @@ class OpenAICompatProvider(BaseProvider):
                 # The status travels on the exception so the retry policy can tell a
                 # 503 (try again) from a 400 (do not).
                 raise ProviderError(
-                    f"{self.kind} HTTP {resp.status_code}: {resp.text[:400]}",
+                    # Type-only summary. The response body can echo the prompt, the
+                    # key or another user's data; it used to land in last_error,
+                    # which the admin API returns and the log ring keeps.
+                    f"{self.kind} HTTP {resp.status_code}",
                     status=resp.status_code,
                     retry_after=retry_after_of(resp),
                 )

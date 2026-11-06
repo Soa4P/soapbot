@@ -1,16 +1,16 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-import { ApiError, api, clearToken, getToken, setToken } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import type { AuthStatus } from '@/api/client'
 
 /**
  * Session state for the panel.
  *
- * The backend allows two modes: a bearer token (works from anywhere) and a bare
- * loopback request (local single-operator convenience). The UI must not collapse them
- * into "logged in": an operator who is in loopback mode and then exposes the service
- * would otherwise have no clue that a token is now required.
+ * Login state comes from the server's /api/auth/status, which reads an HttpOnly
+ * cookie. The store keeps no credential of its own. Loopback read access and a real
+ * session are displayed differently: with strict auth on, the former cannot change
+ * anything, and the UI must not make it look like a signed-in operator.
  */
 export const useAuthStore = defineStore('auth', () => {
   const status = ref<AuthStatus | null>(null)
@@ -18,7 +18,7 @@ export const useAuthStore = defineStore('auth', () => {
   const busy = ref(false)
   const dialogOpen = ref(false)
 
-  const hasToken = computed(() => Boolean(getToken()))
+  const hasToken = computed(() => mode.value === 'token')
   const mode = computed(() => status.value?.mode ?? 'none')
   const authenticated = computed(() => mode.value === 'token' || mode.value === 'loopback')
   const canLogin = computed(() => Boolean(status.value?.login_available))
@@ -37,8 +37,9 @@ export const useAuthStore = defineStore('auth', () => {
     busy.value = true
     error.value = ''
     try {
-      const result = await api.login(initToken.trim())
-      setToken(result.access_token)
+      await api.login(initToken.trim())
+      // The response still carries access_token for scripts. The panel ignores it:
+      // login set the HttpOnly cookie, and /api/auth/status is the source of truth.
       dialogOpen.value = false
       await refresh()
       return true
@@ -51,23 +52,20 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Sign out, and actually invalidate the credential.
+   * Sign out on the server, which revokes the token and clears both cookies.
    *
-   * This used to only delete the copy in localStorage. The token itself stayed valid on
-   * the server for its full ttl, which meant "log out" on a shared machine left a usable
-   * credential behind in whatever had seen it — a HAR file, a screenshot, another tab
-   * that had already read localStorage. The local clear still runs in `finally`: a failed
-   * request must not leave the operator looking signed in.
+   * There is no local credential to delete any more, so a failed request leaves the
+   * browser signed in — that is the honest outcome. `refresh()` still runs so the UI
+   * reflects whatever the server actually decided.
    */
   async function logout(): Promise<void> {
     try {
-      if (hasToken.value) await api.logout()
+      await api.logout()
     } catch {
-      // Server unreachable, or the token was already dead. The local clear in
-      // `finally` is what actually logs this browser out, so stop here.
-      return
+      // fallback: server unreachable or the session was already dead. There is no
+      // local credential to clear, so refresh() below shows whatever the server
+      // actually decided instead of pretending the logout succeeded.
     } finally {
-      clearToken()
       status.value = null
       void refresh()
     }
