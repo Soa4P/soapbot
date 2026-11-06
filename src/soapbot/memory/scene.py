@@ -42,6 +42,7 @@ a group, and it would drift, hallucinate, and be impossible to audit. The portra
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from collections import Counter
@@ -105,17 +106,30 @@ class SceneCard:
         Deliberately terse. This rides along with every request, and a card that costs
         200 tokens to say "this is a group chat" is a tax on every turn. Empty fields are
         omitted rather than rendered as "无" — a line saying nothing is worse than no line.
+
+        Every field is cleaned and capped on the way out. The card is assembled from
+        ``keywords``, ``subject`` and the scope id, none of which this module controls, and
+        it is injected as *system* text on every turn — so a value that carries newlines or
+        a paragraph of instructions would be read as part of the instructions. Sanitising
+        at render time covers rows written before the sanitiser existed, which is the case
+        that matters: the database already holds whatever the old code stored.
         """
         parts: list[str] = []
-        if self.title:
-            parts.append(f"当前场景：{self.title}")
-        if self.summary:
-            parts.append(self.summary)
-        if self.topics:
-            parts.append("常聊话题：" + "、".join(self.topics))
-        if self.people:
-            parts.append("常见成员：" + "、".join(self.people))
-        return "\n".join(parts)
+        title = _clean(self.title, _PROMPT_FIELD_LIMIT)
+        if title:
+            parts.append(f"当前场景：{title}")
+        summary = _clean(self.summary, _PROMPT_TOTAL_LIMIT // 3)
+        if summary:
+            parts.append(summary)
+        topics = [_clean(t, _PROMPT_FIELD_LIMIT) for t in self.topics[:CARD_TOPIC_LIMIT]]
+        topics = [t for t in topics if t]
+        if topics:
+            parts.append("常聊话题：" + "、".join(topics))
+        people = [_clean(p, _PROMPT_FIELD_LIMIT) for p in self.people[:CARD_PERSON_LIMIT]]
+        people = [p for p in people if p]
+        if people:
+            parts.append("常见成员：" + "、".join(people))
+        return "\n".join(parts)[:_PROMPT_TOTAL_LIMIT]
 
 
 @dataclass(slots=True)
@@ -142,16 +156,30 @@ class ScenePortrait:
     updated_at: float = 0.0
 
     def to_prompt(self) -> str:
+        """Render for the system prompt, cleaned the same way as the card.
+
+        ``recurring_questions`` is the dangerous field: it is verbatim memory content, so
+        it is the one place where a whole user message reaches the system prompt. Capped
+        harder than the rest and stripped of newlines for that reason.
+        """
         parts: list[str] = []
-        if self.headline:
-            parts.append(f"场景画像：{self.headline}")
-        if self.themes:
-            parts.append("长期主题：" + "、".join(self.themes))
-        if self.tone:
-            parts.append(f"交流风格：{self.tone}")
-        if self.recurring_questions:
-            parts.append("反复被问到：" + "；".join(self.recurring_questions[:3]))
-        return "\n".join(parts)
+        headline = _clean(self.headline, _PROMPT_TOTAL_LIMIT // 3)
+        if headline:
+            parts.append(f"场景画像：{headline}")
+        themes = [_clean(t, _PROMPT_FIELD_LIMIT) for t in self.themes[:CARD_TOPIC_LIMIT]]
+        themes = [t for t in themes if t]
+        if themes:
+            parts.append("长期主题：" + "、".join(themes))
+        tone = _clean(self.tone, _PROMPT_FIELD_LIMIT)
+        if tone:
+            parts.append(f"交流风格：{tone}")
+        questions = [
+            _clean(q, _PROMPT_QUESTION_LIMIT) for q in self.recurring_questions[:3]
+        ]
+        questions = [q for q in questions if q]
+        if questions:
+            parts.append("反复被问到：" + "；".join(questions))
+        return "\n".join(parts)[:_PROMPT_TOTAL_LIMIT]
 
 
 @dataclass(slots=True)
@@ -185,15 +213,59 @@ _TOPIC_STOPWORDS = frozenset(
 )
 
 
+#: Characters kept from any single field that reaches the system prompt.
+#:
+#: The card and the portrait are injected on every turn, and their content comes from
+#: ``keywords``, ``subject`` and memory ``content`` — all of which originate outside this
+#: module. A topic is a word, not a paragraph; anything longer is either a bug in the
+#: extractor or an attempt to smuggle instructions in through a field nobody thought to
+#: vet. Truncation is the cheap half of that defence; stripping newlines is the other,
+#: because a newline is what turns a list item into a new instruction.
+_PROMPT_FIELD_LIMIT = 32
+
+#: Characters kept from a recurring question. Longer than a topic because a question is
+#: allowed to be a sentence, but still bounded.
+_PROMPT_QUESTION_LIMIT = 60
+
+#: Hard ceiling on a rendered card or portrait. A belt to the per-field braces: even if
+#: every field were at its limit, the injected block cannot grow without bound.
+_PROMPT_TOTAL_LIMIT = 600
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _clean(text: str, limit: int) -> str:
+    """Make one prompt-bound field safe and small.
+
+    Collapses every run of whitespace to a single space — which removes the newlines that
+    would let a value impersonate a new instruction — and truncates. Applied to every
+    field rather than to the ones that "look" user-controlled, because the distinction is
+    exactly what a future edit gets wrong.
+    """
+    collapsed = _WHITESPACE_RE.sub(" ", text or "").strip()
+    return collapsed[:limit]
+
+
 def _keywords_of(row: MemoryRow) -> list[str]:
     """Topic tokens for one memory.
 
     ``keywords`` is already a space-joined token list written at insert time, so this
     reuses that work rather than re-tokenising content. Stopwords are dropped because
     "什么" and "可以" would otherwise be the top topics of every Chinese group chat.
+
+    Every token is also cleaned and length-capped here rather than at render time: the
+    card's topic list is what reaches the prompt, and a token long enough to carry an
+    instruction is not a topic.
     """
     raw = (row.keywords or "").split()
-    return [token for token in raw if token and token not in _TOPIC_STOPWORDS]
+    out: list[str] = []
+    for token in raw:
+        if not token or token in _TOPIC_STOPWORDS:
+            continue
+        cleaned = _clean(token, _PROMPT_FIELD_LIMIT)
+        if cleaned:
+            out.append(cleaned)
+    return out
 
 
 class SceneMemory:
@@ -214,22 +286,34 @@ class SceneMemory:
 
         One helper rather than one query per view: the card and the portrait describe the
         same conversation, and building them from two different windows meant a card that
-        listed topics the portrait had never seen. Ordering is importance first, recency
-        second — the store's own judgement of what matters, with recency breaking the tie
-        that the default importance (0.5 for everything) would otherwise leave to row id.
+        listed topics the portrait had never seen.
+
+        Two half-windows, merged. Ordering by importance alone froze the view: a group
+        whose 200 highest-importance memories were all old would never sample anything new,
+        so the card would describe a conversation the group had moved on from — while
+        ``memory_count`` kept climbing. Ordering by recency alone has the opposite failure,
+        dropping the few memories that were marked as mattering. Half of the budget each
+        way keeps both, and the total is still :data:`CARD_SOURCE_LIMIT`.
         """
-        return list(
-            (
-                await session.execute(
-                    select(MemoryRow)
-                    .where(MemoryRow.scope == scope)
-                    .order_by(MemoryRow.importance.desc(), MemoryRow.created_at.desc())
-                    .limit(CARD_SOURCE_LIMIT)
-                )
-            )
-            .scalars()
-            .all()
+        half = CARD_SOURCE_LIMIT // 2
+        recent = (
+            select(MemoryRow)
+            .where(MemoryRow.scope == scope)
+            .order_by(MemoryRow.created_at.desc())
+            .limit(half)
         )
+        important = (
+            select(MemoryRow)
+            .where(MemoryRow.scope == scope)
+            .order_by(MemoryRow.importance.desc(), MemoryRow.created_at.desc())
+            .limit(half)
+        )
+        rows: dict[int, MemoryRow] = {}
+        for stmt in (recent, important):
+            for row in (await session.execute(stmt)).scalars().all():
+                rows.setdefault(row.id, row)
+        # Newest first so downstream counters break ties toward what is current.
+        return sorted(rows.values(), key=lambda row: row.created_at or 0.0, reverse=True)
 
     async def _total(self, session: Any, scope: str) -> int:
         """How many memories the scope actually holds.
@@ -356,10 +440,10 @@ class SceneMemory:
         question_marks = 0
         for row in rows:
             theme_counter.update(_keywords_of(row))
-            content = (row.content or "").strip()
+            content = _clean(row.content or "", _PORTRAIT_SNIPPET)
             if _QUESTION_RE.search(content):
                 question_marks += 1
-                question_counter[content[:_PORTRAIT_SNIPPET]] += 1
+                question_counter[content] += 1
 
         portrait.themes = [word for word, _ in theme_counter.most_common(CARD_TOPIC_LIMIT)]
         portrait.recurring_questions = [
@@ -371,12 +455,14 @@ class SceneMemory:
             if portrait.themes
             else f"{total} 条记忆"
         )
-        # Confidence rises with evidence but saturates: a thousand memories is not ten
-        # times more certain than a hundred, and a linear scale would make the number
-        # meaningless at both ends. Measured against the *total*, not the sample: the
-        # sample is capped at CARD_SOURCE_LIMIT, so using its length would pin confidence
-        # at the same value for every group past that size.
-        portrait.confidence = round(min(1.0, total / (total + 40.0)), 3)
+        # Confidence describes the evidence the *portrait* rests on, which is the sample —
+        # not the size of the scope. Measuring it against the total made it a restatement
+        # of "how big is this group": a scope with 50 000 memories reported ~0.999 while
+        # the portrait itself was still built from the same 200 rows, so the number rose
+        # without the portrait getting any better. Saturating at the sample cap is correct
+        # and intended: past CARD_SOURCE_LIMIT rows the portrait genuinely cannot improve,
+        # because it never sees more.
+        portrait.confidence = round(min(1.0, len(rows) / (len(rows) + 40.0)), 3)
         portrait.updated_at = time.time()
         return portrait
 
@@ -449,6 +535,11 @@ class SceneMemory:
         ``kind`` is validated against :data:`LINK_KINDS` rather than stored as given: an
         unvalidated vocabulary is one nobody can query later, and the failure is silent —
         the edge exists, it just never matches a reader's filter.
+
+        Both endpoints must exist and share a scope. Without that check an edge could join
+        a memory in one group to a memory in another, and ``neighbours`` would then hand a
+        caller ids from a scope it is not allowed to read — the edge table has no scope
+        column of its own, so this is the only place the invariant can be enforced.
         """
         if kind not in LINK_KINDS:
             raise ValueError(f"unknown link kind {kind!r}; expected one of {sorted(LINK_KINDS)}")
@@ -456,6 +547,37 @@ class SceneMemory:
             # A self-link carries no information and would make "related memories"
             # return the memory itself, which reads as a bug to anyone who sees it.
             return
+        if not math.isfinite(weight) or weight < 0:
+            # NaN survives every comparison (``NaN > 0`` is False, ``NaN < 0`` is False),
+            # so it would slip past a plain range check and then poison the ordering:
+            # ``max(NaN, x)`` is NaN in SQLite, permanently pinning the edge at a weight
+            # that sorts arbitrarily.
+            raise ValueError(f"link weight must be a finite non-negative number, got {weight!r}")
+
+        async with self.db.session_factory()() as session:
+            scopes = dict(
+                (
+                    await session.execute(
+                        select(MemoryRow.id, MemoryRow.scope).where(
+                            MemoryRow.id.in_((source_id, target_id))
+                        )
+                    )
+                ).all()
+            )
+        if len(scopes) != 2:
+            # One or both endpoints are gone. Writing the edge anyway would create a
+            # dangling reference that ``neighbours`` resolves to nothing.
+            return
+        if len(set(scopes.values())) != 1:
+            logger.warning(
+                "refusing cross-scope link %s -> %s (%s vs %s)",
+                source_id,
+                target_id,
+                scopes.get(source_id),
+                scopes.get(target_id),
+            )
+            return
+
         stmt = sqlite_insert(SceneLinkRow).values(
             source_id=source_id,
             target_id=target_id,
