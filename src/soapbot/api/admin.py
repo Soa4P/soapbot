@@ -60,6 +60,7 @@ from soapbot import __version__
 from soapbot.api.auth import require_api_auth, require_role
 from soapbot.api.errors import safe_detail
 from soapbot.api.locale import request_locale
+from soapbot.api.service_hint import restart_hint
 from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
@@ -1257,6 +1258,9 @@ async def access_matrix(_: dict = Depends(require_api_auth)) -> dict:
         "admins": sorted(authority.admins),
         "members": sorted(authority.members),
         "trust_protocol_roles": bool(authority.trust_protocol_roles),
+        # Rendered by the panel instead of a hard-coded command: the Windows task
+        # name is not "SoapbotPanel", and a wrong hint looks like a broken save.
+        "restart_hint": restart_hint(),
         "generated_at": time.time(),
     }
 

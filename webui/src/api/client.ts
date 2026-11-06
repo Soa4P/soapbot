@@ -305,6 +305,8 @@ export const api = {
     request<{
       ok: boolean
       restart_required: boolean
+      /** Platform-correct restart command, rendered verbatim by the panel. */
+      restart_hint: string
       owners: string[]
       admins: string[]
       members: string[]
