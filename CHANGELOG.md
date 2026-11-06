@@ -10,6 +10,61 @@
 
 ## [Unreleased]
 
+### 插件进程与 IPC 边界加固
+
+对运营者提出的十项风险做了**逐项核实**，其中六项在当前代码中已经解决，本轮只修真实缺口，
+并把「不得回退」固化成 CI 门禁。核实结论：
+
+| 提出的风险 | 核实结果 |
+|---|---|
+| IPC 用 pickle | 不符：长度前缀 JSON，全仓无 pickle 原语 |
+| 能力授权在插件进程内自查 | 不符：父进程 `_handle_callback` + `surfaces.py` + `sandbox.py` 单一授权点 |
+| 崩溃无重启/熔断 | 不符：指数退避、窗口内重启预算、熔断且需显式重置 |
+| 子进程继承全部环境变量 | 不符：`sanitize_env()` 白名单，仅转发 `SOAPBOT_PLUGIN_*` 前缀 |
+| 插件加载路径未校验 | 基本不符：symlink、`resolve().parents`、zip slip、名称正则、manifest digest 均已有 |
+| correlation id + 超时 / stdout drain / 进程数 / 僵尸回收 / 消息大小上限 | **部分属实**，见下 |
+
+真实缺口与修复：
+
+- **请求串台**：父端 `invoke()` 收到 `result` 时完全不校验 `id`（子端其实一直回带了 id），
+  `call` 帧也不绑定当前请求。现在每次调用生成随机 `rid`，`result.id` 与 `call.rid`
+  都要强校验，不匹配即丢弃并计数；未绑定的回调在查 capability 之前就被拒绝。
+  `invoke()` 全程持锁，杜绝两个调用交错读同一条管道。
+- **帧预算漂移**：父端入站 4 MiB、子端入站硬编码 8 MiB、出站不限。现在
+  `isolation.MAX_FRAME_BYTES` 是唯一常量源，以字面量注入两个 `-I` 子脚本；
+  父/子入站与出站、一次性 runner 的请求与回包统一受限，错误带「上限 + 实际字节」。
+- **stdout 只在调用期间读**：空闲期插件写满管道会把自己阻塞。现在一个常驻 reader
+  独占 stdout，帧进入 `asyncio.Queue(maxsize=4)`；队列 0.5 秒无人消费即判定帧洪水并
+  杀进程树。
+- **进程数无上限**：新增 `SOAPBOT_MAX_PLUGIN_WORKERS`（默认 16，`1..64`，`0` 非法），
+  注册与启动双重 fail-closed；容器的 `pids_limit` 退居最后一道兜底。
+- **回收不统一**：新增 `proc.wait()` 退出看护（带进程代际守卫），`stop()` 取消并 await
+  三个任务，`loader.unload_all()` 与 `app._shutdown()` 都调用幂等 `stop_all()`。
+- **子端纵深校验**：两个子脚本都对 boot/请求里的 `plugin_dir` 做 `realpath`、目录存在、
+  `main.py` 普通文件且未逃逸根目录、`attr` 合法标识符的复核。
+- **一次性 runner 的静默失效**：`_CHILD_BOOTSTRAP._apply_limits()` 引用只存在于宿主模块的
+  `DEFAULT_PLUGIN_MEMORY_BYTES`，`NameError` 被裸 `except: pass` 吞掉，资源限制从未生效。
+  现在默认值是字面量，其它异常打印到 stderr。
+
+并发交叉审查后追加修复：帧洪水/协议错误时 reader **同步**杀进程并关闭队列（此前
+`await self._abort()` → `proc.wait()` 会与 stdout EOF 形成循环依赖，持锁的 `invoke()` 永久挂死）；
+所有 `proc.wait()` 加上界；`stop()` 在 `finally` 中无条件回收三个任务；
+`PluginSupervisor` 增加生命周期锁使容量检查与建进程原子化，并新增 `unregister()` 在卸载时
+释放容量；同一 worker 重入 `start()` 时杀掉旧进程并重置全部代际状态；
+一次性 runner 不再用无上限的 `communicate()`，改为按帧有界读取；
+启动期回调立即拒绝而不是让 shutdown 等满超时。这些不变量也写进了 `check_plugin_ipc.py`。
+
+新增运维与门禁：`scripts/check_plugin_ipc.py`（离线静态审计，挂进 CI 与 `make check`）、
+`scripts/plugin_worker_guard.py`（**只读**巡检，绝不重启）、
+`deploy/plugin-worker-guard.{service,timer}`（每 5 分钟）、
+`tests/test_plugin_ipc_hardening.py`。
+
+参考 [surfcore](https://github.com/Mieksido/surfcore)、
+[qq-dsh-bridge](https://github.com/NoMindSama/qq-dsh-bridge)、
+[dsh-bili-humanism](https://github.com/InariNGT-Ofiicial/dsh-bili-humanism) 的治理机制
+已落地；人格分层、四层记忆与 selfNote、闲置边界压缩等业务设计**评估后不移植**，
+理由见 [DSH 生态参考评估](docs/reference-dsh-ecosystem.md)。
+
 ### 新增
 
 - **Windows 双击启动器**：`start-panel.bat`（本地起面板并自动开浏览器）、`stop-panel.bat`、

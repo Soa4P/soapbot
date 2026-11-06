@@ -139,25 +139,24 @@ class _FakeProc:
         self.stdout = object()
 
 
-async def test_a_fatal_frame_is_reported_instead_of_becoming_an_exit_code(
-    monkeypatch,
-) -> None:
+async def test_a_fatal_frame_is_reported_instead_of_becoming_an_exit_code() -> None:
     """The child used to die silently; now it says why and the host repeats it.
 
     Without this the operator gets "died (code=1)", which is a number, not a cause.
+    The frame is injected into the worker's reader queue: stdout is owned by one
+    long-lived reader task, so tests feed that queue rather than the pipe directly.
     """
     from soapbot.plugins import supervisor as sup_mod
-
-    async def _fatal(_reader):
-        return {"type": "fatal", "error": "RuntimeError: can't start new thread"}
-
-    monkeypatch.setattr(sup_mod, "_read_frame", _fatal)
 
     worker = sup_mod.PluginWorker(
         WorkerConfig(plugin="limits", plugin_dir=Path(".")),
         surface_handler=lambda *a, **k: None,
     )
     worker._proc = _FakeProc()
+    worker._frames = asyncio.Queue()
+    await worker._frames.put(
+        {"type": "fatal", "error": "RuntimeError: can't start new thread"}
+    )
 
     with pytest.raises(WorkerCrashedError, match="can't start new thread"):
         await worker.invoke("thread", caller=_Caller(), timeout=1.0)
@@ -176,10 +175,8 @@ async def test_child_script_does_not_reference_host_module_names() -> None:
     """
     import ast
 
+    from soapbot.plugins import isolation as iso_mod
     from soapbot.plugins import supervisor as sup_mod
-
-    child = sup_mod._CHILD_WORKER
-    tree = ast.parse(child)  # also proves the embedded script is valid Python
 
     forbidden = {
         "DEFAULT_PLUGIN_MEMORY_BYTES",
@@ -189,14 +186,24 @@ async def test_child_script_does_not_reference_host_module_names() -> None:
         "MAX_FRAME_BYTES",
         "WorkerConfig",
     }
-    # Names, not substrings: these identifiers are mentioned in the child's comments
-    # (explaining this very bug), so a text search would report a false positive.
-    used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-    leaked = sorted(used & forbidden)
-    assert not leaked, (
-        "the child script must not reference names from the host module; they do not "
-        f"exist there and any NameError would be swallowed: {leaked}"
-    )
+    # Both child programs run under a fresh -I interpreter: the resident worker and
+    # the one-shot runner. The name that broke RLIMIT_AS lived in the latter.
+    for label, child in (
+        ("resident worker", sup_mod._CHILD_WORKER),
+        ("one-shot runner", iso_mod._CHILD_BOOTSTRAP),
+    ):
+        tree = ast.parse(child)  # also proves the embedded script is valid Python
+        # Names, not substrings: these identifiers are mentioned in the children's
+        # comments (explaining this very bug), so a text search would false-positive.
+        used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        leaked = sorted(used & forbidden)
+        assert not leaked, (
+            f"the {label} script must not reference names from the host module; they "
+            f"do not exist there and any NameError would be swallowed: {leaked}"
+        )
+        assert "__MAX_FRAME_BYTES__" not in used, (
+            f"the {label} frame budget placeholder was not injected"
+        )
 
 
 async def test_the_reader_thread_failure_is_reproducible() -> None:
