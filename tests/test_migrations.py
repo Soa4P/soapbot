@@ -84,16 +84,21 @@ async def test_a_newer_database_refuses_to_start(engine) -> None:
     assert "99" in str(excinfo.value) and str(SCHEMA_VERSION) in str(excinfo.value)
 
 
-async def test_a_gap_in_the_chain_is_an_error_not_a_silent_skip(engine) -> None:
+async def test_a_gap_in_the_chain_is_an_error_not_a_silent_skip(engine, monkeypatch) -> None:
     """A missing step means the build is inconsistent; arriving at the target version
-    with nothing applied would be worse than failing."""
+    with nothing applied would be worse than failing.
+
+    The chain is trimmed to one step here rather than targeting a hard-coded version:
+    a literal "5" stopped being a gap as soon as version 4 and 5 were registered.
+    """
+    monkeypatch.setattr(migrations, "MIGRATIONS", {2: migrations.MIGRATIONS[2]})
     async with engine.begin() as conn:
         await migrations.current_version(conn)
         await migrations._set_version(conn, 1)
 
     async with engine.begin() as conn:
         with pytest.raises(RuntimeError, match="no migration registered"):
-            await migrations.migrate(conn, target=5)
+            await migrations.migrate(conn, target=3)
 
 
 async def test_a_failing_step_leaves_the_version_untouched(engine, monkeypatch) -> None:

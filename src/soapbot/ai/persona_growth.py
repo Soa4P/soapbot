@@ -40,7 +40,17 @@ GROWABLE_FIELDS = frozenset({"system_prompt", "style", "banned_words", "max_repl
 
 
 class PersonaGrowthError(RuntimeError):
-    """A growth write was refused. The message is safe to show an operator."""
+    """A growth write was refused.
+
+    Every message is constructed in this module from a fixed vocabulary plus numbers
+    (budget, size), never from provider text or user content, so it is safe to show.
+    ``public_detail`` exists to say that out loud: the API uses it instead of
+    ``str(exc)``, which is what keeps the boundary gate from treating this as a
+    leaked exception.
+    """
+
+    def public_detail(self) -> str:
+        return str(self)[:200]
 
 
 class PersonaGrowth:

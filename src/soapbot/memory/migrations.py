@@ -155,15 +155,128 @@ async def _v3_scene_layer(conn: Any) -> None:
     )
 
 
+async def _column_exists(conn: Any, table: str, column: str) -> bool:
+    rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+    return any(str(row[1]) == column for row in rows)
+
+
+async def _add_column(conn: Any, table: str, column: str, ddl: str) -> None:
+    """SQLite has no ``ADD COLUMN IF NOT EXISTS``; a re-run must not fail."""
+    if await _column_exists(conn, table, column):
+        return
+    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
+async def _table_exists(conn: Any, table: str) -> bool:
+    row = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :n"),
+        {"n": table},
+    )
+    return row.first() is not None
+
+
+async def _v4_memory_layers(conn: Any) -> None:
+    """L1 window metadata, L2 archive flag, L4 self-notes and the shared timeline.
+
+    ``summaries`` already existed for the compressor; this step adds the slice and
+    model it describes. Without them a summary cannot be rebuilt from L0 or compared
+    against a different model's output, which makes "the bot remembered something
+    wrong" impossible to investigate.
+
+    Both ``ALTER`` candidates are guarded: a migration test can drive this step over a
+    database that never ran ``create_all``, and ``ALTER TABLE`` on a missing table is a
+    hard error rather than a no-op.
+    """
+    if await _table_exists(conn, "summaries"):
+        await _add_column(conn, "summaries", "window_start", "FLOAT NOT NULL DEFAULT 0")
+        await _add_column(conn, "summaries", "window_end", "FLOAT NOT NULL DEFAULT 0")
+        await _add_column(conn, "summaries", "model", "VARCHAR(64) NOT NULL DEFAULT ''")
+    if await _table_exists(conn, "memories"):
+        await _add_column(conn, "memories", "archived", "INTEGER NOT NULL DEFAULT 0")
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_memories_archived ON memories (archived)")
+        )
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS memory_self_notes ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "content TEXT NOT NULL DEFAULT '', "
+            "norm VARCHAR(256) NOT NULL DEFAULT '', "
+            "source_session VARCHAR(128) NOT NULL DEFAULT '', "
+            "created_at FLOAT NOT NULL DEFAULT 0, "
+            "updated_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_self_note_norm "
+            "ON memory_self_notes (norm)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_self_notes_updated "
+            "ON memory_self_notes (updated_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS memory_timeline ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "kind VARCHAR(24) NOT NULL DEFAULT 'chat', "
+            "ref VARCHAR(128) NOT NULL DEFAULT '', "
+            "summary TEXT NOT NULL DEFAULT '', "
+            "session_key VARCHAR(128) NOT NULL DEFAULT '', "
+            "created_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS ix_memory_timeline_kind ON memory_timeline (kind)",
+        "CREATE INDEX IF NOT EXISTS ix_memory_timeline_created ON memory_timeline (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_timeline_session_time "
+        "ON memory_timeline (session_key, created_at)",
+    ):
+        await conn.execute(text(statement))
+
+
+async def _v5_artifact_index(conn: Any) -> None:
+    """L3: index rows for produced artifacts; bodies stay in ``data/artifacts``."""
+    await conn.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS memory_artifacts ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_key VARCHAR(128) NOT NULL DEFAULT '', "
+            "title VARCHAR(256) NOT NULL DEFAULT '', "
+            "sha256 VARCHAR(64) NOT NULL DEFAULT '', "
+            "path VARCHAR(512) NOT NULL DEFAULT '', "
+            "size INTEGER NOT NULL DEFAULT 0, "
+            "created_at FLOAT NOT NULL DEFAULT 0)"
+        )
+    )
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS ix_memory_artifacts_session "
+        "ON memory_artifacts (session_key)",
+        "CREATE INDEX IF NOT EXISTS ix_memory_artifacts_sha "
+        "ON memory_artifacts (sha256)",
+        "CREATE INDEX IF NOT EXISTS ix_memory_artifacts_created "
+        "ON memory_artifacts (created_at)",
+    ):
+        await conn.execute(text(statement))
+
+
 #: ``{target_version: step}``. The step moves the database *to* ``target_version``.
 #:
 #: Version 1 was the first schema and needed no step. Version 2 adds the index above.
-#: Version 3 adds the scene layer (cards, portraits, links).
+#: Version 3 adds the scene layer (cards, portraits, links). Version 4 adds the memory
+#: layer metadata (summary windows, archive flag, self-notes, timeline). Version 5 adds
+#: the artifact index.
 #: ``tests/test_migrations.py`` monkeypatches this table to exercise the loop, the gap
 #: check and rollback independently of the real step.
 MIGRATIONS: dict[int, MigrationStep] = {
     2: _v2_message_lookup_index,
     3: _v3_scene_layer,
+    4: _v4_memory_layers,
+    5: _v5_artifact_index,
 }
 
 
