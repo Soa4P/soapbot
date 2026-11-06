@@ -348,6 +348,31 @@ export const api = {
       `/api/memory/timeline?session_key=${encodeURIComponent(sessionKey)}&limit=${limit}`,
     ),
   memoryStats: () => request<any>('/api/memory/stats'),
+  // The scene layer: a per-conversation index card, a portrait, and skills distilled
+  // from that conversation's memories. These existed in the backend and were injected
+  // into every prompt, but had no interface — the panel could not show or trigger any
+  // of it, so the feature was invisible from the one place meant to describe it.
+  memoryScenes: (limit = 100) => request<any>(`/api/memory/scenes?limit=${limit}`),
+  memoryScene: (scope: string) =>
+    request<any>(`/api/memory/scene?scope=${encodeURIComponent(scope)}`),
+  memorySceneRefresh: (scope: string) =>
+    request<any>(`/api/memory/scene/refresh?scope=${encodeURIComponent(scope)}`, {
+      method: 'POST',
+    }),
+  memorySkills: (scope: string) =>
+    request<any>(`/api/memory/skills?scope=${encodeURIComponent(scope)}`),
+  memorySkillCandidates: (scope: string) =>
+    request<any>(`/api/memory/skills/candidates?scope=${encodeURIComponent(scope)}`),
+  generateSkill: (payload: { scope: string; topic: string }) =>
+    request<any>('/api/memory/skills', { method: 'POST', body: JSON.stringify(payload) }),
+  // The scope travels as a query parameter because a skill id is only unique within one
+  // scene: two groups can both have a skill named 部署, and a path alone would be
+  // ambiguous about which file to delete.
+  deleteSkill: (scope: string, skillId: string) =>
+    request<any>(
+      `/api/memory/skills/${encodeURIComponent(skillId)}?scope=${encodeURIComponent(scope)}`,
+      { method: 'DELETE' },
+    ),
   knowledge: () => request<any>('/api/knowledge'),
   knowledgeDetail: (docId: string) =>
     request<any>(`/api/knowledge/${encodeURIComponent(docId)}`),

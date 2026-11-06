@@ -130,6 +130,136 @@ function resetDraft(): void {
   saveNotice.value = null
   saveError.value = null
 }
+
+// ------------------------------------------------------------------ scene layer
+//
+// The scene layer had no interface at all: the card was injected into every prompt and
+// the portrait was computed and stored, but the only way to see either was to read the
+// database. This section is the missing half — the same gap the knowledge page had.
+//
+// Two deliberate choices about what to show:
+//
+// * the **rendered prompt** is displayed verbatim, not just the fields. The fields are
+//   the input; the prompt is what the model actually receives, and it is the thing an
+//   operator needs to see to judge whether the card is any good.
+// * **candidates are listed before anything is written**. The argument for keyword
+//   clustering over embeddings is that a human can check it; a one-click "generate"
+//   button would throw that away.
+
+const scenes = useAsync(() => api.memoryScenes(100))
+
+const sceneScope = ref('')
+const sceneCard = ref<any>(null)
+const scenePortrait = ref<any>(null)
+const sceneLoading = ref(false)
+const sceneError = ref('')
+const sceneNotice = ref('')
+const rebuilding = ref(false)
+
+const skills = ref<any[]>([])
+const candidates = ref<any[]>([])
+const skillsLoading = ref(false)
+const skillError = ref('')
+const skillNotice = ref('')
+const generating = ref('')
+
+const sceneRows = computed<any[]>(() => scenes.data.value?.scenes ?? [])
+
+async function openScene(scope: string): Promise<void> {
+  sceneScope.value = scope
+  sceneLoading.value = true
+  sceneError.value = ''
+  sceneNotice.value = ''
+  skillError.value = ''
+  skillNotice.value = ''
+  try {
+    const [detail, skillList, candidateList] = await Promise.all([
+      api.memoryScene(scope),
+      api.memorySkills(scope),
+      api.memorySkillCandidates(scope),
+    ])
+    sceneCard.value = detail.card
+    scenePortrait.value = detail.portrait
+    skills.value = skillList.skills ?? []
+    candidates.value = candidateList.candidates ?? []
+  } catch (err) {
+    sceneError.value = (err as Error).message
+    sceneCard.value = null
+    scenePortrait.value = null
+    skills.value = []
+    candidates.value = []
+  } finally {
+    sceneLoading.value = false
+  }
+}
+
+async function rebuildScene(): Promise<void> {
+  if (!sceneScope.value) return
+  rebuilding.value = true
+  sceneError.value = ''
+  sceneNotice.value = ''
+  try {
+    const result = await api.memorySceneRefresh(sceneScope.value)
+    sceneCard.value = result.card
+    scenePortrait.value = result.portrait
+    sceneNotice.value = result.portrait_withheld
+      ? t('memory.portraitWithheld')
+      : t('memory.rebuilt')
+    // The list carries `has_card` and the portrait confidence, so it has to be re-read:
+    // leaving it alone would show "not built" next to a card the operator just built.
+    await scenes.reload()
+    const candidateList = await api.memorySkillCandidates(sceneScope.value)
+    candidates.value = candidateList.candidates ?? []
+  } catch (err) {
+    sceneError.value = (err as Error).message
+  } finally {
+    rebuilding.value = false
+  }
+}
+
+async function createSkill(topic: string): Promise<void> {
+  if (!sceneScope.value) return
+  generating.value = topic
+  skillError.value = ''
+  skillNotice.value = ''
+  try {
+    const result = await api.generateSkill({ scope: sceneScope.value, topic })
+    skillNotice.value = t('memory.skillCreated', { name: result.title })
+    const [skillList, candidateList] = await Promise.all([
+      api.memorySkills(sceneScope.value),
+      api.memorySkillCandidates(sceneScope.value),
+    ])
+    skills.value = skillList.skills ?? []
+    candidates.value = candidateList.candidates ?? []
+  } catch (err) {
+    skillError.value = (err as Error).message
+  } finally {
+    generating.value = ''
+  }
+}
+
+async function removeSkill(skill: any): Promise<void> {
+  if (!sceneScope.value) return
+  if (!window.confirm(t('memory.skillDeleteConfirm', { name: skill.title }))) return
+  skillError.value = ''
+  skillNotice.value = ''
+  try {
+    await api.deleteSkill(sceneScope.value, skill.skill_id)
+    skillNotice.value = t('memory.skillDeleted', { name: skill.title })
+    const [skillList, candidateList] = await Promise.all([
+      api.memorySkills(sceneScope.value),
+      api.memorySkillCandidates(sceneScope.value),
+    ])
+    skills.value = skillList.skills ?? []
+    candidates.value = candidateList.candidates ?? []
+  } catch (err) {
+    skillError.value = (err as Error).message
+  }
+}
+
+function confidencePct(value: number): string {
+  return `${Math.round((Number(value) || 0) * 100)}%`
+}
 </script>
 
 <template>
@@ -338,4 +468,178 @@ function resetDraft(): void {
   </section>
 
   <div v-if="sessions.error.value" class="error-banner">{{ sessions.error.value }}</div>
+
+  <!--
+    Scene layer. Sits after the knowledge base because it is derived from memories, not
+    authored: the page reads top-down as "what happened → what was written → what the bot
+    concluded from it".
+  -->
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('memory.sceneLayer') }}</h2>
+      <span class="strip__spacer" />
+      <span class="hint">{{ t('memory.sceneHint') }}</span>
+    </div>
+    <div class="panel__body">
+      <div v-if="scenes.error.value" class="error-banner">{{ scenes.error.value }}</div>
+
+      <EmptyState
+        v-else-if="!scenes.loading.value && sceneRows.length === 0"
+        :lead="t('memory.sceneEmpty')"
+      />
+
+      <div v-else class="scene-grid">
+        <ul class="scene-list">
+          <li v-for="row in sceneRows" :key="row.scope">
+            <button
+              class="scene-item"
+              :class="{ 'scene-item--on': row.scope === sceneScope }"
+              @click="openScene(row.scope)"
+            >
+              <span class="scene-item__name">{{ row.title || row.scope }}</span>
+              <span class="scene-item__meta">
+                {{ t('memory.memoryCount', { n: row.memory_count }) }}
+                <span v-if="row.has_card" class="tag lamp">{{ t('memory.card') }}</span>
+                <span v-if="row.has_portrait" class="tag">
+                  {{ t('memory.portrait') }} {{ confidencePct(row.portrait_confidence) }}
+                </span>
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <div class="scene-detail">
+          <div v-if="!sceneScope" class="empty">{{ t('memory.scenePick') }}</div>
+          <div v-else-if="sceneLoading" class="empty">{{ t('common.loading') }}</div>
+          <div v-else-if="sceneError" class="error-banner">{{ sceneError }}</div>
+          <div v-else class="stack">
+            <div class="row">
+              <strong class="mono">{{ sceneScope }}</strong>
+              <span class="strip__spacer" />
+              <button class="btn ghost" :disabled="rebuilding" @click="rebuildScene">
+                {{ rebuilding ? t('memory.rebuilding') : t('memory.rebuild') }}
+              </button>
+            </div>
+            <div v-if="sceneNotice" class="hint">{{ sceneNotice }}</div>
+
+            <!-- card -->
+            <div class="scene-block">
+              <div class="scene-block__head">
+                <h3>{{ t('memory.card') }}</h3>
+                <span v-if="sceneCard" class="hint">
+                  {{ t('memory.memoryCount', { n: sceneCard.memory_count }) }}
+                </span>
+              </div>
+              <div v-if="!sceneCard" class="empty">{{ t('memory.sceneNoCard') }}</div>
+              <div v-else class="stack">
+                <div class="row">
+                  <span class="hint">{{ t('memory.topics') }}</span>
+                  <span v-for="topic in sceneCard.topics" :key="topic" class="tag">{{ topic }}</span>
+                </div>
+                <div v-if="sceneCard.people.length" class="row">
+                  <span class="hint">{{ t('memory.people') }}</span>
+                  <span v-for="person in sceneCard.people" :key="person" class="tag">
+                    {{ person }}
+                  </span>
+                </div>
+                <div>
+                  <div class="hint">{{ t('memory.injectedPrompt') }}</div>
+                  <pre class="scene-prompt">{{ sceneCard.prompt }}</pre>
+                  <div class="hint">{{ t('memory.injectedHint') }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- portrait -->
+            <div class="scene-block">
+              <div class="scene-block__head">
+                <h3>{{ t('memory.portrait') }}</h3>
+                <span v-if="scenePortrait" class="hint">
+                  {{ t('memory.confidence') }} {{ confidencePct(scenePortrait.confidence) }}
+                </span>
+              </div>
+              <div v-if="!scenePortrait" class="empty">{{ t('memory.sceneNoPortrait') }}</div>
+              <div v-else class="stack">
+                <div v-if="scenePortrait.headline" class="scene-headline">
+                  {{ scenePortrait.headline }}
+                </div>
+                <div v-if="scenePortrait.themes.length" class="row">
+                  <span class="hint">{{ t('memory.themes') }}</span>
+                  <span v-for="theme in scenePortrait.themes" :key="theme" class="tag">
+                    {{ theme }}
+                  </span>
+                </div>
+                <div v-if="scenePortrait.tone" class="row">
+                  <span class="hint">{{ t('memory.tone') }}</span>
+                  <span class="tag">{{ scenePortrait.tone }}</span>
+                </div>
+                <div v-if="scenePortrait.recurring_questions.length" class="stack">
+                  <span class="hint">{{ t('memory.questions') }}</span>
+                  <ul class="scene-questions">
+                    <li v-for="q in scenePortrait.recurring_questions" :key="q">{{ q }}</li>
+                  </ul>
+                </div>
+                <div>
+                  <div class="hint">{{ t('memory.injectedPrompt') }}</div>
+                  <pre class="scene-prompt">{{ scenePortrait.prompt }}</pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- skills -->
+            <div class="scene-block">
+              <div class="scene-block__head">
+                <h3>{{ t('memory.skills') }}</h3>
+                <span class="hint">{{ t('memory.skillsHint') }}</span>
+              </div>
+
+              <div v-if="skillError" class="error-banner">{{ skillError }}</div>
+              <div v-if="skillNotice" class="hint">{{ skillNotice }}</div>
+
+              <div v-if="skills.length === 0" class="empty">{{ t('memory.skillEmpty') }}</div>
+              <ul v-else class="skill-list">
+                <li v-for="skill in skills" :key="skill.skill_id" class="skill-item">
+                  <div class="skill-item__head">
+                    <strong>{{ skill.title }}</strong>
+                    <span class="tag">{{ t('memory.skillSupport', { n: skill.support }) }}</span>
+                    <span class="tag">{{ confidencePct(skill.confidence) }}</span>
+                    <span class="strip__spacer" />
+                    <button class="btn ghost" @click="removeSkill(skill)">
+                      {{ t('common.delete') }}
+                    </button>
+                  </div>
+                  <pre class="scene-prompt">{{ skill.body }}</pre>
+                  <div class="hint">{{ t('memory.skillFile') }}: {{ skill.file }}</div>
+                </li>
+              </ul>
+
+              <div class="scene-block__head">
+                <h3>{{ t('memory.skillCandidates') }}</h3>
+                <span class="hint">
+                  {{ t('memory.skillCandidatesHint', { n: 3 }) }}
+                </span>
+              </div>
+              <div v-if="candidates.length === 0" class="empty">
+                {{ t('memory.skillNoCandidates') }}
+              </div>
+              <ul v-else class="candidate-list">
+                <li v-for="c in candidates" :key="c.topic" class="candidate-item">
+                  <span class="candidate-item__topic">{{ c.topic }}</span>
+                  <span class="tag">{{ t('memory.skillSupport', { n: c.support }) }}</span>
+                  <span class="strip__spacer" />
+                  <button
+                    class="btn ghost"
+                    :disabled="generating === c.topic"
+                    @click="createSkill(c.topic)"
+                  >
+                    {{ c.exists ? t('memory.skillRegenerate') : t('memory.skillCreate') }}
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 </template>

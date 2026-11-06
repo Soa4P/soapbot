@@ -42,6 +42,8 @@ class BotRuntime:
         traces=None,
         mcp=None,
         passive=None,
+        scene=None,
+        skills=None,
         locale: str = "",
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
@@ -95,6 +97,25 @@ class BotRuntime:
 
         Kept so the panel can show how many messages were read without being answered.
         A passive mode with no counter is indistinguishable from one that never ran.
+        """
+
+        self.scene = scene
+        """Optional :class:`soapbot.memory.scene.SceneMemory`.
+
+        Exposed for the same reason as ``memory``: the panel reads the *same* object the
+        pipeline writes, so "what the card says" and "what the bot was told" cannot
+        diverge. ``None`` when a runtime was assembled by hand, and the scene endpoints
+        answer 503 rather than rendering an empty card that reads as "nothing learned yet".
+        """
+
+        self.skills = skills
+        """Optional :class:`soapbot.memory.skills.SkillForge`.
+
+        Held here because skills are files on the data volume, not rows: the panel lists,
+        generates and deletes them, and none of that can go through ``memory``. This
+        attribute existing is the difference between a feature and a module nobody calls —
+        ``SkillForge`` was fully implemented and never constructed, so no skill could ever
+        be produced by a running bot.
         """
 
         self.locale = locale or settings.default_locale

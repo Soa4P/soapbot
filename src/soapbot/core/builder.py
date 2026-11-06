@@ -41,6 +41,7 @@ from soapbot.core.trace import TraceStore
 from soapbot.memory.db import Database
 from soapbot.memory.extractor import MemoryExtractor
 from soapbot.memory.scene import SceneMemory
+from soapbot.memory.skills import SkillForge
 from soapbot.memory.stages import (
     CommandStage,
     KnowledgeStage,
@@ -150,6 +151,7 @@ def build_pipeline(
     bilibili=None,
     tools=None,
     router=None,
+    scene=None,
 ) -> Pipeline:
     """Build the pipeline. Stage order is load-bearing.
 
@@ -216,7 +218,7 @@ def build_pipeline(
                 # ``/forget`` deletes evidence, so it has to rebuild the derived views
                 # the same way a write does. Sharing one SceneMemory instance keeps the
                 # two paths from drifting apart.
-                scene=SceneMemory(memory.db),
+                scene=scene,
             )
         )
 
@@ -244,7 +246,12 @@ def build_pipeline(
     if memory is not None:
         # The scene layer rides with recall: it needs the same store, and a caller that
         # has memories but no scene view is the case this exists to fix.
-        scene = SceneMemory(memory.db)
+        #
+        # One instance, passed in from ``build_runtime`` and shared with the management
+        # API. Constructing it here instead meant the panel read a *different*
+        # ``SceneMemory`` than the pipeline wrote through — same database, so it mostly
+        # worked, but "mostly" is the wrong property for the object that decides what the
+        # model is told about a group.
         pipeline.add(RecallStage(memory, scene=scene))
     if kb is not None:
         pipeline.add(KnowledgeStage(kb))
@@ -553,6 +560,18 @@ def build_runtime(
     if tool_registry is not None:
         tool_registry.register_source(mcp_manager)
 
+    # The scene layer and the skill forge are built here, once, and handed to both the
+    # pipeline and the runtime. Two things follow from that, and both were broken before:
+    #
+    # * the panel and the pipeline operate on the same object, so what the card says is
+    #   what the model was told;
+    # * ``SkillForge`` is actually constructed. It was fully implemented — detection,
+    #   rendering, path safety, front matter — and never instantiated anywhere in the
+    #   service, so no running bot could ever produce a skill. A module no one calls is
+    #   indistinguishable from one that does not exist, except that it passes its tests.
+    scene_layer = SceneMemory(memory.db) if memory is not None else None
+    skill_forge = SkillForge(settings.data_dir / "skills") if memory is not None else None
+
     pipeline = build_pipeline(
         personas=persona_store,
         engine=engine,
@@ -568,6 +587,7 @@ def build_runtime(
         router=router,
         bilibili=bilibili_commands,
         tools=tool_registry,
+        scene=scene_layer,
     )
     # The trace collector is wired here, in the one place that assembles the runtime,
     # rather than in `app.py`. `Pipeline.observe` is the only hook that sees per-stage
@@ -599,6 +619,8 @@ def build_runtime(
         traces=traces,
         mcp=mcp_manager,
         passive=passive,
+        scene=scene_layer,
+        skills=skill_forge,
     )
 
 
