@@ -199,6 +199,14 @@
 ### 6.3 反序列化
 **已防护。** manifest 用 `yaml.safe_load`（非 `load`）。`test_yaml_python_object_tag_is_not_executed` 验证 `!!python/object/apply` 被拒而非执行。插件存储值强制 JSON 可序列化，不接受活对象。
 
+进程间 IPC 同样**不使用 pickle**：4 字节长度前缀 + UTF-8 JSON，子端返回值限定为 JSON 标量/容器，非序列化类型直接报 `non-serialisable result`。`scripts/check_plugin_ipc.py` 在 CI 中对 `src/soapbot/plugins/*.py` 逐文件断言不出现 pickle 原语，防止后人「为了方便传对象」把它加回来。验证方式：
+
+- `tests/test_plugin_ipc_hardening.py`：帧长度头超限时错误含上限、出站帧超限含实际字节与上限、父子两端常量一致；
+- `tests/test_worker_limits.py::test_child_script_does_not_reference_host_module_names`：两个 `-I` 子脚本都做 AST 名检查，不引用宿主模块名；
+- `make ipc-audit`：离线静态门禁，与 CI 的 `Plugin IPC audit` 步骤同款。
+
+请求关联方面，`invoke` 用随机 `rid` 而非自增计数器；`result.id` 与 `call.rid` 不匹配时丢弃并计数，未绑定的回调不会到达 capability dispatcher，见 [部署层 §2.1](deploy-layer.md)。
+
 ### 6.4 权限与访问控制
 **设计合理，已复检。** 三处加固复核通过：
 - 命令/工具授权由**宿主**按已解析 `Principal` 重算，不采信插件的 `min_role` 声明

@@ -67,6 +67,12 @@ jobs:
         # not runtime. `docker build` happens on the deployment host.
         run: python scripts/check_deploy.py
 
+      - name: Plugin IPC audit
+        # Static, offline gate for the negative invariants of the plugin boundary:
+        # no pickle, one frame budget shared with both child scripts, request
+        # correlation ids, parent-side authorization, stdout drain and process cap.
+        run: python scripts/check_plugin_ipc.py
+
       - name: Lint
         run: python -m ruff check src tests
 

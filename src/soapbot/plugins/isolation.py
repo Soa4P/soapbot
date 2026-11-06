@@ -268,7 +268,11 @@ class NullLedger:
 #: Runs inside the child. Kept as a module-level constant (not a nested function)
 #: so it is importable by path from a fresh interpreter.
 _CHILD_BOOTSTRAP = r'''
-import asyncio, importlib.util, inspect, json, os, sys
+import asyncio, importlib.util, inspect, json, os, sys, traceback
+
+# Injected from the host's MAX_FRAME_BYTES at module load. This script is executed
+# by a fresh -I interpreter, so a host module name here would raise NameError.
+_MAX_FRAME_BYTES = __MAX_FRAME_BYTES__
 
 class _HostPackageBlocker:
     """Refuse to import the host package inside a plugin process.
@@ -295,6 +299,10 @@ sys.meta_path.insert(0, _HostPackageBlocker())
 
 def _send(msg):
     data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
+    if len(data) > _MAX_FRAME_BYTES:
+        error = "outbound frame too large: %d bytes > %d limit" % (len(data), _MAX_FRAME_BYTES)
+        msg = {"ok": False, "error": error}
+        data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
     sys.stdout.buffer.write(len(data).to_bytes(4, "big"))
     sys.stdout.buffer.write(data)
     sys.stdout.buffer.flush()
@@ -303,17 +311,25 @@ def _apply_limits():
     """Lower the child's own ceilings. Best effort; POSIX only."""
     try:
         import resource
+        # The default MUST stay a literal. This function is part of
+        # _CHILD_BOOTSTRAP, a standalone script run by a fresh -I interpreter which
+        # cannot import the host package. Referencing DEFAULT_PLUGIN_MEMORY_BYTES
+        # here raised NameError that a bare "except: pass" swallowed, so *every*
+        # limit silently stopped being applied. The resident worker already had this
+        # fixed; the one-shot runner had the same defect.
+        cap = int(os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES") or 512 * 1024 * 1024)
         # Address space: a memory-bomb plugin dies alone instead of taking the bot
         # down with it (the OOM killer picks the largest process, not the guilty one).
-        cap = int(
-            os.environ.get("SOAPBOT_PLUGIN_MEM_BYTES", DEFAULT_PLUGIN_MEMORY_BYTES)
-        )
         resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
         # No core dumps: a dump of this process can contain host memory inherited
         # before exec, which would turn a crash into a disclosure.
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except ImportError:
+        pass  # Windows: no rlimits at all. The only expected way to get here.
     except Exception:
-        pass  # Windows, or a platform without these limits.
+        # Visible rather than silent: a containment failure must show up in the
+        # stderr drain, not disappear into a bare pass.
+        traceback.print_exc(file=sys.stderr)
 
 async def _invoke(fn, payload):
     caller = payload.get("caller") or {}
@@ -332,17 +348,51 @@ async def _invoke(fn, payload):
         out = await out
     return out
 
+def _boot_path(req):
+    """Re-check the plugin directory inside the child. Defence in depth.
+
+    The host validated the path before passing it, but the request crosses a pipe.
+    A tampered request must not be able to point the child's import machinery at an
+    arbitrary file, so resolve it here too and require a real main.py inside the root.
+    """
+    raw = req.get("plugin_dir")
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("missing plugin_dir")
+    root = os.path.realpath(raw)
+    if not os.path.isdir(root):
+        raise ValueError("plugin_dir is not a directory")
+    entry = os.path.realpath(os.path.join(root, "main.py"))
+    if os.path.commonpath([root, entry]) != root:
+        raise ValueError("main.py escapes plugin_dir")
+    if not os.path.isfile(entry) or os.path.islink(os.path.join(root, "main.py")):
+        raise ValueError("main.py is not a regular file")
+    return root, entry
+
+
 def main():
     _apply_limits()
-    req = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    sys.path.insert(0, req["plugin_dir"])
+    raw = sys.stdin.buffer.read(_MAX_FRAME_BYTES + 1)
+    if len(raw) > _MAX_FRAME_BYTES:
+        _send({"ok": False, "error": "inbound request too large: %d bytes > %d limit"
+               % (len(raw), _MAX_FRAME_BYTES)})
+        return
     try:
-        spec = importlib.util.spec_from_file_location(
-            "plugin_main", os.path.join(req["plugin_dir"], "main.py")
-        )
+        req = json.loads(raw.decode("utf-8"))
+        if not isinstance(req, dict):
+            raise ValueError("request is not an object")
+        attr = req.get("attr") or "Plugin"
+        if not isinstance(attr, str) or not attr.isidentifier():
+            raise ValueError("invalid attr")
+        root, entry = _boot_path(req)
+    except (ValueError, UnicodeDecodeError, OSError) as exc:
+        _send({"ok": False, "error": type(exc).__name__})
+        return
+    sys.path.insert(0, root)
+    try:
+        spec = importlib.util.spec_from_file_location("plugin_main", entry)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        target = getattr(mod, req["attr"])
+        target = getattr(mod, attr)
 
         handler = req.get("handler")
         if handler:
@@ -377,12 +427,19 @@ if __name__ == "__main__":
     main()
 '''
 
+# Both child scripts are standalone -I programs. Inject the one shared protocol
+# constant as a literal so the parent, the resident worker and the one-shot runner
+# can never disagree about the frame budget.
+_CHILD_BOOTSTRAP = _CHILD_BOOTSTRAP.replace("__MAX_FRAME_BYTES__", str(MAX_FRAME_BYTES))
+
 
 async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any]:
     header = await reader.readexactly(4)
     length = int.from_bytes(header, "big")
     if length <= 0 or length > MAX_FRAME_BYTES:
-        raise IsolationError(f"refusing frame of {length} bytes")
+        raise IsolationError(
+            f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
+        )
     body = await reader.readexactly(length)
     return json.loads(body.decode("utf-8"))
 
@@ -426,6 +483,8 @@ class IsolatedRunner:
         # master key".
         env = sanitize_env(extra={"SOAPBOT_PLUGIN_MEM_BYTES": str(self.memory_bytes)})
 
+        if not isinstance(attr, str) or not attr.isidentifier():
+            raise IsolationError("invalid plugin entry attribute")
         request = json.dumps(
             {
                 "plugin_dir": str(plugin_dir),
@@ -434,6 +493,11 @@ class IsolatedRunner:
                 "payload": payload,
             }
         ).encode("utf-8")
+        if len(request) > MAX_FRAME_BYTES:
+            raise IsolationError(
+                f"refusing to send request of {len(request)} bytes "
+                f"(limit {MAX_FRAME_BYTES})"
+            )
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -463,20 +527,55 @@ class IsolatedRunner:
         except OSError as exc:  # pragma: no cover - depends on environment
             raise IsolationError(f"could not start plugin process: {exc}") from exc
 
+        # ``communicate()`` reads stdout until EOF with no byte ceiling: a plugin
+        # writing junk directly to fd 1 could make the *host* buffer arbitrarily
+        # much data. Read exactly one bounded length-prefixed frame instead.
+        assert proc.stdin and proc.stdout and proc.stderr
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(request), timeout=self.timeout
-            )
-        except TimeoutError as exc:
-            # The parent kills the child *tree*. This is the guarantee that a hung
-            # plugin cannot wedge a session: the plugin's own SIGTERM handling is
-            # irrelevant, and its helpers die with it.
-            _kill_tree(proc)
-            with SuppressProcessLookup():
-                await proc.wait()
-            raise PluginTimeoutError(
-                f"plugin did not answer within {self.timeout:.1f}s"
-            ) from exc
+            proc.stdin.write(request)
+            await proc.stdin.drain()
+            proc.stdin.close()
+            # Keep stderr draining so a chatty child cannot block on its own stderr
+            # pipe while the parent waits for the reply.
+            stderr_task = asyncio.create_task(proc.stderr.read(64 * 1024))
+            try:
+                header = await asyncio.wait_for(
+                    proc.stdout.readexactly(4), timeout=self.timeout
+                )
+                length = int.from_bytes(header, "big")
+                if length <= 0 or length > MAX_FRAME_BYTES:
+                    raise IsolationError(
+                        f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
+                    )
+                body = await asyncio.wait_for(
+                    proc.stdout.readexactly(length), timeout=self.timeout
+                )
+                stdout = header + body
+                # Reap with a bound: a child that keeps writing after its reply must
+                # not hold the parent on proc.wait() forever.
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+                except TimeoutError:
+                    _kill_tree(proc)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except asyncio.IncompleteReadError as exc:
+                raise PluginCrashedError("plugin process produced no output") from exc
+            except TimeoutError as exc:
+                # The parent kills the child *tree*: its own SIGTERM handling is
+                # irrelevant, and helpers die with it.
+                _kill_tree(proc)
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+                raise PluginTimeoutError(
+                    f"plugin did not answer within {self.timeout:.1f}s"
+                ) from exc
+            finally:
+                stderr_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await stderr_task
+        except OSError as exc:  # pragma: no cover - platform dependent
+            raise IsolationError(f"plugin I/O failed: {type(exc).__name__}") from exc
 
         if proc.returncode != 0:
             # Never include stderr text in the exception: it is plugin-controlled and
@@ -489,8 +588,16 @@ class IsolatedRunner:
             raise PluginCrashedError("plugin process produced no output")
 
         try:
+            if len(stdout) < 4:
+                raise ValueError("truncated length header")
             length = int.from_bytes(stdout[:4], "big")
+            if length <= 0 or length > MAX_FRAME_BYTES:
+                raise IsolationError(
+                    f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
+                )
             body = stdout[4 : 4 + length]
+            if len(body) != length:
+                raise ValueError("truncated frame body")
             reply = json.loads(body.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise IsolationError("plugin sent a malformed frame") from exc

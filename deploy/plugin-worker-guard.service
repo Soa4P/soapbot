@@ -1,0 +1,13 @@
+[Unit]
+Description=Read-only plugin worker watchdog for soapbot
+Documentation=file:///opt/soapbot/docs/deploy-layer.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The script only inspects: it never kills, restarts or writes business data.
+# Recovery belongs to the supervisor's explicit-reset circuit breaker, not a timer.
+ExecStart=/usr/bin/python3 /opt/soapbot/scripts/plugin_worker_guard.py --json
+# A stuck docker/ps call must not block the next tick.
+TimeoutStartSec=30

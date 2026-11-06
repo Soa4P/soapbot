@@ -40,6 +40,9 @@
 | 上游连通性静态检查 | `security/posture.py` | `tests/test_posture.py`（7 项：空配置、缺文件、坏 YAML、本机端点、明文 http、远端、进报告） | `python -m soapbot.cli doctor` 实跑，输出 `[warn] provider.upstream (medium)` | **自动 + 实测** |
 | `doctor --probe` 网络探测 | `security/posture.py`、`cli.py` | `test_posture.py`：401 ⇒ 可达、503 ⇒ 不可达（mock transport，规则本身）；另有本地回环服务端的 Socket 测试 | 只对本地回环跑过。**本机回环被拦截返回 502，那条 Socket 测试在此环境会 skip**，规则由 mock 版覆盖 | **仅自动**（真实云端探测**未验证**） |
 | 进度看板契约 | `docs/progress/` | `tests/test_progress_board.py`（8 项：时间戳带时区、状态枚举、blocked 必须写原因、done 不得留未完成文件） | 浏览器打开：显示「最后更新 32 秒前」，无陈旧横幅 | **自动 + 实测** |
+| 插件 IPC 请求关联与帧预算 | `plugins/supervisor.py`、`plugins/isolation.py` | `tests/test_plugin_ipc_hardening.py`（伪造/迟到结果丢弃、未绑定回调拒绝、父子帧上限一致、出站超限含实际字节）、`tests/test_worker_limits.py`（两个 `-I` 子脚本的 AST 名检查） | 本机实跑 `scripts/check_plugin_ipc.py`，逐条打印证据行并全部成立 | **自动 + 实测**（本机；生产容器内的帧洪水与真实崩溃仍按下方「未验证」处理） |
+| 进程数上限与统一回收 | `config.py`、`core/builder.py`、`plugins/loader.py`、`app.py` | `tests/test_plugin_ipc_hardening.py`（容量 fail-closed、非法值拒绝、退出看护 reap 与代际守卫）、`tests/test_deploy_isolation.py`（熔断不随时间自动恢复） | — | **仅自动** |
+| 离线审计门禁与只读巡检 | `scripts/check_plugin_ipc.py`、`scripts/plugin_worker_guard.py`、`deploy/plugin-worker-guard.{service,timer}` | `tests/test_plugin_ipc_hardening.py`（门禁对故意移除不变量会失败、巡检自检的解析断言）、`make ipc-audit`、`make guard` | 本机执行过门禁与 `--self-test`；**未**在生产上执行过 `docker compose ps` / `ps` 的真实巡检 | **仅自动**（真实 docker/ps 路径未验证） |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 

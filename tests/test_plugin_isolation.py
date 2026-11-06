@@ -256,7 +256,10 @@ def _write_plugin(dir_: Path, source: str) -> Path:
 async def _run(source: str, *, timeout: float = 3.0):
     tmp = Path(tempfile.mkdtemp())
     _write_plugin(tmp, source)
-    runner = IsolatedRunner(timeout=timeout, memory_bytes=256 * 1024 * 1024)
+    # The child now actually applies RLIMIT_AS (a host-module name used to make the
+    # call fail silently). 256 MiB is below what a bare CPython reserves in virtual
+    # address space, so these isolation tests use the same floor as production.
+    runner = IsolatedRunner(timeout=timeout, memory_bytes=512 * 1024 * 1024)
     return await runner.run_entry(
         plugin_dir=tmp,
         attr="Plugin",
@@ -306,7 +309,7 @@ PLUGIN = (
 async def main() -> None:
     plugin_dir = Path(tempfile.mkdtemp())
     (plugin_dir / "main.py").write_text(PLUGIN, encoding="utf-8")
-    runner = IsolatedRunner(timeout=3.0, memory_bytes=256 * 1024 * 1024)
+    runner = IsolatedRunner(timeout=3.0, memory_bytes=512 * 1024 * 1024)
     try:
         await runner.run_entry(
             plugin_dir=plugin_dir,
