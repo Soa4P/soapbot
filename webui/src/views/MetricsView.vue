@@ -85,6 +85,13 @@ const counters = computed(() => {
 })
 
 const hasSamples = computed(() => (data.value?.samples.length ?? 0) > 1)
+const metricDiagnosis = computed(() => {
+  if (!summary.value) return t('metrics.noDataDiagnosis')
+  const counts = summary.value.counters
+  if (counts.failed > 0) return t('metrics.failedDiagnosis', { count: counts.failed })
+  if (counts.halted > 0) return t('metrics.haltedDiagnosis', { count: counts.halted })
+  return t('metrics.healthyDiagnosis')
+})
 
 onMounted(() => void load())
 
@@ -120,6 +127,13 @@ function fmtCount(value: number): string {
 
 <template>
   <div v-if="error" class="error-banner" role="alert">{{ error }}</div>
+  <section class="panel">
+    <div class="panel__body">
+      <div class="eyebrow">{{ t('metrics.diagnosis') }}</div>
+      <h2>{{ metricDiagnosis }}</h2>
+      <p class="hint">{{ t('metrics.nextStep') }}</p>
+    </div>
+  </section>
 
   <section class="panel">
     <div class="panel__head">

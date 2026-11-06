@@ -338,6 +338,8 @@ async def write_group_scope(
     updates = {
         "SOAPBOT_REPLY_GROUPS": ",".join(reply),
         "SOAPBOT_MEMORY_COLLECT_GROUPS": ",".join(collect),
+        # An explicit empty value must override the deprecated alias on restart.
+        "SOAPBOT_GROUP_ALLOWLIST": "",
     }
     path = _env_path()
     try:

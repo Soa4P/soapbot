@@ -39,7 +39,48 @@ class VoiceUnavailableError(RuntimeError):
 
 
 class TtsEngine(Protocol):
+    provider: str
+    voice: str
+
     async def synthesize(self, text: str) -> str: ...
+
+    def status(self) -> dict[str, object]: ...
+
+
+class ProviderTts:
+    """Generic HTTP TTS contract; credentials are referenced, never stored here."""
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        endpoint: str,
+        voice: str,
+        api_key_ref: str = "",
+        timeout_seconds: float = 15.0,
+        max_chars: int = DEFAULT_MAX_CHARS,
+    ) -> None:
+        self.provider = provider
+        self.endpoint = endpoint
+        self.voice = voice
+        self.api_key_ref = api_key_ref
+        self.timeout_seconds = timeout_seconds
+        self.max_chars = max_chars
+
+    def status(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "endpoint": self.endpoint,
+            "voice": self.voice,
+            "api_key_configured": bool(self.api_key_ref),
+            "timeout_seconds": self.timeout_seconds,
+            "max_chars": self.max_chars,
+        }
+
+    async def synthesize(self, text: str) -> str:
+        raise VoiceUnavailableError(
+            f"provider {self.provider} has no transport implementation", code="not_implemented"
+        )
 
 
 class EdgeTts:
@@ -55,6 +96,17 @@ class EdgeTts:
         self.voice = voice
         self.max_chars = max_chars
         self.rate = rate
+        self.provider = "edge"
+
+    def status(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "endpoint": "microsoft edge speech",
+            "voice": self.voice,
+            "api_key_configured": False,
+            "timeout_seconds": None,
+            "max_chars": self.max_chars,
+        }
 
     async def synthesize(self, text: str) -> str:
         """Return base64 audio, ready for :meth:`MessageSegment.record`.

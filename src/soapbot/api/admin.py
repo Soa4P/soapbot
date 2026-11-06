@@ -1165,26 +1165,55 @@ async def recent_logs(
     limit: int = Query(200, ge=1, le=2000),
     level: str = Query("", description="minimum level: DEBUG / INFO / WARNING / ERROR"),
     contains: str = Query("", max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
-    """Tail of the in-process log ring buffer.
+    """Tail of the in-process log ring buffer, with role-filtered details.
 
     Served from the bounded ring (``logging_setup``) rather than the log file: reading
     the file would let a caller walk arbitrary amounts of it, and it may not exist on a
     read-only container filesystem.
     """
     from soapbot.logging_setup import get_ring
+    from soapbot.security.audit import _redact_detail as redact_log
 
     levels = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
     floor = levels.get(level.upper(), 0)
     needle = contains.lower()
 
     entries = list(get_ring())
+    if _role_of(auth).rank < Role.ADMIN.rank:
+        return {
+            "entries": [],
+            "count": 0,
+            "total": len(entries),
+            "issues": sum(levels.get(str(e.get("level", "")), 0) >= 30 for e in entries),
+            "details_restricted": True,
+        }
     if floor:
         entries = [e for e in entries if levels.get(str(e.get("level", "")), 0) >= floor]
     if needle:
         entries = [e for e in entries if needle in str(e.get("msg", "")).lower()]
-    return {"entries": entries[-limit:], "count": min(len(entries), limit), "total": len(entries)}
+    visible = entries[-limit:]
+
+    def safe_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: "***REDACTED***" if any(
+                    term in str(key).lower() for term in ("token", "secret", "password", "key", "authorization", "cookie")
+                ) else safe_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [safe_value(item) for item in value]
+        return redact_log(value) if isinstance(value, str) else value
+
+    return {
+        "entries": [safe_value(entry) for entry in visible],
+        "count": len(visible),
+        "total": len(entries),
+        "issues": sum(levels.get(str(e.get("level", "")), 0) >= 30 for e in entries),
+        "details_restricted": False,
+    }
 
 
 @router.get("/access")

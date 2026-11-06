@@ -130,7 +130,7 @@ class AuditLog:
                 event.role,
                 event.scene,
                 event.group_id,
-                detail,
+                event.detail,
                 trace_id,
             )
         elif outcome in ("block", "quarantine"):
@@ -140,7 +140,7 @@ class AuditLog:
                 outcome.upper(),
                 action,
                 event.user_id or "?",
-                detail,
+                event.detail,
                 trace_id,
             )
         else:

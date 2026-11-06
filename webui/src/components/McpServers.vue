@@ -117,6 +117,8 @@ async function load(): Promise<void> {
 
 function markEdited(key: string): void {
   edited.value = { ...edited.value, [key]: true }
+  diff.value = null
+  confirmOpen.value = false
   outcome.value = null
 }
 
@@ -148,12 +150,16 @@ function requestDelete(row: Draft): void {
     return
   }
   row.pendingDelete = true
+  diff.value = null
+  confirmOpen.value = false
   expanded.value = ''
   outcome.value = null
 }
 
 function undoDelete(row: Draft): void {
   row.pendingDelete = false
+  diff.value = null
+  confirmOpen.value = false
   outcome.value = null
 }
 
