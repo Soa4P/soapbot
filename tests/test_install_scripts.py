@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 PS1 = ROOT / "scripts" / "install.ps1"
@@ -22,13 +23,21 @@ def test_both_installers_exist() -> None:
     assert SH.is_file() and SH.stat().st_size > 500
 
 
-def test_windows_task_name_matches_the_panel_hint() -> None:
-    """The panel generates a restart command; it must name the task this creates."""
-    from soapbot.api.service_hint import restart_hint
+def test_windows_task_name_matches_the_panel_hint(monkeypatch) -> None:
+    """The panel generates a restart command; it must name the task this creates.
+
+    The hint is platform-dependent, so the Windows branch is pinned explicitly: on a
+    Linux runner ``restart_hint()`` returns systemctl and this assertion would be
+    checking the wrong string.
+    """
+    import soapbot.api.service_hint as hint
+
+    monkeypatch.setattr(hint, "in_container", lambda: False)
+    monkeypatch.setattr(hint, "os", SimpleNamespace(name="nt", environ={}))
 
     script = PS1.read_text(encoding="utf-8")
     assert "$TaskName = 'SoapbotBot'" in script
-    assert "SoapbotBot" in restart_hint().replace("schtasks", "")
+    assert "/TN SoapbotBot" in hint.restart_hint()
 
 
 def test_installers_never_print_the_bootstrap_token() -> None:
