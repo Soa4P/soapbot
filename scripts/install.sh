@@ -48,24 +48,22 @@ if [ -z "$PY" ]; then
 fi
 ok "using $($PY -c 'import sys; print(sys.executable, sys.version.split()[0])')"
 
-if [ ! -d "$DIR" ]; then
-  step "downloading soapbot into $DIR"
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TARBALL" -o "$tmp/soapbot.tar.gz"
-  else
-    wget -qO "$tmp/soapbot.tar.gz" "$TARBALL"
-  fi
-  mkdir -p "$DIR"
-  tar -xzf "$tmp/soapbot.tar.gz" -C "$tmp"
-  inner="$(find "$tmp" -maxdepth 1 -type d -name 'soapbot-*' | head -n1)"
-  cp -a "$inner/." "$DIR/"
-  ok "code extracted"
+# Always fetch: an earlier version only downloaded when the directory was missing, so
+# "rerun to update" kept the old code. The archive has no data/ or .venv, so copying
+# over an existing install leaves both alone.
+step "fetching the current code into $DIR"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$TARBALL" -o "$tmp/soapbot.tar.gz"
 else
-  step "reusing $DIR"
-  ok "existing data directory kept as-is"
+  wget -qO "$tmp/soapbot.tar.gz" "$TARBALL"
 fi
+mkdir -p "$DIR"
+tar -xzf "$tmp/soapbot.tar.gz" -C "$tmp"
+inner="$(find "$tmp" -maxdepth 1 -type d -name 'soapbot-*' | head -n1)"
+cp -a "$inner/." "$DIR/"
+ok "code updated; data/ and .venv untouched"
 
 VENV="$DIR/.venv"
 if [ ! -x "$VENV/bin/python" ]; then
