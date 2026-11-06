@@ -726,6 +726,293 @@ async def knowledge_detail(
     return detail
 
 
+# --------------------------------------------------------------------- scene layer
+#
+# The scene layer existed, was tested, and was injected into every prompt — and had no
+# interface at all. The only way to see a card was to read the database, and the only way
+# to produce a skill was to call ``SkillForge`` from a REPL. That is the same shape as the
+# knowledge-base gap this module already fixed: a capability that is real, wired into the
+# pipeline, and unreachable from the panel that is supposed to describe it.
+#
+# Two rules govern the write endpoints below:
+#
+# * **Rebuild is explicit.** ``refresh`` recomputes from stored memories; it never invents
+#   anything. The card and portrait are derived views, so "regenerate" cannot produce a
+#   summary the evidence does not support.
+# * **Skills are files.** Generating one writes a Markdown file under the data volume,
+#   which is why deletion goes through ``SkillForge.delete`` rather than the database, and
+#   why the scope is validated there rather than here.
+
+
+def _scene_or_503():
+    runtime = _runtime()
+    scene = getattr(runtime, "scene", None)
+    if scene is None:
+        raise HTTPException(status_code=503, detail="scene layer is not initialised")
+    return scene
+
+
+@router.get("/memory/scenes")
+async def memory_scenes(
+    limit: int = Query(100, ge=1, le=500),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Every conversation the bot has memories for, with its card state.
+
+    Driven by memories rather than by stored cards: a scope with memories and no card is
+    the case the panel most needs to show, because it is the one an operator can act on.
+    """
+    rows = await _scene_or_503().list_scenes(limit=limit)
+    return {"scenes": rows, "count": len(rows)}
+
+
+@router.get("/memory/scene")
+async def memory_scene(
+    scope: str = Query(..., min_length=1, max_length=200),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """The stored card and portrait for one scope.
+
+    ``None`` for either is a real answer, not an error: a conversation can hold memories
+    and have no card yet, and the panel renders that as "not built" rather than as a
+    failure. Returning 404 would make the normal first-visit case look broken.
+    """
+    scene = _scene_or_503()
+    card = await scene.get_card(scope)
+    portrait = await scene.get_portrait(scope)
+    return {
+        "scope": scope,
+        "card": _card_json(card),
+        "portrait": _portrait_json(portrait),
+    }
+
+
+@router.post("/memory/scene/refresh")
+async def memory_scene_refresh(
+    scope: str = Query(..., min_length=1, max_length=200),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Rebuild and persist the card and portrait from stored memories.
+
+    Idempotent and cheap to repeat: both views are derived, so a second call over
+    unchanged evidence produces the same result. The portrait is *dropped* rather than
+    kept when the scope falls below the evidence threshold, which is what makes this safe
+    to run after a deletion.
+    """
+    scene = _scene_or_503()
+    card, portrait = await scene.refresh(scope)
+    return {
+        "ok": True,
+        "scope": scope,
+        "card": _card_json(card),
+        "portrait": _portrait_json(portrait),
+        "portrait_withheld": portrait.confidence <= 0.0,
+    }
+
+
+def _card_json(card: Any) -> dict | None:
+    if card is None:
+        return None
+    return {
+        "scope": card.scope,
+        "title": card.title,
+        "summary": card.summary,
+        "topics": list(card.topics),
+        "people": list(card.people),
+        "memory_count": card.memory_count,
+        "updated_at": card.updated_at,
+        # The rendered form is what the model actually receives. Showing it verbatim is
+        # the difference between "the panel describes the feature" and "the panel shows
+        # the artefact" — an operator can see the exact text and the token cost.
+        "prompt": card.to_prompt(),
+    }
+
+
+def _portrait_json(portrait: Any) -> dict | None:
+    if portrait is None:
+        return None
+    return {
+        "scope": portrait.scope,
+        "headline": portrait.headline,
+        "themes": list(portrait.themes),
+        "tone": portrait.tone,
+        "recurring_questions": list(portrait.recurring_questions),
+        "memory_count": portrait.memory_count,
+        "confidence": portrait.confidence,
+        "updated_at": portrait.updated_at,
+        "prompt": portrait.to_prompt(),
+    }
+
+
+@router.get("/memory/skills")
+async def memory_skills(
+    scope: str = Query(..., min_length=1, max_length=200),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Skills stored for one scene.
+
+    Scoped by construction: ``SkillForge.load`` reads exactly one folder, and there is no
+    "all skills" endpoint on purpose. A private skill that any scope could enumerate would
+    not be private, and the leak would be silent — the content would simply appear in a
+    list nobody expected to be cross-scope.
+    """
+    runtime = _runtime()
+    forge = getattr(runtime, "skills", None)
+    if forge is None:
+        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+    skills = forge.load(scope)
+    return {
+        "scope": scope,
+        "skills": [
+            {
+                "skill_id": s.skill_id,
+                "title": s.title,
+                "body": s.body,
+                "support": s.support,
+                "confidence": s.confidence,
+                # Relative to the skills root, not the bare file name: the name alone is
+                # ambiguous across scopes (every scene has its own folder), so an operator
+                # reading "部署.md" would not know which conversation's file it is.
+                "file": _relative_to_root(s.path, forge.root),
+            }
+            for s in skills
+        ],
+        "count": len(skills),
+    }
+
+
+def _relative_to_root(path: Any, root: Any) -> str:
+    """Path relative to the skills root, for display. Empty when unknown."""
+    if path is None:
+        return ""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        # Outside the root should be impossible (``save`` refuses it), but a display
+        # helper must not raise on the one input that would mean the guard failed.
+        return path.name
+
+
+@router.get("/memory/skills/candidates")
+async def memory_skill_candidates(
+    scope: str = Query(..., min_length=1, max_length=200),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Clusters that would become skills, without writing anything.
+
+    Separate from generation so the operator can see *why* a skill would exist — which
+    memories, which topic — before a file appears on disk. The whole design argument for
+    keyword clustering over embeddings is that this list is checkable by a human; hiding
+    it behind a one-click "generate" would throw that away.
+    """
+    runtime = _runtime()
+    forge = getattr(runtime, "skills", None)
+    scene = getattr(runtime, "scene", None)
+    if forge is None or scene is None:
+        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+
+    triples = await scene.evidence(scope)
+    candidates = forge.candidates(triples)
+    existing = {s.skill_id for s in forge.load(scope)}
+    return {
+        "scope": scope,
+        "candidates": [
+            {
+                "topic": c.topic,
+                "support": c.support,
+                "memories": list(c.memories),
+                # Already on disk: the panel offers "regenerate" instead of "create", so
+                # the button does not silently overwrite a skill the operator hand-edited.
+                "exists": _skill_id_for(c.topic) in existing,
+            }
+            for c in candidates
+        ],
+        "count": len(candidates),
+    }
+
+
+def _skill_id_for(topic: str) -> str:
+    """The file name a topic would produce.
+
+    Imported from the forge rather than reimplemented: the slug rule (digest on
+    truncation, digest on case collision) is exactly the kind of detail that drifts when
+    copied, and a drifted copy here would report "not created yet" for a skill that
+    exists.
+    """
+    from soapbot.memory.skills import _slug
+
+    return _slug(topic)
+
+
+class SkillGenerateIn(BaseModel):
+    """One topic to promote into a skill."""
+
+    scope: str = Field(min_length=1, max_length=200)
+    topic: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/memory/skills")
+async def memory_skill_generate(
+    body: SkillGenerateIn,
+    request: Request,
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Write a skill for one topic, from the memories that support it.
+
+    The topic is re-derived from stored evidence rather than trusted from the request: a
+    caller could otherwise name a topic that no memory supports and get a skill whose body
+    is empty, or — worse — pass a topic whose slug collides with an existing skill and
+    overwrite it with nothing. Re-running detection and picking the matching candidate
+    makes the request a *selection*, not an assertion.
+    """
+    locale = request_locale(request)
+    runtime = _runtime()
+    forge = getattr(runtime, "skills", None)
+    scene = getattr(runtime, "scene", None)
+    if forge is None or scene is None:
+        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+
+    triples = await scene.evidence(body.scope)
+    match = next((c for c in forge.candidates(triples) if c.topic == body.topic), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail=t("api.skill_no_evidence", locale))
+
+    skill = forge.build(body.scope, match)
+    path = forge.save(skill)
+    return {
+        "ok": True,
+        "scope": body.scope,
+        "skill_id": skill.skill_id,
+        "title": skill.title,
+        "support": skill.support,
+        "file": _relative_to_root(path, forge.root),
+    }
+
+
+@router.delete("/memory/skills/{skill_id}")
+async def memory_skill_delete(
+    skill_id: str,
+    request: Request,
+    scope: str = Query(..., min_length=1, max_length=200),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """Delete one skill file.
+
+    ``scope`` is a query parameter, not part of the path, because a skill id is only
+    unique *within* a scope — two groups can both have a skill called ``部署``, and a path
+    of ``/skills/部署`` would be ambiguous. Requiring the scope makes the deletion name
+    exactly one file.
+    """
+    locale = request_locale(request)
+    runtime = _runtime()
+    forge = getattr(runtime, "skills", None)
+    if forge is None:
+        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+    if not forge.delete(scope, skill_id):
+        raise HTTPException(status_code=404, detail=t("api.skill_not_found", locale))
+    return {"ok": True, "scope": scope, "skill_id": skill_id}
+
+
 @router.get("/budget")
 async def budget_view(
     status: str = Query("", description="pending / approved / denied / expired / reserved"),

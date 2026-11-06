@@ -652,6 +652,82 @@ class SceneMemory:
             return int(result.rowcount or 0)
 
     # ------------------------------------------------------------------ upkeep
+    async def list_scenes(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Every scope that holds memories, with its stored card if one exists.
+
+        The panel needs an entry point that is not "type a session key": before this, the
+        only way to see a card was to already know which conversation to ask about, which
+        meant the feature was invisible to anyone who had not read the source.
+
+        Driven by ``memories`` rather than by ``scene_cards``, because a scope with
+        memories and no card is the interesting case — it is a conversation the bot has
+        learned from but never summarised, and it should be offered for a rebuild rather
+        than hidden. A card with no memories behind it would be the opposite: a summary of
+        evidence that no longer exists, which ``refresh`` already deletes.
+        """
+        async with self.db.session_factory()() as session:
+            counts = (
+                await session.execute(
+                    select(MemoryRow.scope, func.count(MemoryRow.id))
+                    .group_by(MemoryRow.scope)
+                    .order_by(func.count(MemoryRow.id).desc())
+                    .limit(limit)
+                )
+            ).all()
+            if not counts:
+                return []
+            scopes = [row[0] for row in counts]
+            cards = {
+                row.scope: row
+                for row in (
+                    await session.execute(
+                        select(SceneCardRow).where(SceneCardRow.scope.in_(scopes))
+                    )
+                )
+                .scalars()
+                .all()
+            }
+            portraits = {
+                row.scope: row
+                for row in (
+                    await session.execute(
+                        select(ScenePortraitRow).where(ScenePortraitRow.scope.in_(scopes))
+                    )
+                )
+                .scalars()
+                .all()
+            }
+
+        out: list[dict[str, Any]] = []
+        for scope, count in counts:
+            card = cards.get(scope)
+            portrait = portraits.get(scope)
+            out.append(
+                {
+                    "scope": scope,
+                    "memory_count": int(count),
+                    "title": card.title if card is not None else "",
+                    "summary": card.summary if card is not None else "",
+                    "has_card": card is not None,
+                    "has_portrait": portrait is not None,
+                    "portrait_confidence": portrait.confidence if portrait is not None else 0.0,
+                    "updated_at": card.updated_at if card is not None else 0.0,
+                }
+            )
+        return out
+
+    async def evidence(self, scope: str, *, limit: int = CARD_SOURCE_LIMIT) -> list[tuple[int, str, str]]:
+        """``(id, content, keywords)`` triples for one scope.
+
+        The shape :meth:`soapbot.memory.skills.SkillForge.candidates` expects. Kept here
+        rather than in the API module so the sampling rule is the same one the card uses:
+        a skill distilled from a different window than the card would describe a
+        conversation the card does not mention.
+        """
+        async with self.db.session_factory()() as session:
+            rows = await self._sample(session, scope)
+        return [(row.id, row.content or "", row.keywords or "") for row in rows[:limit]]
+
     async def refresh(self, scope: str, *, title: str = "") -> tuple[SceneCard, ScenePortrait]:
         """Rebuild and persist both views for a scope.
 
