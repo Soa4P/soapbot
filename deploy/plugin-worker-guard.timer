@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodic read-only inspection of soapbot plugin worker processes
+
+[Timer]
+# Every five minutes. A crash loop is visible in the supervisor's health output
+# immediately; this timer exists to catch slow leaks: orphaned children, zombies and
+# a worker count that crept past the configured ceiling.
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=30
+Unit=plugin-worker-guard.service
+
+[Install]
+WantedBy=timers.target

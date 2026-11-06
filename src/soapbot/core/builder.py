@@ -713,7 +713,11 @@ def build_plugin_manager(
 
     from soapbot.plugins.approvals import ApprovalStore, default_path
 
-    supervisor = PluginSupervisor() if isolate else None
+    # Process ceiling comes from settings but is validated again inside the
+    # supervisor, so a direct builder call cannot raise it past the hard limit.
+    supervisor = (
+        PluginSupervisor(max_workers=settings.max_plugin_workers) if isolate else None
+    )
     loader = PluginLoader(
         plugins_dir=plugins_dir,
         audit=audit or get_audit_log(),

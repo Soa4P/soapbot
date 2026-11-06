@@ -12,7 +12,7 @@ else
 	BIN := $(VENV)/bin
 endif
 
-.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks
+.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks ipc-audit guard
 
 help:
 	@echo "make install    创建虚拟环境并安装开发依赖"
@@ -26,6 +26,8 @@ help:
 	@echo "make doclinks   文档相对链接检查（含在 check 内）"
 	@echo "make check      lint + contrast + a11y + gaps + doclinks + test（CI 阻断项同款）"
 	@echo "make deploy-check 容器部署配置静态检查（不需要 docker）"
+	@echo "make ipc-audit   插件进程 / IPC 边界静态审计（含在 check 内）"
+	@echo "make guard       只读巡检插件 worker 进程（需要 docker / ps）"
 	@echo "make ui         构建前端到 src/soapbot/webui/dist"
 	@echo "make progress   启动开发进度看板 http://127.0.0.1:8099/"
 	@echo "make run        启动服务（自动先构建前端）"
@@ -71,6 +73,16 @@ a11y:
 doclinks:
 	$(BIN)/python scripts/check_doc_links.py
 
+# Both child programs are standalone -I scripts; a static audit is what keeps the
+# protocol's negative invariants (no pickle, one frame budget, correlated frames,
+# parent-side authorization, stdout drain, process cap) from quietly regressing.
+ipc-audit:
+	$(BIN)/python scripts/check_plugin_ipc.py
+
+# Read-only: reports worker count, zombies and health. Never restarts a process.
+guard:
+	$(BIN)/python scripts/plugin_worker_guard.py --self-test
+
 # The board is a static page; this is the shortest way to look at it without
 # remembering the flags. Must be HTTP — `file://` blocks the fetch of progress.json.
 progress:
@@ -83,7 +95,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint contrast a11y gaps doclinks test
+check: lint contrast a11y gaps doclinks ipc-audit test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:

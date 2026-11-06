@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -353,6 +353,23 @@ class Settings(BaseSettings):
     means genuinely stuck rather than merely slow.
 
     ``0`` disables it.
+    """
+
+    # ---- plugin process ceiling ----
+    max_plugin_workers: Annotated[int, Field(ge=1, le=64)] = 16
+    """Maximum number of resident plugin worker processes at once.
+
+    One plugin gets one worker. Without a ceiling, the number of processes is simply
+    the number of entries an operator (or an attacker who can write to
+    ``data/plugins``) puts in that directory; each one costs memory, a pipe pair and
+    a potential crash loop. ``pids_limit`` in the container is a last resort, not a
+    policy — by the time it fires the host is already degraded.
+
+    Unlike ``max_inflight_handlers``, ``0`` is deliberately **invalid**: this is a
+    security boundary, and an accidental "unlimited" must fail at startup rather than
+    silently disable the cap. The upper bound matches
+    ``soapbot.plugins.supervisor.MAX_PLUGIN_WORKERS``; the supervisor validates it
+    again at construction so a direct builder call cannot exceed it either.
     """
 
     busy_notice: str = "忙不过来啦，稍后再试一次"

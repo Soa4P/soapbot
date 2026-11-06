@@ -63,6 +63,19 @@
 - 配置写入：`base_hash` 乐观锁 + `approved_hash` 二次确认，防止覆盖他人改动
 - 插件安装：zip slip 规范化、体积/数量上限、临时目录 + 原子移动、
   `manifest_digest` 由服务端重算
+- 插件 IPC：**不用 pickle**，长度前缀 JSON；每次调用一个随机 correlation id，
+  `result` 与 `call` 帧都必须绑定它，伪造/迟到帧丢弃且未绑定的回调不进入授权层；
+  能力与会话 scope 的判定始终在父进程
+- 插件 IPC 预算：父/子两端入站与出站、一次性 runner 的请求与回包共用同一个
+  `MAX_FRAME_BYTES`；超限错误带上限与实际字节；stdout 由常驻 reader 排空，
+  帧洪水会终止进程树而不是撑大宿主内存
+- 插件子进程环境：`sanitize_env()` 白名单，不继承宿主凭据；`SOAPBOT_PLUGIN_*`
+  是唯一可转发前缀
+- 插件进程治理：`SOAPBOT_MAX_PLUGIN_WORKERS`（默认 16，范围 1..64，0 非法）、
+  退出看护 reap、关闭时统一 `stop_all()`；熔断只能显式重置
+- 离线门禁与巡检：`make ipc-audit` / CI `Plugin IPC audit` 固化否定式不变量；
+  `plugin-worker-guard.timer` 每 5 分钟**只读**报告 worker 数、僵尸态与健康接口，
+  绝不自动重启
 - 容器：non-root（uid 10001）、只读根文件系统、`cap_drop: ALL`、
   `no-new-privileges`、宿主机侧仅绑定 loopback
 

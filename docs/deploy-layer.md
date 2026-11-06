@@ -104,16 +104,26 @@ env = sanitize_env(base=os.environ)   # 只保留 PATH/LANG/TZ/HOME 等 11 项
 
 ### 2.1 协议
 
-长度前缀 + JSON，单向写、按 `cid` 关联：
+4 字节大端长度前缀 + UTF-8 JSON，双向管道。序列化**只有 JSON**，没有 `pickle`：子进程的返回值若能被父进程反序列化复活对象图，进程边界就不存在了。`scripts/check_plugin_ipc.py` 把「不得出现 pickle 原语」固化为 CI 门禁。
 
 ```
-parent → child : {"type":"boot", "plugin_dir":..., "api":{...}}   启动上下文
-parent → child : {"type":"call", "cid":N, "handler":..., "caller":{...}, "args":[...]}
-child  → parent: {"type":"ready", "ok":true, "commands":[...], "api":{...}}
-child  → parent: {"type":"request", "cid":N, "surface":"memory.recall", "args":{...}}
-parent → child : {"type":"reply", "cid":N, "ok":true, "value":...}
-child  → parent: {"type":"log", "level":..., "message":...}
+parent → child : {"type":"boot","plugin_dir":...,"attr":...,"max_frame_bytes":N}
+parent → child : {"type":"invoke","id":RID,"handler":...,"caller":{...},"args":[...]}
+child  → parent: {"type":"ready","ok":true,"commands":[...],"api":{...}}
+child  → parent: {"type":"result","id":RID,"ok":true,"value":...}
+child  → parent: {"type":"call","cid":N,"rid":RID,"surface":"memory.recall","args":{...}}
+parent → child : {"type":"reply","cid":N,"ok":true,"value":...}
+child  → parent: {"type":"log" | "fatal", ...}
+parent → child : {"type":"shutdown"}
 ```
+
+`id`/`rid` 是**每次调用随机生成的 correlation id**（`secrets.token_hex(16)`），不是自增计数器。计数器可预测：重启后的子进程可能续上旧序列，伪造帧也能猜出下一个编号。父进程只认当前在飞的那一个请求：
+
+- `result` 的 `id` 不匹配 → 丢弃并计数，绝不作为本次调用的返回值；
+- `call` 的 `rid` 不匹配 → 在查 capability 之前就拒绝，回固定错误串；
+- `invoke` 全程持有 `asyncio.Lock`，因此不存在两个调用交错读同一条管道。
+
+能力判定与会话 scope 仍完全在父进程（见 §1.3）。子进程只能**请求**，不能授权。
 
 用管道而非 socket：管道天然继承、无端口可被同机其它进程连接、无监听面。
 
@@ -127,9 +137,12 @@ child  → parent: {"type":"log", "level":..., "message":...}
 
 ### 2.3 协议健壮性
 
-- 帧长上限 `MAX_FRAME_BYTES`，超限即杀——防止插件用超长帧撑爆宿主内存
-- 子进程往 stdout 写垃圾（绕过 `_stdout` 直接写 `sys.stdout.buffer`）会被判定为协议破坏并终止，**不会**污染宿主解析
-- 未注册的 handler 返回明确错误，不是静默超时
+- **单一帧预算**：`isolation.MAX_FRAME_BYTES`（4 MiB）是唯一常量源。父端入站、父端出站、子端入站、子端出站、一次性 runner 的请求与回包都受它约束。两个子进程脚本由 `-I` 解释器执行，无法 import 宿主模块，所以常量在模块加载时以**字面量注入**——历史上父端 4 MiB、子端硬编码 8 MiB，两端不一致。
+- 超限错误带**上限与实际字节**（`refusing frame of N bytes (limit M)`），运维不用读插件源码就能区分恶意长度头与普通崩溃。子端超限会回一个短的结构化 `result`/`fatal` 帧，而不是让父进程等一个永不来的答复。
+- **stdout 常驻 drain**：一个 reader 任务从启动到退出独占 stdout，解析后的帧放入 `asyncio.Queue(maxsize=4)`。此前只在 `invoke()` 期间读 stdout，空闲期插件写满管道就会把自己阻塞，看起来像挂死。队列满且 0.5 秒无人消费即判定帧洪水并杀进程树，避免「用宿主内存换管道不堵」。
+- stderr 继续常驻 drain、保留脱敏 tail；子进程往 stdout 写垃圾（绕过协议直接写 `sys.stdout.buffer`）仍会被判定为协议破坏并终止。
+- **子端路径复核**：`boot.plugin_dir` 与一次性 runner 的请求都要过 `realpath`、目录存在、`main.py` 是普通文件且未逃逸根目录、`attr` 是合法标识符。父端 `loader.resolve().parents`、名称正则、zip slip 与 manifest digest 仍是信任锚，子端只作纵深防御。
+- 未注册的 handler 返回明确错误，不是静默超时；未知帧类型忽略，保证新旧协议混跑不互相卡死。
 
 ---
 
@@ -144,6 +157,11 @@ child  → parent: {"type":"log", "level":..., "message":...}
 ```
 
 熔断是必须的：一个每条消息都崩的插件，无限重启比不服务更贵。熔断后**不自动恢复**——坏插件应当保持下线，直到有人看它。
+
+> 边界说明：`ensure_running()` 提供带退避与熔断的重启能力并有回归测试，但生产转发器
+> （`context.py` 的 `register_proxied_command/tool`）直接持有 worker 并调用 `invoke()`，
+> **不会**在每条消息上自动重启。worker 崩溃后该插件保持下线，由运维 reload 恢复。
+> 这是刻意的：把重启挂到消息路径上会和「熔断需人工显式恢复」互相打架，也会掩盖敌意插件。
 
 ```python
 # 实测日志
@@ -186,6 +204,15 @@ worker 启动前就被别人花掉一部分，于是子进程第一次 `run_in_e
 8MB 的线程栈都放不下。真正的 fork 炸弹防护是 `killpg`，见下。
 
 超时用 `killpg` 杀**整个进程组**。此前只杀直接子进程，插件 spawn 的 20 个 helper 会存活并继续吃 CPU——"被隔离"的插件仍在烧机器。
+
+另外修复了一个静默失效：`isolation._CHILD_BOOTSTRAP` 的 `_apply_limits()` 曾引用只存在于宿主模块的 `DEFAULT_PLUGIN_MEMORY_BYTES`，`NameError` 被裸 `except: pass` 吞掉，导致一次性 runner 的所有资源限制从未生效。现在默认值是字面量，其它异常会打印到 stderr 而不是消失。
+
+### 3.4 进程数上限与统一回收
+
+- `SOAPBOT_MAX_PLUGIN_WORKERS` 默认 16，范围 `1..64`，`0` 会在启动时被 pydantic 拒绝——这是安全边界，不是吞吐旋钮，`builder` 传入后 `PluginSupervisor` 会再校验一次。`register()` 卡注册数，`start()` 再按**存活进程数**兜底。此前进程数等于插件目录条目数，容器的 `pids_limit` 只是最后一道兜底，触发时宿主已经降级。
+- 每个 worker 有一个 `proc.wait()` 退出看护任务：空闲期崩溃也会被 reap 并置 `_dead`，而不是等到下一次调用读 EOF 才发现。看护任务带**进程代际守卫**，旧进程退出不会把新 worker 标记为已死。
+- `stop()` 取消并 await stdout reader、退出看护与 stderr drain 三个任务；`loader.unload_all()` 末尾与 `app._shutdown()` 的 `finally` 都会调用幂等的 `supervisor.stop_all()`，覆盖「注册了但未加载成功」和「卸载中途抛异常」两条路径。
+- 熔断仍**不自动恢复**（见 §3.1）。新增的 `scripts/plugin_worker_guard.py` 与 `deploy/plugin-worker-guard.timer` 是**只读巡检**：报告容器状态、worker 数、僵尸进程与回环健康接口，绝不 kill 或 restart。自动重启会掩盖敌意插件，也会和熔断策略打架。
 
 ---
 
@@ -325,6 +352,11 @@ tmpfs: [/tmp]
 
 1. **插件目录可写**（`fs.plugin_dir` warn）→ 被攻陷的插件可改写自身代码以持久化。生产应 `:ro` 挂载。
 2. **`bind_caller` 可被恶意插件自行调用**（同进程场景）→ 这正是进程隔离要解决的问题；在隔离子进程中，`bind_caller` 不再有跨调用者提权的意义，因为每次调用都是新帧、caller 由父进程注入。
+3. **子端 `realpath` 复核不是 OS 沙箱**：它防的是伪造/篡改的 boot 帧，不能阻止同 uid 子进程用绝对路径读宿主机文件。该边界仍由容器 `read_only`、`cap_drop` 与独立 uid 承担。
+4. **巡检只报告不修复**：`plugin-worker-guard.timer` 发现超限或僵尸进程时只会写告警，恢复动作仍需运维按熔断策略显式执行。这是刻意的，不是功能缺失。
+5. **隔离模式下 `ctx.send` 目前不可用**（本轮核实发现，属既有行为，未改动）：子端 `_RemoteCtx.send` 会传 `session_key`，而父端 `_FORBIDDEN_ARG_KEYS` 把该键一律拒绝，请求到不了 `surfaces._send` 的 ledger 复核。放开它需要单独评估「允许插件点名会话、由宿主 ledger 裁决」这一授权语义，不在本轮进程/IPC 加固范围内。
+
+参考仓库的可迁移治理机制与「不移植业务设计」的结论见 [DSH 生态参考评估](reference-dsh-ecosystem.md)。
 
 ---
 
@@ -337,6 +369,8 @@ tmpfs: [/tmp]
 - [ ] 插件目录只读挂载
 - [ ] 一个数据目录只跑一个实例
 - [ ] CI 里把 `doctor --strict` 作为部署前门禁
+- [ ] `make ipc-audit`（CI 里同名步骤）通过：无 pickle、两端帧预算一致、请求关联与父端授权未回退
+- [ ] `SOAPBOT_MAX_PLUGIN_WORKERS` 按内存容量设定，且巡检定时器 `plugin-worker-guard.timer` 已启用
 
 ---
 

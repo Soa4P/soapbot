@@ -335,6 +335,14 @@ def test_sanitize_env_drops_secrets() -> None:
             "OPENAI_API_KEY": "sk-live",
             "AWS_SECRET_ACCESS_KEY": "a",
             "PGPASSWORD": "p",
+            # An unbounded set in practice: a denylist cannot enumerate cloud SDK
+            # provider chains, CI tokens and connection strings.
+            "DATABASE_URL": "postgresql://bot:p@db/p",
+            "GOOGLE_APPLICATION_CREDENTIALS": "/run/secrets/sa.json",
+            "AZURE_CLIENT_SECRET": "a",
+            "GITHUB_TOKEN": "g",
+            "CLOUDFLARE_API_TOKEN": "c",
+            "SOAPBOT_INIT_TOKEN": "t",
             "SOAPBOT_PLUGIN_FEATURE": "on",
         }
     )
@@ -345,6 +353,12 @@ def test_sanitize_env_drops_secrets() -> None:
         "OPENAI_API_KEY",
         "AWS_SECRET_ACCESS_KEY",
         "PGPASSWORD",
+        "DATABASE_URL",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_CLIENT_SECRET",
+        "GITHUB_TOKEN",
+        "CLOUDFLARE_API_TOKEN",
+        "SOAPBOT_INIT_TOKEN",
     ):
         assert banned not in env, f"{banned} leaked to the child"
     assert env["PATH"] == "/bin"
@@ -530,6 +544,39 @@ async def test_circuit_can_be_reset_explicitly():
         assert sup.health()[0].circuit_open is False
     finally:
         await sup.stop_all()
+
+
+async def test_circuit_does_not_recover_just_because_time_passed():
+    """The restart *window* expires, but the opened circuit does not.
+
+    An automatic timer-based recovery would hide a plugin that is broken or hostile:
+    the log would show a steady trickle of crashes nobody is expected to notice.
+    """
+    from soapbot.plugins import supervisor as sup_mod
+
+    sup, _ = await _boot(PLAIN)
+    try:
+        sup._circuit["demo"] = True
+        # Simulate a restart history far outside the counting window.
+        sup._restarts["demo"] = [
+            sup_mod.time.time() - sup_mod.RESTART_WINDOW_SECONDS * 10
+        ]
+        assert sup.health()[0].restarts == 0  # the window itself did expire
+        assert sup.health()[0].circuit_open is True
+        with pytest.raises(IsolationError, match="circuit open"):
+            await sup.ensure_running("demo")
+    finally:
+        await sup.stop_all()
+
+
+def test_capability_checks_are_not_downgraded_into_the_child():
+    """The wire carries requests, never a guard: authorization stays in the parent."""
+    from soapbot.plugins import supervisor as sup_mod
+
+    child = sup_mod._CHILD_WORKER
+    for forbidden in ("CapabilityGuard", "CapabilityGrant", "SurfaceRouter", "AuditLog"):
+        assert forbidden not in child, f"{forbidden} must not exist in the child"
+    assert "_handle_callback" in Path(sup_mod.__file__).read_text(encoding="utf-8")
 
 
 async def test_backoff_grows_then_caps():

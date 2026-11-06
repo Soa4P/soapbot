@@ -47,13 +47,23 @@ CPU than serving traffic. Recovery is explicit, never silent.
 
 Protocol (both directions, 4-byte big-endian length + UTF-8 JSON)
 -----------------------------------------------------------------
-parent -> child : {"type":"invoke","id":n,"handler":str,"caller":{...},"args":[...]}
+parent -> child : {"type":"boot","plugin_dir":str,"attr":str,"max_frame_bytes":n}
+parent -> child : {"type":"invoke","id":rid,"handler":str,"caller":{...},"args":[...]}
 parent -> child : {"type":"reply","cid":n,"ok":bool,"value":...,"error":str}
 parent -> child : {"type":"shutdown"}
 child -> parent : {"type":"ready","ok":bool,"commands":[...],"api":{...}}
-child -> parent : {"type":"result","id":n,"ok":bool,"value":...,"error":str}
-child -> parent : {"type":"call","cid":n,"surface":str,"args":{}}
+child -> parent : {"type":"result","id":rid,"ok":bool,"value":...,"error":str}
+child -> parent : {"type":"call","cid":n,"rid":rid,"surface":str,"args":{}}
 child -> parent : {"type":"log","level":str,"message":str}
+child -> parent : {"type":"fatal","error":str}
+
+``id`` is a per-request random correlation id, not a counter: the host refuses a
+``result`` whose id does not match the one request it has in flight, and refuses a
+``call`` whose rid does not match, so a stale, replayed or forged frame cannot be
+mistaken for the answer or trigger a privileged surface. Every frame in both
+directions is bounded by ``isolation.MAX_FRAME_BYTES``; that constant is injected
+into the child script (which runs under a fresh ``-I`` interpreter and therefore
+cannot import the host module).
 """
 
 from __future__ import annotations
@@ -62,6 +72,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import secrets
 import sys
 import time
 from collections import deque
@@ -88,6 +99,35 @@ MAX_RESTARTS_IN_WINDOW = 3
 RESTART_WINDOW_SECONDS = 60.0
 BACKOFF_BASE = 0.25
 BACKOFF_CAP = 8.0
+
+#: Hard ceiling on resident plugin workers. ``config.max_plugin_workers`` may lower
+#: this but never raise it: an unbounded number of plugins would turn a directory of
+#: hostile code into an unbounded number of processes. ``0`` is deliberately invalid
+#: -- unlike ``max_inflight_handlers``, this is a security boundary, not a tuning knob.
+MAX_PLUGIN_WORKERS = 64
+DEFAULT_MAX_PLUGIN_WORKERS = 16
+
+#: Frames buffered between the stdout reader and the invoking coroutine. Small on
+#: purpose: each frame can be MAX_FRAME_BYTES, so an idle plugin must not be able to
+#: grow host memory by writing into a pipe nobody reads.
+_FRAME_QUEUE_SIZE = 4
+_FRAME_QUEUE_PUT_TIMEOUT = 0.5
+
+#: Sentinel pushed when the channel closes, so a waiter never blocks forever.
+_CHANNEL_CLOSED = object()
+
+
+class FrameTooLargeError(IsolationError):
+    """A frame exceeded the byte budget; carries the actual size and the limit."""
+
+
+@dataclass(slots=True)
+class _ActiveRequest:
+    """The single request in flight. The wire is serial; one slot is sufficient."""
+
+    rid: str
+    caller: Any
+    deadline: float
 
 #: Surfaces a plugin may request from the host. Anything not in this set is refused
 #: before it reaches any handler — the wire is an allowlist, so a new surface cannot
@@ -143,10 +183,16 @@ class WorkerCrashedError(PluginCrashedError):
 #: Runs in the resident child. Kept as a string so a fresh ``-I`` interpreter can
 #: execute it without importing the host package (which it must not be able to do).
 _CHILD_WORKER = r'''
-import asyncio, importlib.util, inspect, json, os, sys
+import asyncio, importlib.util, inspect, json, os, sys, traceback
 
 _stdin = sys.stdin.buffer
 _stdout = sys.stdout.buffer
+
+# Injected from the host's isolation.MAX_FRAME_BYTES at module load. The child runs
+# under a fresh -I interpreter: a host module name here would raise NameError.
+_MAX_FRAME_BYTES = __MAX_FRAME_BYTES__
+_frame_limit = [_MAX_FRAME_BYTES]
+_current_rid = [""]
 
 
 def _read_frame():
@@ -154,8 +200,8 @@ def _read_frame():
     if len(head) < 4:
         return None
     n = int.from_bytes(head, "big")
-    if n <= 0 or n > 8 * 1024 * 1024:
-        return None
+    if n <= 0 or n > _frame_limit[0]:
+        raise ValueError("inbound frame too large: %d bytes > %d limit" % (n, _frame_limit[0]))
     try:
         return json.loads(_stdin.read(n).decode("utf-8"))
     except Exception:
@@ -168,6 +214,13 @@ def _send(msg):
     except Exception:
         data = json.dumps({"type": "log", "level": "error",
                            "message": "unserialisable frame"}).encode("utf-8")
+    if len(data) > _frame_limit[0]:
+        error = "outbound frame too large: %d bytes > %d limit" % (len(data), _frame_limit[0])
+        if msg.get("type") == "result":
+            msg = {"type": "result", "id": msg.get("id"), "ok": False, "error": error}
+        else:
+            msg = {"type": "fatal", "error": error}
+        data = json.dumps(msg, ensure_ascii=False).encode("utf-8")
     _stdout.write(len(data).to_bytes(4, "big"))
     _stdout.write(data)
     _stdout.flush()
@@ -182,10 +235,13 @@ def _call(surface, args):
     The child has no way to authorize itself: it can only *request*. Every request
     lands in the parent dispatcher, which re-checks the capability and supplies the
     session scope from the caller it recorded. That is why the pipe is bidirectional.
+    ``rid`` is copied from the invoke frame the host sent; the child cannot mint it
+    and the host refuses a callback whose rid is not the request in flight.
     """
     _next_cid[0] += 1
     cid = _next_cid[0]
-    _send({"type": "call", "cid": cid, "surface": surface, "args": args})
+    _send({"type": "call", "cid": cid, "rid": _current_rid[0],
+           "surface": surface, "args": args})
     while True:
         frame = _read_frame()
         if frame is None:
@@ -457,21 +513,58 @@ def _install_stubs():
     sys.modules["soapbot.security.principal"] = principal
 
 
+def _boot_path(boot):
+    """Re-check the plugin directory inside the child. Defence in depth.
+
+    The host already validated this path (loader.resolve().parents, name regex, zip
+    slip, digest). This second check makes a forged or tampered boot frame useless:
+    the child refuses a directory that is not real, an entry point that escapes the
+    resolved root, or a main.py that is a symlink rather than a regular file.
+    """
+    raw = boot.get("plugin_dir")
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("missing plugin_dir")
+    root = os.path.realpath(raw)
+    if not os.path.isdir(root):
+        raise ValueError("plugin_dir is not a directory")
+    main = os.path.realpath(os.path.join(root, "main.py"))
+    if os.path.commonpath([root, main]) != root:
+        raise ValueError("main.py escapes plugin_dir")
+    if not os.path.isfile(main) or os.path.islink(os.path.join(root, "main.py")):
+        raise ValueError("main.py is not a regular file")
+    return root, main
+
+
 async def _serve():
-    boot = _read_frame()
-    if not boot:
+    try:
+        boot = _read_frame()
+    except ValueError as exc:
+        _send({"type": "ready", "ok": False, "error": str(exc)[:200]})
+        return
+    if not boot or boot.get("type") != "boot":
+        return
+    limit = boot.get("max_frame_bytes", _MAX_FRAME_BYTES)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0 or limit > _MAX_FRAME_BYTES:
+        _send({"type": "ready", "ok": False, "error": "invalid frame limit"})
+        return
+    _frame_limit[0] = limit
+    attr = boot.get("attr") or "Plugin"
+    if not isinstance(attr, str) or not attr.isidentifier():
+        _send({"type": "ready", "ok": False, "error": "invalid attr"})
         return
     _apply_limits()
     _install_stubs()
-    sys.path.insert(0, boot["plugin_dir"])
+    try:
+        root, main = _boot_path(boot)
+    except (ValueError, OSError):
+        _send({"type": "ready", "ok": False, "error": "invalid plugin_dir"})
+        return
+    sys.path.insert(0, root)
     ctx = _RemoteCtx()
     try:
-        spec = importlib.util.spec_from_file_location(
-            "plugin_main", os.path.join(boot["plugin_dir"], "main.py")
-        )
+        spec = importlib.util.spec_from_file_location("plugin_main", main)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        attr = boot.get("attr") or "Plugin"
         cls = getattr(mod, attr, None)
         if cls is None or cls is _StubPlugin:
             # ``attr`` defaulted to "Plugin", which resolves to the *imported base
@@ -531,6 +624,13 @@ async def _serve():
             return
         if kind != "invoke":
             continue
+        rid = frame.get("id")
+        if not isinstance(rid, str) or not rid:
+            _send({"type": "fatal", "error": "invoke without correlation id"})
+            return
+        # Callbacks issued while this handler runs carry this rid. The host will
+        # refuse any callback whose rid is not the request it currently has in flight.
+        _current_rid[0] = rid
         name = frame.get("handler")
         fn = ctx._commands.get(name)
         if fn is None:
@@ -574,25 +674,47 @@ async def _serve():
 asyncio.run(_serve())
 '''
 
+# The child is a standalone ``-I`` script: it cannot import the host module. Inject
+# the one shared protocol constant as a literal so the two ends cannot drift (the
+# child used to hardcode 8 MiB while the parent allowed 4 MiB).
+_CHILD_WORKER = _CHILD_WORKER.replace("__MAX_FRAME_BYTES__", str(MAX_FRAME_BYTES))
+
 
 # -------------------------------------------------------------------------- parent
 
 
 async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
-    """Read one length-prefixed frame. ``None`` means clean EOF."""
+    """Read one length-prefixed frame. ``None`` means clean EOF.
+
+    The error carries both the declared size and the limit: an operator seeing
+    "refusing frame of 9000000 bytes (limit 4194304)" can tell a malicious length
+    header from an ordinary crash without reading the plugin's source.
+    """
     try:
         header = await reader.readexactly(4)
     except asyncio.IncompleteReadError:
         return None
     length = int.from_bytes(header, "big")
     if length <= 0 or length > MAX_FRAME_BYTES:
-        raise IsolationError(f"refusing frame of {length} bytes")
+        raise IsolationError(
+            f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
+        )
     body = await asyncio.wait_for(reader.readexactly(length), timeout=30)
     return json.loads(body.decode("utf-8"))
 
 
 async def _write_frame(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
+    """Serialize and send, refusing to allocate an unbounded outbound frame.
+
+    Inbound limits alone are not enough: a plugin can return a huge value and the
+    host would otherwise serialize it into memory before noticing. The child applies
+    the same cap, so this is a second, host-owned gate.
+    """
     data = json.dumps(msg, ensure_ascii=False, default=str).encode("utf-8")
+    if len(data) > MAX_FRAME_BYTES:
+        raise FrameTooLargeError(
+            f"refusing to send frame of {len(data)} bytes (limit {MAX_FRAME_BYTES})"
+        )
     writer.write(len(data).to_bytes(4, "big"))
     writer.write(data)
     await writer.drain()
@@ -644,6 +766,16 @@ class PluginWorker:
         self._stderr_tail: deque[str] = deque(maxlen=40)
         self._proc: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task | None = None
+        #: One reader owns stdout for the whole lifetime of the process. Reading it
+        #: only while a call is in flight let an idle plugin fill the pipe and block
+        #: itself, which looks exactly like a hang. Frames go to a bounded queue so
+        #: flooding the host's memory is not the fix for that.
+        self._reader_task: asyncio.Task | None = None
+        self._exit_task: asyncio.Task | None = None
+        self._frames: asyncio.Queue | None = None
+        self._invoke_lock = asyncio.Lock()
+        self._active: _ActiveRequest | None = None
+        self._mismatched_frames = 0
         self.commands: list[str] = []
         self.api: dict[str, Any] = {}
         self.started_at: float = 0.0
@@ -670,7 +802,28 @@ class PluginWorker:
     async def start(self, *, timeout: float = 20.0) -> None:
         if self.alive:
             return
+        # A worker object can be started again after its process died (the supervisor
+        # normally builds a fresh object, but direct callers do not). Every piece of
+        # per-process state must be reset, or the next call reads a stale sentinel.
+        old_proc = self._proc
+        await self._cancel_tasks()
+        # A dead-but-not-reaped previous process must not survive a direct restart of
+        # the same worker object; the supervisor normally builds a fresh object, but
+        # relying on that would leave an orphan whenever a caller retries start().
+        if old_proc is not None and old_proc.returncode is None:
+            _kill_tree(old_proc)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(old_proc.wait(), timeout=1.0)
         self._dead = False
+        self._active = None
+        self._mismatched_frames = 0
+        self.last_error = ""
+        self.commands = []
+        self.api = {}
+        self.started_at = 0.0
+        self.invocations = 0
+        self._stderr_tail.clear()
+        self._frames = asyncio.Queue(maxsize=_FRAME_QUEUE_SIZE)
         env = sanitize_env(
             extra={
                 "SOAPBOT_PLUGIN_MEM_BYTES": str(self.config.memory_bytes),
@@ -695,29 +848,76 @@ class PluginWorker:
         except OSError as exc:  # pragma: no cover - environment dependent
             raise IsolationError(f"could not start plugin worker: {exc}") from exc
 
-        assert self._proc.stdin and self._proc.stdout and self._proc.stderr
-        # Drain stderr unconditionally. A child writing more than the pipe buffer
-        # blocks on its next write, which looks exactly like a plugin hang — a
-        # self-inflicted deadlock misread as malicious behaviour.
+        proc = self._proc
+        frames = self._frames
+        assert proc.stdin and proc.stdout and proc.stderr
+        # Both pipes are drained for the whole lifetime of the process. An idle child
+        # that writes more than the pipe buffer would otherwise block on its next
+        # write, which looks exactly like a plugin hang.
         self._stderr_task = asyncio.create_task(self._drain_stderr())
+        self._reader_task = asyncio.create_task(self._drain_stdout(proc, frames))
+        self._exit_task = asyncio.create_task(self._watch_exit(proc, frames))
 
-        await _write_frame(
-            self._proc.stdin,
-            {
-                "plugin": self.config.plugin,
-                "plugin_dir": str(self.config.plugin_dir),
-                "attr": self.config.attr,
-            },
-        )
         try:
-            ready = await asyncio.wait_for(_read_frame(self._proc.stdout), timeout=timeout)
+            await _write_frame(
+                proc.stdin,
+                {
+                    "type": "boot",
+                    "plugin": self.config.plugin,
+                    "plugin_dir": str(self.config.plugin_dir),
+                    "attr": self.config.attr,
+                    "max_frame_bytes": MAX_FRAME_BYTES,
+                },
+            )
+        except FrameTooLargeError as exc:
+            await self.stop()
+            raise IsolationError(str(exc)) from exc
+
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                ready = await asyncio.wait_for(frames.get(), timeout=remaining)
+                if ready is _CHANNEL_CLOSED:
+                    raise WorkerCrashedError("plugin worker died during setup")
+                # A plugin may log during setup. Skipping non-ready frames here keeps
+                # an incidental ctx.log() from being mistaken for the boot reply.
+                if isinstance(ready, dict) and ready.get("type") == "log":
+                    logger.debug(
+                        "plugin log plugin=%s level=%s msg=%s",
+                        self.config.plugin,
+                        ready.get("level"),
+                        str(ready.get("message", ""))[:300],
+                    )
+                    continue
+                if isinstance(ready, dict) and ready.get("type") == "call":
+                    # No request is in flight during setup, so no callback can be
+                    # authorized. Answer immediately: otherwise the child blocks in
+                    # _call() and the later shutdown has to wait for its full timeout.
+                    await _write_frame(
+                        proc.stdin,
+                        {
+                            "type": "reply",
+                            "cid": ready.get("cid"),
+                            "ok": False,
+                            "error": "no active request",
+                        },
+                    )
+                    continue
+                if isinstance(ready, dict) and ready.get("type") == "fatal":
+                    raise WorkerCrashedError(
+                        f"plugin setup failed: {ready.get('error', 'error')}"
+                    )
+                break
         except TimeoutError:
-            _kill_tree(self._proc)
+            _kill_tree(proc)
             with contextlib.suppress(Exception):
-                await self._proc.wait()
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
             raise PluginTimeoutError("plugin setup did not finish in time") from None
-        if ready is None:
-            raise WorkerCrashedError("plugin worker died during setup")
+        if not isinstance(ready, dict) or ready.get("type") != "ready":
+            raise WorkerCrashedError("plugin worker sent an unexpected boot reply")
         if not ready.get("ok"):
             raise WorkerCrashedError(f"plugin setup failed: {ready.get('error', 'error')}")
         self.commands = list(ready.get("commands") or [])
@@ -726,9 +926,102 @@ class PluginWorker:
         logger.info(
             "plugin worker up plugin=%s pid=%s commands=%d",
             self.config.plugin,
-            self._proc.pid,
+            proc.pid,
             len(self.commands),
         )
+
+    @staticmethod
+    def _close_frames(queue: asyncio.Queue) -> None:
+        """Unblock any waiter. Drop buffered frames if a flood filled the queue."""
+        while queue.full():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
+        with contextlib.suppress(asyncio.QueueFull):
+            queue.put_nowait(_CHANNEL_CLOSED)
+
+    async def _drain_stdout(self, proc, queue: asyncio.Queue) -> None:
+        """Own stdout from boot to exit, so the pipe can never fill up.
+
+        Two rules here exist because an earlier version deadlocked: on any protocol
+        violation the child is killed **synchronously** (``_kill_tree``) and the
+        queue is closed in ``finally``. Awaiting ``proc.wait()`` from inside the
+        reader is unsafe — the process exit notification needs this very reader to
+        keep consuming stdout, so a child still writing into a full pipe can make
+        the wait (and anything holding the invoke lock) hang forever.
+        """
+        assert proc.stdout
+        try:
+            while True:
+                try:
+                    frame = await _read_frame(proc.stdout)
+                except (
+                    asyncio.IncompleteReadError,
+                    IsolationError,
+                    ValueError,
+                    TimeoutError,
+                ) as exc:
+                    # A malformed frame leaves the protocol unusable. Killing the
+                    # child is essential: if only the reader stopped, `alive` would
+                    # still report True for a worker nobody can ever talk to.
+                    logger.warning(
+                        "plugin protocol error plugin=%s reason=%s",
+                        self.config.plugin,
+                        type(exc).__name__,
+                    )
+                    self._dead = True
+                    self.last_error = "protocol error"
+                    _kill_tree(proc)
+                    break
+                if frame is None:
+                    break
+                try:
+                    await asyncio.wait_for(
+                        queue.put(frame), timeout=_FRAME_QUEUE_PUT_TIMEOUT
+                    )
+                except TimeoutError:
+                    # An idle plugin flooding frames is a protocol violation, not a
+                    # slow consumer: kill it rather than growing host memory or
+                    # wedging the next call behind a backlog of stale frames.
+                    logger.error(
+                        "plugin frame flood plugin=%s; terminating worker",
+                        self.config.plugin,
+                    )
+                    self._dead = True
+                    self.last_error = "frame flood"
+                    _kill_tree(proc)
+                    break
+        finally:
+            if self._proc is proc and self._frames is queue:
+                self._close_frames(queue)
+
+    async def _watch_exit(self, proc, queue: asyncio.Queue) -> None:
+        """Reap the child even when it dies while nobody is calling it."""
+        code = await proc.wait()
+        if self._proc is not proc or self._frames is not queue:
+            return
+        self._dead = True
+        if not self.last_error:
+            self.last_error = f"exit:{code}"
+        self._close_frames(queue)
+
+    async def _cancel_tasks(self) -> None:
+        # All three tasks are cancellable. Cancelling a proc.wait() waiter only
+        # cancels that one future in the transport's exit-waiter list; it does not
+        # disturb the transport or any other waiter.
+        for name in ("_reader_task", "_exit_task", "_stderr_task"):
+            task = getattr(self, name)
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            setattr(self, name, None)
+
+    def _reject_frame(self, reason: str) -> None:
+        """Count a forged/stale frame without letting a hostile plugin flood logs."""
+        self._mismatched_frames += 1
+        log = logger.warning if self._mismatched_frames <= 3 else logger.debug
+        log("plugin frame rejected plugin=%s reason=%s", self.config.plugin, reason)
 
     async def _drain_stderr(self) -> None:
         assert self._proc and self._proc.stderr
@@ -777,22 +1070,26 @@ class PluginWorker:
         if proc is None:
             return
         self._dead = True
-        if proc.returncode is None:
-            with contextlib.suppress(Exception):
-                assert proc.stdin
-                await _write_frame(proc.stdin, {"type": "shutdown"})
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=timeout)
-            except TimeoutError:
-                _kill_tree(proc)
+        try:
+            if proc.returncode is None:
                 with contextlib.suppress(Exception):
-                    await proc.wait()
-        if self._stderr_task is not None:
-            self._stderr_task.cancel()
-            with contextlib.suppress(Exception):
-                await self._stderr_task
-            self._stderr_task = None
-        self._proc = None
+                    assert proc.stdin
+                    await _write_frame(proc.stdin, {"type": "shutdown"})
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=timeout)
+                except TimeoutError:
+                    _kill_tree(proc)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(proc.wait(), timeout=1.0)
+        finally:
+            # Even a child that never delivers EOF must not leave the reader,
+            # watcher and stderr tasks running after shutdown.
+            await self._cancel_tasks()
+            if self._frames is not None:
+                self._close_frames(self._frames)
+            self._frames = None
+            self._active = None
+            self._proc = None
 
     async def invoke(
         self,
@@ -811,112 +1108,136 @@ class PluginWorker:
         locally. It goes to ``surface_handler``, which re-checks the capability and
         supplies the scope.
         """
-        if not self.alive:
-            raise WorkerCrashedError("plugin worker is not running")
-        proc = self._proc
-        assert proc and proc.stdin and proc.stdout
+        async with self._invoke_lock:
+            if not self.alive:
+                raise WorkerCrashedError("plugin worker is not running")
+            proc = self._proc
+            queue = self._frames
+            assert proc and proc.stdin
+            if queue is None:
+                raise IsolationError("plugin worker has no stdout reader")
 
-        self.invocations += 1
-        await _write_frame(
-            proc.stdin,
-            {
-                "type": "invoke",
-                "id": self.invocations,
-                "handler": handler,
-                "caller": _caller_payload(caller),
-                "args": list(args or []),
-            },
-        )
-
-        limit = timeout if timeout is not None else self.config.timeout
-        deadline = time.monotonic() + limit
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                await self._abort("timeout")
-                raise PluginTimeoutError(
-                    f"plugin {self.config.plugin} did not answer within {limit:.1f}s"
-                )
+            # A counter is not a correlation id: a restarted child could resume an old
+            # sequence and a forged frame could name the next number. Random per call,
+            # echoed by the child, and checked on both result and callback.
+            rid = secrets.token_hex(16)
+            limit = timeout if timeout is not None else self.config.timeout
+            deadline = time.monotonic() + limit
+            self._active = _ActiveRequest(rid=rid, caller=caller, deadline=deadline)
+            self.invocations += 1
             try:
-                frame = await asyncio.wait_for(_read_frame(proc.stdout), timeout=remaining)
-            except TimeoutError:
-                await self._abort("timeout")
-                raise PluginTimeoutError(
-                    f"plugin {self.config.plugin} did not answer in time"
-                ) from None
-            except (asyncio.IncompleteReadError, IsolationError, ValueError):
-                frame = None
-
-            if frame is None:
-                # EOF is the earliest reliable death signal; record it before the
-                # event loop has necessarily noticed the exit.
-                self._dead = True
-                code = proc.returncode
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), timeout=1.0)
-                    code = proc.returncode
-                self.last_error = f"crash:{code}"
-                # The stderr drain task is asynchronous and may still be behind the
-                # pipe's EOF, so give it a moment: the traceback explaining a code=1
-                # exit is the single most useful line in the whole failure, and
-                # reporting "died (code=1)" with it omitted is what made a real
-                # Linux-only crash look like flakiness for several CI rounds.
-                # ``CancelledError`` is a BaseException, so suppress(Exception) alone
-                # would let a cancelled drain task propagate out of the crash path and
-                # replace the real diagnosis with a cancellation.
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await asyncio.wait_for(self._await_stderr_settled(), timeout=1.0)
-                tail = self.crash_tail()
-                logger.error(
-                    "plugin worker crashed plugin=%s code=%s stderr=%s",
-                    self.config.plugin,
-                    code,
-                    " | ".join(tail) if tail else "(empty)",
+                await _write_frame(
+                    proc.stdin,
+                    {
+                        "type": "invoke",
+                        "id": rid,
+                        "handler": handler,
+                        "caller": _caller_payload(caller),
+                        "args": list(args or []),
+                    },
                 )
-                detail = f" (code={code})"
-                if tail:
-                    detail += f"; stderr tail: {' | '.join(tail)}"
-                raise WorkerCrashedError(
-                    f"plugin worker {self.config.plugin} died{detail}"
-                )
+            except FrameTooLargeError as exc:
+                raise IsolationError(str(exc)) from exc
 
-            kind = frame.get("type")
-            if kind == "result":
-                if not frame.get("ok"):
-                    raise WorkerCrashedError(f"plugin reported {frame.get('error', 'error')}")
-                return frame.get("value")
+            try:
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        await self._abort("timeout")
+                        raise PluginTimeoutError(
+                            f"plugin {self.config.plugin} did not answer within {limit:.1f}s"
+                        )
+                    try:
+                        frame = await asyncio.wait_for(queue.get(), timeout=remaining)
+                    except TimeoutError:
+                        await self._abort("timeout")
+                        raise PluginTimeoutError(
+                            f"plugin {self.config.plugin} did not answer in time"
+                        ) from None
+                    if frame is _CHANNEL_CLOSED:
+                        frame = None
 
-            if kind == "fatal":
-                # The child hit something it could not survive and said so before
-                # exiting. Report its words: they are the whole diagnosis, and the
-                # alternative (waiting for EOF) yields only a numeric exit code.
-                self._dead = True
-                self.last_error = f"fatal:{frame.get('error', 'unknown')}"
-                logger.error(
-                    "plugin worker fatal plugin=%s err=%s",
-                    self.config.plugin,
-                    self.last_error,
-                )
-                raise WorkerCrashedError(
-                    f"plugin worker {self.config.plugin} failed: "
-                    f"{frame.get('error', 'unknown')}"
-                )
+                    if frame is None:
+                        # EOF is the earliest reliable death signal; record it before
+                        # the event loop has necessarily noticed the exit.
+                        self._dead = True
+                        code = proc.returncode
+                        with contextlib.suppress(Exception):
+                            await asyncio.wait_for(proc.wait(), timeout=1.0)
+                            code = proc.returncode
+                        self.last_error = f"crash:{code}"
+                        # The stderr drain task is asynchronous and may still be behind
+                        # the pipe's EOF, so give it a moment: the traceback explaining
+                        # a code=1 exit is the single most useful line in the whole
+                        # failure, and reporting "died (code=1)" with it omitted is
+                        # what made a real Linux-only crash look like flakiness for
+                        # several CI rounds. ``CancelledError`` is a BaseException, so
+                        # suppress(Exception) alone would let a cancelled drain task
+                        # propagate out of the crash path and replace the real
+                        # diagnosis with a cancellation.
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await asyncio.wait_for(self._await_stderr_settled(), timeout=1.0)
+                        tail = self.crash_tail()
+                        logger.error(
+                            "plugin worker crashed plugin=%s code=%s stderr=%s",
+                            self.config.plugin,
+                            code,
+                            " | ".join(tail) if tail else "(empty)",
+                        )
+                        detail = f" (code={code})"
+                        if tail:
+                            detail += f"; stderr tail: {' | '.join(tail)}"
+                        raise WorkerCrashedError(
+                            f"plugin worker {self.config.plugin} died{detail}"
+                        )
 
-            if kind == "log":
-                logger.debug(
-                    "plugin log plugin=%s level=%s msg=%s",
-                    self.config.plugin,
-                    frame.get("level"),
-                    str(frame.get("message", ""))[:300],
-                )
-                continue
+                    kind = frame.get("type")
+                    if kind == "result":
+                        if frame.get("id") != rid:
+                            # A stale, replayed or forged answer must never be returned
+                            # as this caller's result.
+                            self._reject_frame("result id mismatch")
+                            continue
+                        if not frame.get("ok"):
+                            raise WorkerCrashedError(
+                                f"plugin reported {frame.get('error', 'error')}"
+                            )
+                        return frame.get("value")
 
-            if kind == "call":
-                await self._handle_callback(proc, frame, caller)
-                continue
+                    if kind == "fatal":
+                        # The child hit something it could not survive and said so
+                        # before exiting. Report its words: they are the whole
+                        # diagnosis, and the alternative (waiting for EOF) yields only
+                        # a numeric exit code.
+                        self._dead = True
+                        self.last_error = f"fatal:{frame.get('error', 'unknown')}"
+                        logger.error(
+                            "plugin worker fatal plugin=%s err=%s",
+                            self.config.plugin,
+                            self.last_error,
+                        )
+                        raise WorkerCrashedError(
+                            f"plugin worker {self.config.plugin} failed: "
+                            f"{frame.get('error', 'unknown')}"
+                        )
 
-            # Unknown frame types are ignored rather than fatal: a newer child
-            # protocol must not wedge an older host.
+                    if kind == "log":
+                        logger.debug(
+                            "plugin log plugin=%s level=%s msg=%s",
+                            self.config.plugin,
+                            frame.get("level"),
+                            str(frame.get("message", ""))[:300],
+                        )
+                        continue
+
+                    if kind == "call":
+                        await self._handle_callback(proc, frame, caller, rid)
+                        continue
+
+                    # Unknown frame types are ignored rather than fatal: a newer child
+                    # protocol must not wedge an older host.
+            finally:
+                self._active = None
 
     async def _abort(self, reason: str) -> None:
         proc = self._proc
@@ -925,16 +1246,35 @@ class PluginWorker:
         self.last_error = reason
         self._dead = True
         _kill_tree(proc)
+        # Bounded: a killed child whose helpers still hold the pipe write ends may
+        # never deliver EOF, and an unbounded wait here would keep the invoke lock
+        # (and therefore every later call) hostage.
         with contextlib.suppress(Exception):
-            await proc.wait()
+            await asyncio.wait_for(proc.wait(), timeout=1.0)
+        if self._frames is not None:
+            self._close_frames(self._frames)
 
     async def _handle_callback(
-        self, proc: asyncio.subprocess.Process, frame: dict[str, Any], caller: Any
+        self,
+        proc: asyncio.subprocess.Process,
+        frame: dict[str, Any],
+        caller: Any,
+        rid: str,
     ) -> None:
         cid = frame.get("cid")
         surface = frame.get("surface") or ""
         raw_args = frame.get("args") or {}
         assert proc.stdin
+        if frame.get("rid") != rid:
+            # A callback that is not tied to the request in flight never reaches the
+            # capability dispatcher. This rejects replayed, stale and forged calls
+            # before any privileged surface is even looked up.
+            self._reject_frame("callback rid mismatch")
+            await _write_frame(
+                proc.stdin,
+                {"type": "reply", "cid": cid, "ok": False, "error": "request id mismatch"},
+            )
+            return
         try:
             if surface not in ALLOWED_SURFACES:
                 raise SurfaceDeniedError(f"surface not available: {surface}")
@@ -986,6 +1326,19 @@ class PluginWorker:
                 proc.stdin,
                 {"type": "reply", "cid": cid, "ok": False, "error": "PermissionError"},
             )
+        except FrameTooLargeError:
+            # The surface handler produced a value too large to put on the wire.
+            # Report a short refusal to the child instead of letting the generic
+            # handler log a traceback for what is a bounded, expected failure.
+            logger.warning(
+                "plugin surface reply exceeds frame budget plugin=%s surface=%s",
+                self.config.plugin,
+                surface,
+            )
+            await _write_frame(
+                proc.stdin,
+                {"type": "reply", "cid": cid, "ok": False, "error": "FrameTooLargeError"},
+            )
         except Exception as exc:
             # Type only crosses the boundary; the traceback stays here. A host-side
             # fault must still be diagnosable, otherwise a bug in a surface handler
@@ -1008,6 +1361,10 @@ class WorkerHealth:
     circuit_open: bool
     last_error: str
     uptime_seconds: float
+    #: Capacity of the owning supervisor and how many workers are currently live,
+    #: so an operator can see a saturated process budget without opening a shell.
+    max_workers: int = 0
+    live_workers: int = 0
 
 
 class PluginSupervisor:
@@ -1026,7 +1383,19 @@ class PluginSupervisor:
       auto-recover would hide a plugin that is broken or hostile.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_workers: int = DEFAULT_MAX_PLUGIN_WORKERS) -> None:
+        if (
+            not isinstance(max_workers, int)
+            or isinstance(max_workers, bool)
+            or not 1 <= max_workers <= MAX_PLUGIN_WORKERS
+        ):
+            # Fail closed rather than silently accepting "unlimited". A typo in an
+            # operator's config must not remove the process ceiling.
+            raise IsolationError(
+                f"max_workers must be an integer in 1..{MAX_PLUGIN_WORKERS}, "
+                f"got {max_workers!r}"
+            )
+        self.max_workers = max_workers
         self._workers: dict[str, PluginWorker] = {}
         self._configs: dict[str, WorkerConfig] = {}
         self._surface_handler = None
@@ -1034,17 +1403,46 @@ class PluginSupervisor:
         self._circuit: dict[str, bool] = {}
         self._last_error: dict[str, str] = {}
         self._backoff: dict[str, float] = {}
+        # start() checks capacity and then awaits process creation. Without a lock,
+        # two concurrent loads can both pass the check and spawn two children while
+        # the registry keeps only one.
+        self._lifecycle_lock = asyncio.Lock()
+
+    def live_worker_count(self) -> int:
+        return sum(1 for worker in self._workers.values() if worker.alive)
 
     def bind_surface_handler(self, handler) -> None:
         """Install the host dispatcher. Without it a worker cannot authorize anything."""
         self._surface_handler = handler
 
     def register(self, config: WorkerConfig) -> None:
+        if config.plugin not in self._configs and len(self._configs) >= self.max_workers:
+            raise IsolationError(
+                f"plugin worker limit reached ({self.max_workers}); refusing to "
+                f"register {config.plugin}"
+            )
         self._configs[config.plugin] = config
         self._restarts.setdefault(config.plugin, [])
         self._circuit.setdefault(config.plugin, False)
         self._backoff.setdefault(config.plugin, BACKOFF_BASE)
         self._last_error.setdefault(config.plugin, "")
+
+    def unregister(self, plugin: str) -> None:
+        """Drop a plugin's booking after it is unloaded.
+
+        ``stop()`` must keep the config (``ensure_running`` needs it to restart),
+        but an unloaded plugin must not keep consuming capacity forever. Without
+        this, load/unload cycles would eventually make ``register`` refuse new
+        plugins even with zero live workers.
+        """
+        for mapping in (
+            self._configs,
+            self._restarts,
+            self._circuit,
+            self._backoff,
+            self._last_error,
+        ):
+            mapping.pop(plugin, None)
 
     def _record_restart(self, plugin: str) -> None:
         now = time.time()
@@ -1062,6 +1460,10 @@ class PluginSupervisor:
             )
 
     async def start(self, plugin: str) -> PluginWorker:
+        async with self._lifecycle_lock:
+            return await self._start_unlocked(plugin)
+
+    async def _start_unlocked(self, plugin: str) -> PluginWorker:
         if self._surface_handler is None:
             raise IsolationError(
                 "supervisor has no surface handler; refusing to start a worker that "
@@ -1078,6 +1480,14 @@ class PluginSupervisor:
         existing = self._workers.get(plugin)
         if existing is not None and existing.alive:
             return existing
+        # Second gate: a config may have been registered while other workers were
+        # still starting. Live processes, not registered names, are what the OS has
+        # to pay for.
+        if self.live_worker_count() >= self.max_workers:
+            raise IsolationError(
+                f"plugin worker limit reached ({self.max_workers}); "
+                f"refusing to start {plugin}"
+            )
 
         worker = PluginWorker(
             config,
@@ -1097,6 +1507,10 @@ class PluginSupervisor:
         return worker
 
     async def ensure_running(self, plugin: str) -> PluginWorker:
+        async with self._lifecycle_lock:
+            return await self._ensure_running_unlocked(plugin)
+
+    async def _ensure_running_unlocked(self, plugin: str) -> PluginWorker:
         """Start or *restart* the worker, honouring backoff and the circuit breaker.
 
         Called after a crash. Sleeps the current backoff first so a plugin that dies
@@ -1127,20 +1541,23 @@ class PluginSupervisor:
             self._backoff[plugin] = min(delay * 2, BACKOFF_CAP)
             self._last_error[plugin] = existing.last_error or "died"
             self._record_restart(plugin)
-            await self.stop(plugin)
+            await self._stop_unlocked(plugin)
 
-        return await self.start(plugin)
+        return await self._start_unlocked(plugin)
 
     def worker(self, plugin: str) -> PluginWorker | None:
         return self._workers.get(plugin)
 
     def health(self) -> list[WorkerHealth]:
         now = time.time()
+        live = self.live_worker_count()
         out: list[WorkerHealth] = []
         for name in self._configs:
             worker = self._workers.get(name)
             out.append(
                 WorkerHealth(
+                    max_workers=self.max_workers,
+                    live_workers=live,
                     plugin=name,
                     alive=bool(worker and worker.alive),
                     restarts=len(
@@ -1165,10 +1582,15 @@ class PluginSupervisor:
         self._backoff[plugin] = BACKOFF_BASE
 
     async def stop(self, plugin: str, *, timeout: float = 5.0) -> None:
+        async with self._lifecycle_lock:
+            await self._stop_unlocked(plugin, timeout=timeout)
+
+    async def _stop_unlocked(self, plugin: str, *, timeout: float = 5.0) -> None:
         worker = self._workers.pop(plugin, None)
         if worker is not None:
             await worker.stop(timeout=timeout)
 
     async def stop_all(self, *, timeout: float = 5.0) -> None:
-        for name in list(self._workers):
-            await self.stop(name, timeout=timeout)
+        async with self._lifecycle_lock:
+            for name in list(self._workers):
+                await self._stop_unlocked(name, timeout=timeout)

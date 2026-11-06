@@ -335,10 +335,20 @@ async def _shutdown() -> None:
         _RUNTIME = None
 
     if _PLUGIN_MANAGER is not None:
+        manager = _PLUGIN_MANAGER
         try:
-            await _PLUGIN_MANAGER.loader.unload_all()
+            await manager.loader.unload_all()
         except Exception as exc:  # pragma: no cover
             logger.warning("plugin unload failed: %s", exc)
+        finally:
+            # unload_all() reaps workers too, but an exception inside it must not
+            # leave resident children behind. stop_all() is idempotent.
+            supervisor = getattr(manager.loader, "supervisor", None)
+            if supervisor is not None:
+                try:
+                    await supervisor.stop_all()
+                except Exception as exc:  # pragma: no cover - shutdown must not raise
+                    logger.warning("plugin worker shutdown failed: %s", exc)
         _PLUGIN_MANAGER = None
 
     if settings.enable_runtime:

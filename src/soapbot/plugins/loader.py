@@ -817,6 +817,9 @@ class PluginLoader:
                     )
             except Exception as exc:
                 await self.supervisor.stop(name)
+                # A failed load never enters _loaded, so unload() cannot clean up its
+                # capacity booking. Release it here too.
+                self.supervisor.unregister(name)
                 self.audit.record(
                     kind="plugin",
                     action="load",
@@ -948,6 +951,10 @@ class PluginLoader:
         if loaded.isolated and self.supervisor is not None:
             try:
                 await self.supervisor.stop(name)
+                # Release the process-capacity booking. stop() keeps the config so a
+                # restart can reuse it; a real unload must drop it or load/unload
+                # cycles would eventually exhaust the worker cap with no workers alive.
+                self.supervisor.unregister(name)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("plugin %s worker stop failed: %s", name, exc)
 
@@ -1057,6 +1064,15 @@ class PluginLoader:
     async def unload_all(self) -> None:
         for name in list(self._loaded):
             await self.unload(name)
+        # Uniform reap: a worker can be registered without a corresponding loaded
+        # plugin (registration happens before a load can fail), and an unload can
+        # raise midway. stop_all() is idempotent, so this is the one place that
+        # guarantees no resident child survives shutdown.
+        if self.supervisor is not None:
+            try:
+                await self.supervisor.stop_all()
+            except Exception as exc:  # pragma: no cover - shutdown must not raise
+                logger.warning("plugin worker shutdown failed: %s", exc)
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [p.to_dict() for p in self._loaded.values()]
