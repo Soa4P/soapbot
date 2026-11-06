@@ -138,6 +138,21 @@ def bounded_scan(pattern: re.Pattern[str], text: str, *, limit: int | None = Non
     return bool(pattern.search(text[:ceiling]))
 
 
+def scan_injection(text: str, *, limit: int | None = None) -> list[str]:
+    """Which injection patterns fire on ``text``, by label.
+
+    A list rather than a boolean because the caller may have to act differently:
+    a chat message with two hits is refused, while a persona growth write is
+    applied and flagged (the operator chose automatic growth) — but both want to
+    record *what* matched.
+    """
+    hits: list[str] = []
+    for label, pattern in _INJECTION_PATTERNS:
+        if bounded_scan(pattern, text, limit=limit):
+            hits.append(label)
+    return hits
+
+
 #: How many independent signals make a message hostile enough to refuse. Shared by
 #: every entry point that inspects untrusted text — typed messages and transcribed
 #: speech — because two paths with two thresholds means the weaker one decides.

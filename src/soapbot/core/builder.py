@@ -78,9 +78,25 @@ def build_persona_store(directory: Path | None = None) -> PersonaStore:
     "persona store has no directory to write to". A first-run box has no cards and no
     directory, which is exactly when an operator wants to write the first one.
     """
+    from soapbot.ai.persona_growth import PersonaGrowth
+    from soapbot.ai.persona_history import PersonaHistory
+
     store = PersonaStore()
     target = directory or (settings.config_dir / "personas")
+    # Attach before load: a card damaged by a growth write is repaired from its last
+    # version during the load, and a store without history could only log the failure.
+    history = PersonaHistory(settings.data_dir / "persona_history.db")
+    store.attach_history(history)
     store.load_directory(target)
+    store.growth = PersonaGrowth(
+        history,
+        max_chars=settings.persona_growth_max_chars,
+        per_hour=settings.persona_growth_per_hour,
+        enabled=settings.persona_growth_enabled,
+    )
+    # The card on disk is version 1; without a row for it the first growth write
+    # would be the earliest restorable state, not the operator's own text.
+    store.growth.seed_baseline(store)
     if not store.all():
         logger.info("no persona cards yet in %s; the panel can create the first one", target)
     _apply_group_personas(store)
