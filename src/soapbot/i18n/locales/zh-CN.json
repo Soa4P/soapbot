@@ -10,6 +10,7 @@
     "api.content_empty": "内容为空，未写入任何片段",
     "api.skill_no_evidence": "没有足够的记忆支撑这个主题，无法生成技能",
     "api.skill_not_found": "技能不存在",
+    "api.scope_invalid": "场景标识不合法：它会被用作目录名，不能包含路径分隔符或以点结尾",
     "api.write_failed": "写入失败，文件未被修改。",
     "api.personaIdInvalid": "人格卡 id 只能包含字母、数字、下划线和短横线（它会成为文件名）。",
     "api.authorityLastOwner": "至少要保留一个 owner，否则没有人能再改权限。",

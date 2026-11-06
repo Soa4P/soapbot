@@ -734,42 +734,115 @@ async def knowledge_detail(
 # knowledge-base gap this module already fixed: a capability that is real, wired into the
 # pipeline, and unreachable from the panel that is supposed to describe it.
 #
-# Two rules govern the write endpoints below:
+# Three rules govern the endpoints below:
 #
 # * **Rebuild is explicit.** ``refresh`` recomputes from stored memories; it never invents
 #   anything. The card and portrait are derived views, so "regenerate" cannot produce a
 #   summary the evidence does not support.
 # * **Skills are files.** Generating one writes a Markdown file under the data volume,
-#   which is why deletion goes through ``SkillForge.delete`` rather than the database, and
-#   why the scope is validated there rather than here.
+#   which is why deletion goes through ``SkillForge.delete`` rather than the database.
+# * **A scene is private.** A card is a summary of one conversation and a skill body is
+#   *verbatim* memory content from it. Both are more sensitive than a persona card, and
+#   the persona read already requires ``MANAGE_CONFIG``. Requiring only
+#   ``require_api_auth`` here would have made the most private data in the system the
+#   easiest to read — and ``/memory/scenes`` enumerates every scope, so the leak needs no
+#   guessing.
 
 
-def _scene_or_503():
+def _require_scene_access(
+    auth: dict[str, Any], request: Request, *, action: str = "scene_read"
+) -> Role:
+    """Gate every scene/skill endpoint on the config permission.
+
+    The reasoning mirrors :func:`_require_persona_access`, and the conclusion is stronger:
+    a persona card is text the operator wrote, while a scene card is a summary of what a
+    group actually said and a skill body is quoted memory content. If the former needs
+    ``MANAGE_CONFIG`` to read, the latter cannot need less.
+
+    Reads are gated too, not just writes. ``/memory/scenes`` lists every scope, so a
+    read-only leak is one request away from a full enumeration — gating only the mutation
+    endpoints would leave the enumeration open.
+    """
+    role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
+    if role.rank < minimum.rank:
+        get_audit_log().record(
+            kind="authz",
+            action=action,
+            outcome="deny",
+            role=role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=t("api.role_required", request_locale(request), role=minimum.value),
+        )
+    return role
+
+
+def _scene_pair_or_503():
+    """The scene layer and the forge, or a 503 naming the one that is missing.
+
+    Returned together because ``build_runtime`` creates both or neither — but the message
+    still names the missing field, because a hand-assembled runtime (tests, scripts) can
+    have one without the other, and "skill forge is not initialised" sends an operator to
+    check the wrong thing when it is the scene layer that is absent.
+    """
     runtime = _runtime()
     scene = getattr(runtime, "scene", None)
     if scene is None:
         raise HTTPException(status_code=503, detail="scene layer is not initialised")
-    return scene
+    return scene, getattr(runtime, "skills", None)
+
+
+def _forge_or_503():
+    runtime = _runtime()
+    forge = getattr(runtime, "skills", None)
+    if forge is None:
+        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+    return forge
+
+
+def _checked_scope(scope: str, request: Request) -> str:
+    """Reject a scope that cannot name a folder, before any filesystem call.
+
+    Without this, an invalid scope produced three different answers from four endpoints:
+    ``/skills`` and ``/skills/candidates`` returned empty lists (because ``load`` swallows
+    an unsafe scope), while ``POST /skills`` raised ``ValueError`` out of ``save`` and
+    surfaced as a 500. Same input, three statuses — and the empty list is the worst of
+    them, because it reads as "this scene has no skills" rather than "you asked for
+    something that cannot exist".
+    """
+    from soapbot.memory.skills import _safe_scope
+
+    if not _safe_scope(scope):
+        raise HTTPException(
+            status_code=400, detail=t("api.scope_invalid", request_locale(request))
+        )
+    return scope
 
 
 @router.get("/memory/scenes")
 async def memory_scenes(
+    request: Request,
     limit: int = Query(100, ge=1, le=500),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Every conversation the bot has memories for, with its card state.
 
     Driven by memories rather than by stored cards: a scope with memories and no card is
     the case the panel most needs to show, because it is the one an operator can act on.
     """
-    rows = await _scene_or_503().list_scenes(limit=limit)
+    _require_scene_access(auth, request, action="scene_list")
+    rows = await _scene_pair_or_503()[0].list_scenes(limit=limit)
     return {"scenes": rows, "count": len(rows)}
 
 
 @router.get("/memory/scene")
 async def memory_scene(
+    request: Request,
     scope: str = Query(..., min_length=1, max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """The stored card and portrait for one scope.
 
@@ -777,7 +850,8 @@ async def memory_scene(
     and have no card yet, and the panel renders that as "not built" rather than as a
     failure. Returning 404 would make the normal first-visit case look broken.
     """
-    scene = _scene_or_503()
+    _require_scene_access(auth, request, action="scene_read")
+    scene, _forge = _scene_pair_or_503()
     card = await scene.get_card(scope)
     portrait = await scene.get_portrait(scope)
     return {
@@ -789,8 +863,9 @@ async def memory_scene(
 
 @router.post("/memory/scene/refresh")
 async def memory_scene_refresh(
+    request: Request,
     scope: str = Query(..., min_length=1, max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Rebuild and persist the card and portrait from stored memories.
 
@@ -798,15 +873,22 @@ async def memory_scene_refresh(
     unchanged evidence produces the same result. The portrait is *dropped* rather than
     kept when the scope falls below the evidence threshold, which is what makes this safe
     to run after a deletion.
+
+    ``portrait`` is ``None`` when withheld, matching what ``GET /memory/scene`` returns
+    for the same state. Returning an empty-but-present portrait here meant the panel
+    rendered a portrait block with no content after a rebuild, and then made it disappear
+    on the next read — the same state, two shapes, from two endpoints.
     """
-    scene = _scene_or_503()
+    _require_scene_access(auth, request, action="scene_refresh")
+    scene, _forge = _scene_pair_or_503()
     card, portrait = await scene.refresh(scope)
+    withheld = portrait.confidence <= 0.0
     return {
         "ok": True,
         "scope": scope,
         "card": _card_json(card),
-        "portrait": _portrait_json(portrait),
-        "portrait_withheld": portrait.confidence <= 0.0,
+        "portrait": None if withheld else _portrait_json(portrait),
+        "portrait_withheld": withheld,
     }
 
 
@@ -846,8 +928,9 @@ def _portrait_json(portrait: Any) -> dict | None:
 
 @router.get("/memory/skills")
 async def memory_skills(
+    request: Request,
     scope: str = Query(..., min_length=1, max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Skills stored for one scene.
 
@@ -855,11 +938,13 @@ async def memory_skills(
     "all skills" endpoint on purpose. A private skill that any scope could enumerate would
     not be private, and the leak would be silent — the content would simply appear in a
     list nobody expected to be cross-scope.
+
+    A skill body is *verbatim memory content*, which is why this read is gated as tightly
+    as the write.
     """
-    runtime = _runtime()
-    forge = getattr(runtime, "skills", None)
-    if forge is None:
-        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+    _require_scene_access(auth, request, action="skill_read")
+    _checked_scope(scope, request)
+    forge = _forge_or_503()
     skills = forge.load(scope)
     return {
         "scope": scope,
@@ -882,21 +967,25 @@ async def memory_skills(
 
 
 def _relative_to_root(path: Any, root: Any) -> str:
-    """Path relative to the skills root, for display. Empty when unknown."""
+    """Path relative to the skills root, for display. Empty when unknown.
+
+    The fallback is empty, not ``path.name``. A path outside the root means the guard in
+    ``save`` failed, and in that case the *name* is still a leak of host layout — the one
+    input this helper exists to handle is the one where it must say nothing.
+    """
     if path is None:
         return ""
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
-        # Outside the root should be impossible (``save`` refuses it), but a display
-        # helper must not raise on the one input that would mean the guard failed.
-        return path.name
+        return ""
 
 
 @router.get("/memory/skills/candidates")
 async def memory_skill_candidates(
+    request: Request,
     scope: str = Query(..., min_length=1, max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Clusters that would become skills, without writing anything.
 
@@ -905,10 +994,10 @@ async def memory_skill_candidates(
     keyword clustering over embeddings is that this list is checkable by a human; hiding
     it behind a one-click "generate" would throw that away.
     """
-    runtime = _runtime()
-    forge = getattr(runtime, "skills", None)
-    scene = getattr(runtime, "scene", None)
-    if forge is None or scene is None:
+    _require_scene_access(auth, request, action="skill_candidates")
+    _checked_scope(scope, request)
+    scene, forge = _scene_pair_or_503()
+    if forge is None:
         raise HTTPException(status_code=503, detail="skill forge is not initialised")
 
     triples = await scene.evidence(scope)
@@ -955,25 +1044,32 @@ class SkillGenerateIn(BaseModel):
 async def memory_skill_generate(
     body: SkillGenerateIn,
     request: Request,
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Write a skill for one topic, from the memories that support it.
 
     The topic is re-derived from stored evidence rather than trusted from the request: a
     caller could otherwise name a topic that no memory supports and get a skill whose body
-    is empty, or — worse — pass a topic whose slug collides with an existing skill and
-    overwrite it with nothing. Re-running detection and picking the matching candidate
-    makes the request a *selection*, not an assertion.
+    is empty. Re-running detection and picking the matching candidate makes the request a
+    *selection*, not an assertion.
+
+    Matching is on the **slug**, not the raw topic, because the slug is what names the
+    file. Two different topics can slug to the same name — ``部署 脚本`` and ``部署-脚本``
+    both become ``部署-脚本`` — and comparing topics would let the second one pass the
+    "is this a real candidate" check and then overwrite the first one's file. Comparing
+    slugs means the request names the file it will replace, which is also what the panel
+    shows the operator.
     """
     locale = request_locale(request)
-    runtime = _runtime()
-    forge = getattr(runtime, "skills", None)
-    scene = getattr(runtime, "scene", None)
-    if forge is None or scene is None:
+    _require_scene_access(auth, request, action="skill_generate")
+    _checked_scope(body.scope, request)
+    scene, forge = _scene_pair_or_503()
+    if forge is None:
         raise HTTPException(status_code=503, detail="skill forge is not initialised")
 
+    wanted = _skill_id_for(body.topic)
     triples = await scene.evidence(body.scope)
-    match = next((c for c in forge.candidates(triples) if c.topic == body.topic), None)
+    match = next((c for c in forge.candidates(triples) if _skill_id_for(c.topic) == wanted), None)
     if match is None:
         raise HTTPException(status_code=404, detail=t("api.skill_no_evidence", locale))
 
@@ -994,7 +1090,7 @@ async def memory_skill_delete(
     skill_id: str,
     request: Request,
     scope: str = Query(..., min_length=1, max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Delete one skill file.
 
@@ -1004,10 +1100,9 @@ async def memory_skill_delete(
     exactly one file.
     """
     locale = request_locale(request)
-    runtime = _runtime()
-    forge = getattr(runtime, "skills", None)
-    if forge is None:
-        raise HTTPException(status_code=503, detail="skill forge is not initialised")
+    _require_scene_access(auth, request, action="skill_delete")
+    _checked_scope(scope, request)
+    forge = _forge_or_503()
     if not forge.delete(scope, skill_id):
         raise HTTPException(status_code=404, detail=t("api.skill_not_found", locale))
     return {"ok": True, "scope": scope, "skill_id": skill_id}
