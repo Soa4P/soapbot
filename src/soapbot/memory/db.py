@@ -44,7 +44,7 @@ from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 #: How long SQLite waits for a competing writer before giving up, in seconds.
 #:
@@ -120,6 +120,9 @@ class MemoryRow(Base):
     created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     accessed_at: Mapped[float] = mapped_column(Float, default=0.0)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: Retired facts stay on disk. Deleting them would make "why did the bot believe
+    #: this last month" unanswerable, and the archive is what a rollback restores.
+    archived: Mapped[int] = mapped_column(Integer, default=0, index=True)
 
 
 class SceneCardRow(Base):
@@ -219,6 +222,73 @@ class SummaryRow(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     folded_message_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[float] = mapped_column(Float, default=0.0)
+    #: Which slice of L0 this summary describes, and what produced it.
+    #: A summary without a window cannot be rebuilt or checked against the archive;
+    #: a summary without a model name cannot be re-derived after a model change.
+    window_start: Mapped[float] = mapped_column(Float, default=0.0)
+    window_end: Mapped[float] = mapped_column(Float, default=0.0)
+    model: Mapped[str] = mapped_column(String(64), default="")
+
+
+class MemorySelfNoteRow(Base):
+    """L4: short notes the bot writes to itself about how it has been behaving.
+
+    Deliberately capped and deduplicated. The failure mode of a self-note store is
+    a thousand near-identical sentences that crowd out the actual conversation, so
+    ``norm`` carries a unique index and the writer evicts by age rather than growing.
+    """
+
+    __tablename__ = "memory_self_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    #: Whitespace/case-normalised copy used only for the uniqueness check.
+    norm: Mapped[str] = mapped_column(String(256), default="")
+    source_session: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+    __table_args__ = (Index("uq_self_note_norm", "norm", unique=True),)
+
+
+class MemoryArtifactRow(Base):
+    """L3: an index entry for something the bot produced.
+
+    The body lives in ``data/artifacts`` and this row only points at it. Storing the
+    bytes in SQLite would make the database grow without bound and make a truncated
+    artifact indistinguishable from a missing one; ``sha256`` is what lets a reader
+    verify the file still is what was written.
+    """
+
+    __tablename__ = "memory_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_key: Mapped[str] = mapped_column(String(128), default="", index=True)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    sha256: Mapped[str] = mapped_column(String(64), default="", index=True)
+    path: Mapped[str] = mapped_column(String(512), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+
+class MemoryTimelineRow(Base):
+    """One chronological event, shared by chat, tools, plugins and artifacts.
+
+    The point is that "what happened recently" has a single answer regardless of
+    which subsystem produced the event. Per-subsystem logs answer different questions
+    and cannot be merged after the fact.
+    """
+
+    __tablename__ = "memory_timeline"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(24), default="chat", index=True)
+    ref: Mapped[str] = mapped_column(String(128), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    session_key: Mapped[str] = mapped_column(String(128), default="", index=True)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+
+    __table_args__ = (Index("ix_timeline_session_time", "session_key", "created_at"),)
 
 
 class SpendRequestRow(Base):

@@ -40,6 +40,7 @@ from soapbot.core.stages import (
 from soapbot.core.trace import TraceStore
 from soapbot.memory.db import Database
 from soapbot.memory.extractor import MemoryExtractor
+from soapbot.memory.layers import MemoryLayers
 from soapbot.memory.scene import SceneMemory
 from soapbot.memory.skills import SkillForge
 from soapbot.memory.stages import (
@@ -168,6 +169,7 @@ def build_pipeline(
     tools=None,
     router=None,
     scene=None,
+    layers=None,
 ) -> Pipeline:
     """Build the pipeline. Stage order is load-bearing.
 
@@ -208,7 +210,7 @@ def build_pipeline(
     # screening (so poisoned content never becomes "memory"), but before the reply
     # decision. ``PersistStage`` itself consults the collect list.
     if memory is not None:
-        pipeline.add(PersistStage(memory))
+        pipeline.add(PersistStage(memory, layers=layers))
     # Always present, including when there is no store: an un-mentioned message must be
     # stopped here whether or not it was archived. Leaving this inside the ``memory is
     # not None`` branch let every group message continue to the model on a runtime
@@ -268,7 +270,7 @@ def build_pipeline(
         # ``SceneMemory`` than the pipeline wrote through — same database, so it mostly
         # worked, but "mostly" is the wrong property for the object that decides what the
         # model is told about a group.
-        pipeline.add(RecallStage(memory, scene=scene))
+        pipeline.add(RecallStage(memory, scene=scene, layers=layers))
     if kb is not None:
         pipeline.add(KnowledgeStage(kb))
 
@@ -592,6 +594,15 @@ def build_runtime(
     #   service, so no running bot could ever produce a skill. A module no one calls is
     #   indistinguishable from one that does not exist, except that it passes its tests.
     scene_layer = SceneMemory(memory.db) if memory is not None else None
+    layers = (
+        MemoryLayers(
+            memory.db,
+            artifacts_dir=settings.data_dir / "artifacts",
+            self_note_limit=settings.self_notes_limit,
+        )
+        if memory is not None
+        else None
+    )
     skill_forge = SkillForge(settings.data_dir / "skills") if memory is not None else None
 
     pipeline = build_pipeline(
@@ -604,6 +615,7 @@ def build_runtime(
         extractor=extractor,
         resolver=resolver,
         audit=audit_log,
+        layers=layers,
         plugin_manager=plugin_manager,
         budget=budget_commands,
         router=router,
@@ -642,6 +654,7 @@ def build_runtime(
         mcp=mcp_manager,
         passive=passive,
         scene=scene_layer,
+        layers=layers,
         skills=skill_forge,
     )
 
