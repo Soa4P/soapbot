@@ -665,6 +665,19 @@ class Settings(BaseSettings):
     The stdlib ``re`` has no timeout argument; bounding the input is the enforceable
     substitute without adding a dependency (``check_deps.py`` pins the runtime list)."""
 
+    persona_growth_enabled: bool = True
+    """Let the model rewrite a persona card without a review step.
+
+    On by default because that is the chosen behaviour. The compensation lives in
+    ``ai/persona_growth.py``: every write is a restorable version, only prose fields
+    are writable, and each card has an hourly budget."""
+    persona_growth_max_chars: int = Field(default=2000, ge=200, le=20000)
+    """Rendered-card ceiling for a growth write. A prompt that outgrows this is
+    usually a model dumping context, not a persona that got more specific."""
+    persona_growth_per_hour: int = Field(default=6, ge=1, le=60)
+    """How many growth writes one card may receive per hour. Bounds a loop that
+    would otherwise rewrite the card on every message."""
+
     # ---- behaviour ----
     default_timezone: str = "Asia/Shanghai"
 

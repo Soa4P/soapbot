@@ -78,6 +78,44 @@ class PersonaStore:
         self._personas: dict[str, Persona] = {}
         self._binding = PersonaBinding()
         self._directory = directory
+        # Set by the runtime once version storage exists. Typed loosely because
+        # persona_history imports this module; a concrete type here would be a cycle.
+        self._history: Any = None
+        #: ``PersonaGrowth`` when automatic growth is wired, else ``None``.
+        #: Loosely typed for the same reason as ``_history``.
+        self.growth: Any = None
+
+    def attach_history(self, history: Any) -> None:
+        self._history = history
+
+    def _restore_from_history(self, persona_id: str) -> bool:
+        """Rewrite an unreadable card from its newest restorable version.
+
+        A half-written or hand-broken front matter used to mean the persona silently
+        disappeared from the panel and the bot fell back to another card. Growth
+        writes make that failure more likely, so a bad file now recovers itself and
+        the event is logged at error level.
+        """
+        if self._history is None:
+            return False
+        latest = self._history.latest_restorable(persona_id)
+        if latest is None:
+            return False
+        try:
+            persona = persona_from_payload(latest.payload, persona_id)
+            path = self.path_for(persona_id)
+            if path is not None:
+                from soapbot.core.config_write import write_atomic
+
+                write_atomic(path, dump_persona_file(persona))
+            self._personas[persona.id] = persona
+            logger.error(
+                "persona %s was unreadable; restored version %d", persona_id, latest.version
+            )
+            return True
+        except Exception as exc:
+            logger.error("persona %s restore failed: %s", persona_id, exc)
+            return False
 
     # ---------------------------------------------------------------- loading
     def load_directory(self, directory: Path) -> int:
@@ -94,6 +132,8 @@ class PersonaStore:
                 count += 1
             except Exception as exc:
                 logger.error("failed to load persona %s: %s", path.name, exc)
+                if self._restore_from_history(path.stem):
+                    count += 1
         logger.info("loaded %d persona card(s) from %s", count, directory)
         return count
 
@@ -187,6 +227,56 @@ class PersonaStore:
             if p.enabled:
                 return p, "first_available"
         return None, "none"
+
+
+def persona_to_payload(persona: Persona) -> dict[str, Any]:
+    """The fields a version row stores, so a rollback can rebuild the card.
+
+    Only data, no behaviour: a version is replayed through
+    :func:`persona_from_payload`, so anything not listed here is not restorable and
+    must not be offered to a growth write in the first place.
+    """
+    return {
+        "id": persona.id,
+        "name": persona.name,
+        "system_prompt": persona.system_prompt,
+        "style": persona.style,
+        "banned_words": list(persona.banned_words),
+        "wake_words": list(persona.wake_words),
+        "max_reply_chars": persona.max_reply_chars,
+        "temperature": persona.temperature,
+        "version": persona.version,
+        "enabled": persona.enabled,
+        "locale": persona.locale,
+        "examples": [dict(item) for item in persona.examples],
+    }
+
+
+def persona_from_payload(payload: dict[str, Any], persona_id: str) -> Persona:
+    """Rebuild a card from a stored version. Tolerates missing keys."""
+    examples = payload.get("examples") or []
+    return Persona(
+        id=persona_id,
+        name=str(payload.get("name") or persona_id),
+        system_prompt=str(payload.get("system_prompt") or ""),
+        style=str(payload.get("style") or ""),
+        examples=[
+            {"user": str(e.get("user", "")), "assistant": str(e.get("assistant", ""))}
+            for e in examples
+            if isinstance(e, dict)
+        ],
+        banned_words=[str(w) for w in (payload.get("banned_words") or [])],
+        wake_words=[str(w) for w in (payload.get("wake_words") or [])],
+        max_reply_chars=int(payload.get("max_reply_chars") or 500),
+        temperature=(
+            float(payload["temperature"])
+            if payload.get("temperature") is not None
+            else None
+        ),
+        version=int(payload.get("version") or 1),
+        enabled=bool(payload.get("enabled", True)),
+        locale=str(payload.get("locale") or ""),
+    )
 
 
 def dump_persona_file(persona: Persona) -> str:
