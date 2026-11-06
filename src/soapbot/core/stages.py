@@ -366,9 +366,12 @@ class ReplyStage(Stage):
 
     name = "reply"
 
-    def __init__(self, store=None, *, tts=None) -> None:
+    def __init__(self, store=None, *, tts=None, loader=None) -> None:
         self._store = store
         self._tts = tts
+        #: Plugin loader when events are wired. ``None`` in tests that only exercise
+        #: delivery, which is most of them.
+        self._loader = loader
         """Optional speech synthesis. ``None`` means text only, which is the default:
         a group that did not ask for audio should not receive it."""
 
@@ -385,6 +388,30 @@ class ReplyStage(Stage):
             ctx.extras["send_error"] = stats.get("error", "")
             ctx.extras["reply_chunks"] = list(stats.get("sent") or [])
             return StageResult()
+
+        # One writable event exists, and it is here: a plugin may replace the text
+        # just before delivery. The replacement is re-scrubbed because it reaches the
+        # group — routing it through the same filter the model's own text went
+        # through is what stops a handler smuggling invisible characters or a
+        # credential past output safety.
+        if self._loader is not None:
+            from soapbot.plugins.events import dispatch_event
+            from soapbot.plugins.sandbox import scrub_plugin_output
+
+            try:
+                rewritten = await dispatch_event(
+                    self._loader,
+                    "reply_ready",
+                    {
+                        "text": ctx.model_reply,
+                        "session_key": getattr(ctx.event, "session_key", ""),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("reply_ready event failed: %s", type(exc).__name__)
+                rewritten = None
+            if isinstance(rewritten, str) and rewritten.strip():
+                ctx.model_reply = scrub_plugin_output(rewritten)
 
         segments = [MessageSegment.text(ctx.model_reply)]
         voiced = False

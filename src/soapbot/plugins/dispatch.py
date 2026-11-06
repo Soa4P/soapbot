@@ -283,6 +283,16 @@ class PluginMessageHookStage(Stage):
         caller = CallerContext.from_principal(principal, ctx.event.session_key)
         text = ctx.event.text[:500]
 
+        # The named event is the forward-looking surface; ``on_message`` stays for
+        # plugins written against the older decorator. Both are read-only, and this
+        # one runs before the per-plugin loop so a handler sees the message even if
+        # every legacy hook list is empty.
+        await _dispatch_event(
+            self.loader,
+            "message_received",
+            {"text": text, "session_key": ctx.event.session_key},
+        )
+
         for loaded in list(self.loader.loaded.values()):
             hooks = loaded.context._message_hooks
             if not hooks:
@@ -618,6 +628,14 @@ class PluginCronRunner:
                 # on the next tick.
                 self._next_due[key] = self._next_after(str(job["expr"]), ts)
                 ran += 1
+                # Observers see the tick before the job runs, so a handler measuring
+                # duration can bracket it. Rescheduling already happened above: a
+                # handler that raises cannot cause a re-fire.
+                await _dispatch_event(
+                    self.loader,
+                    "schedule_tick",
+                    {"plugin": loaded.name, "job": str(job["name"])},
+                )
                 await self._run_job(loaded, job)
 
         # A plugin unloaded (or reloaded with different jobs) drops its schedule;
