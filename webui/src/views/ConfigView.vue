@@ -404,6 +404,18 @@ async function applyChanges(): Promise<void> {
 </script>
 
 <template>
+  <section class="panel persona-hero">
+    <div class="panel__head">
+      <div>
+        <div class="eyebrow">{{ t('config.personaSectionEyebrow') }}</div>
+        <h2>{{ t('overview.personas') }}</h2>
+        <p class="hint">{{ t('config.personaIdExplain') }}</p>
+        <p class="hint">{{ t('config.personaBindingOrder') }}</p>
+      </div>
+      <button class="btn lamp" type="button" @click="newCard">{{ t('config.personaNew') }}</button>
+    </div>
+  </section>
+  <div id="persona-card-slot" />
   <!-- Bound at the top: "which card speaks where" is the question this page exists to
        answer, and it was previously only editable by hand-editing .env. -->
   <PersonaBindingCard />
@@ -711,6 +723,7 @@ async function applyChanges(): Promise<void> {
   <Adapters />
 <McpServers />
 
+  <Teleport to="#persona-card-slot">
   <section class="panel">
     <div class="panel__head">
       <h2>{{ t('overview.personas') }}</h2>
@@ -867,6 +880,7 @@ async function applyChanges(): Promise<void> {
       </div>
     </div>
   </section>
+  </Teleport>
 
   <section class="panel">
     <div class="panel__head">

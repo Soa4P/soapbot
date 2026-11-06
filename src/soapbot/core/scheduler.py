@@ -145,6 +145,8 @@ class RuntimeScheduler:
             "timezone": str(self._tz),
             "ticks": self.ticks,
             "last_error": self.last_error,
+            "purpose": "plugin_cron_and_budget_expiry",
+            "does_not_handle": ["message_receive", "model_generation", "adapter_connection"],
             "jobs": jobs,
             "plugin_cron": plugins.cron.schedule() if plugins is not None else [],
         }

@@ -34,6 +34,9 @@ watch([level, contains, limit], () => {
 
 const entries = computed<any[]>(() => logs.data.value?.entries ?? [])
 const total = computed<number>(() => logs.data.value?.total ?? 0)
+const restricted = computed(() => Boolean(logs.data.value?.details_restricted))
+const issues = computed<number>(() => logs.data.value?.issues ?? 0)
+const showDetails = ref(false)
 
 // Labels for the filter, not for the rows. The log text itself stays exactly as the
 // logger wrote it — translating it would make the panel disagree with the file that
@@ -64,22 +67,34 @@ function detail(entry: any): string {
 
 <template>
   <section class="panel">
+    <div class="panel__body">
+      <div class="eyebrow">{{ t('logs.diagnosis') }}</div>
+      <h2>{{ issues ? t('logs.issuesFound', { count: issues }) : t('logs.noIssues') }}</h2>
+      <p class="hint">{{ t('logs.nextStep') }}</p>
+      <p v-if="restricted" class="hint">{{ t('logs.restricted') }}</p>
+    </div>
+  </section>
+  <section class="panel">
     <div class="panel__head">
       <h2>{{ t('logs.title') }}</h2>
       <span class="tag">{{ entries.length }} / {{ total }}</span>
       <span class="strip__spacer" />
-      <select v-model="level" class="field" style="width: 140px" :aria-label="t('logs.level')">
+      <select v-if="!restricted" v-model="level" class="field" style="width: 140px" :aria-label="t('logs.level')">
         <option v-for="item in levels" :key="item.value" :value="item.value">
           {{ item.label }}
         </option>
       </select>
       <input
+        v-if="!restricted"
         v-model="contains"
         class="field"
         style="width: 220px"
         :placeholder="t('logs.placeholder')"
         maxlength="200"
       />
+      <button v-if="!restricted && entries.length" class="btn ghost" type="button" @click="showDetails = !showDetails">
+        {{ showDetails ? t('logs.hideDetails') : t('logs.showDetails') }}
+      </button>
       <button class="btn ghost" :disabled="logs.loading.value" @click="logs.reload()">
         {{ t('common.refresh') }}
       </button>
@@ -89,6 +104,7 @@ function detail(entry: any): string {
         <div class="error-banner">{{ logs.error.value }}</div>
       </div>
       <div v-else-if="logs.loading.value && !entries.length" class="empty">{{ t('common.loading') }}</div>
+      <div v-else-if="restricted" class="empty">{{ t('logs.restricted') }}</div>
       <EmptyState v-else-if="!entries.length" :lead="t('logs.empty')" :hint="t('logs.emptyHint')" />
       <div v-else class="scroll" style="max-height: 640px">
         <table class="data"><caption class="visually-hidden">{{ t('logs.title') }}</caption>
@@ -107,7 +123,7 @@ function detail(entry: any): string {
               </td>
               <td>
                 {{ entry.msg }}
-                <span v-if="detail(entry)" class="hint"> {{ detail(entry) }}</span>
+                <span v-if="showDetails && detail(entry)" class="hint"> {{ detail(entry) }}</span>
               </td>
             </tr>
           </tbody>
