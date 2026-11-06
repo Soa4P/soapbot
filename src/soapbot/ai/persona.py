@@ -49,19 +49,52 @@ class Persona:
     """
     extra: dict[str, Any] = field(default_factory=dict)
 
-    def build_system_prompt(self, context_note: str = "") -> str:
-        parts: list[str] = []
+    def build_system_prompt(
+        self,
+        context_note: str = "",
+        *,
+        memory_note: str = "",
+        timeline_note: str = "",
+        task_note: str = "",
+        tools_note: str = "",
+    ) -> str:
+        """Assemble the system prompt in fixed sections.
+
+        Order is load-bearing: identity first, then data. Putting recalled text
+        before the operator's rules makes an attacker's sentence read like one of
+        them, because a flat prompt has no other cue about which is which.
+
+        The extra sections are optional and appended only when non-empty — a heading
+        with nothing under it costs tokens and tells the model nothing. ``context_note``
+        keeps its existing shape (its producers already frame untrusted parts with
+        ``wrap_untrusted``); wrapping it again here would nest two "this is data"
+        banners around the same text.
+        """
+        core: list[str] = []
         if self.system_prompt:
-            parts.append(self.system_prompt.strip())
+            core.append(self.system_prompt.strip())
         if self.style:
-            parts.append(f"说话风格要求：{self.style.strip()}")
+            core.append(f"说话风格要求：{self.style.strip()}")
         if self.max_reply_chars:
-            parts.append(f"回复长度控制在 {self.max_reply_chars} 字以内。")
+            core.append(f"回复长度控制在 {self.max_reply_chars} 字以内。")
         if self.banned_words:
-            parts.append("禁止使用以下词语：" + "、".join(self.banned_words))
-        if context_note:
-            parts.append(context_note)
-        return "\n\n".join(parts)
+            core.append("禁止使用以下词语：" + "、".join(self.banned_words))
+
+        sections: list[str] = []
+        if core:
+            sections.append("【核心设定】\n" + "\n".join(core))
+        for heading, body in (
+            ("【长期记忆】", memory_note),
+            ("【近期事件】", timeline_note),
+            ("【当前任务】", task_note),
+            ("【工具说明】", tools_note),
+        ):
+            text = (body or "").strip()
+            if text:
+                sections.append(f"{heading}\n{text}")
+        if context_note.strip():
+            sections.append("【外部内容】\n" + context_note.strip())
+        return "\n\n".join(sections)
 
 
 @dataclass(slots=True)
