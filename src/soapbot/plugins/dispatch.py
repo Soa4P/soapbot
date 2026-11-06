@@ -51,6 +51,18 @@ from soapbot.security.principal import Principal, Role
 logger = logging.getLogger(__name__)
 
 _HANDLER_TIMEOUT = 8.0
+
+
+async def _dispatch_event(loader: PluginLoader, event: str, payload: dict[str, Any]) -> None:
+    """Fan out a named event. An observer must never fail the action it observes."""
+    from soapbot.plugins.events import dispatch_event
+
+    try:
+        await dispatch_event(loader, event, payload)
+    except Exception as exc:
+        logger.warning(
+            "plugin event dispatch failed event=%s err=%s", event, type(exc).__name__
+        )
 """A plugin handler that blocks must not stall the whole session.
 
 The pipeline is per-session serialised, so one hung plugin equals one frozen
@@ -420,6 +432,11 @@ class PluginToolRegistry:
 
         caller = CallerContext.from_principal(principal, session_key)
         loaded.context.remember_session(session_key)
+        await _dispatch_event(
+            self.loader,
+            "tool_before",
+            {"tool": name, "plugin": loaded.name, "session_key": session_key},
+        )
         started = time.perf_counter()
         invocation = PluginInvocation(
             plugin=loaded.name, entry=f"tool:{name}", ok=False, duration_ms=0
@@ -431,6 +448,16 @@ class PluginToolRegistry:
                     timeout=_HANDLER_TIMEOUT,
                 )
             invocation.ok = True
+            await _dispatch_event(
+                self.loader,
+                "tool_after",
+                {
+                    "tool": name,
+                    "plugin": loaded.name,
+                    "ok": True,
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                },
+            )
         except TimeoutError:
             invocation.error = "timeout"
             return "错误：工具执行超时。"
@@ -723,12 +750,20 @@ class PluginManager:
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         loaded = await self.loader.load(name, force=force)
         loaded.context._init_runtime_hooks(sender=self.sender)
+        await self._emit("plugin_loaded", {"plugin": name})
         return loaded
 
     async def reload(self, name: str) -> LoadedPlugin:
         loaded = await self.loader.reload(name)
         loaded.context._init_runtime_hooks(sender=self.sender)
+        await self._emit("plugin_loaded", {"plugin": name, "reloaded": True})
         return loaded
 
     async def unload(self, name: str) -> None:
         await self.loader.unload(name)
+        # Emitted after the loader has dropped it, so a handler cannot look the
+        # plugin up and use a half-torn-down context.
+        await self._emit("plugin_unloaded", {"plugin": name})
+
+    async def _emit(self, event: str, payload: dict[str, Any]) -> None:
+        await _dispatch_event(self.loader, event, payload)

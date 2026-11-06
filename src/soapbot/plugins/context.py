@@ -171,6 +171,9 @@ class PluginContext:
         self._tools: dict[str, dict[str, Any]] = {}
         self._message_hooks: list[Callable[..., Awaitable[Any]]] = []
         self._notice_hooks: list[Callable[..., Awaitable[Any]]] = []
+        #: Named events, keyed by event name. Declared in ``plugins/events.py`` so the
+        #: writable/read-only distinction is data, not a convention.
+        self._event_handlers: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
         self._cron_jobs: list[dict[str, Any]] = []
         # Only this plugin's slice of the shared store — never the outer mapping.
         # Passing the whole mapping (as before) made every other plugin's secrets
@@ -365,6 +368,32 @@ class PluginContext:
             raise TypeError("handler must be callable")
         self._notice_hooks.append(fn)
         return fn
+
+    def on(self, event: str, fn: Callable[..., Awaitable[Any]] | None = None) -> Any:
+        """Register a handler for a named event.
+
+        Usable as ``@ctx.on("tool_after")`` or ``ctx.on("tool_after", handler)``.
+        Writable events require ``SEND``: being able to rewrite a reply is being able
+        to put words in the bot's mouth, so it must not be reachable through the
+        weaker observation capability.
+        """
+        from soapbot.plugins.events import EVENTS
+
+        spec = EVENTS.get(event)
+        if spec is None:
+            raise ValueError(f"unknown plugin event {event!r}")
+        capability = Capability.SEND if spec.writable else Capability.MESSAGE
+        self._guard.check(capability, detail=f"on {event}")
+
+        def decorator(
+            handler: Callable[..., Awaitable[Any]],
+        ) -> Callable[..., Awaitable[Any]]:
+            if not callable(handler):
+                raise TypeError("handler must be callable")
+            self._event_handlers.setdefault(event, []).append(handler)
+            return handler
+
+        return decorator(fn) if fn is not None else decorator
 
     def tool(
         self,
@@ -594,6 +623,7 @@ class PluginContext:
             "cron_jobs": [j["name"] for j in self._cron_jobs],
             "has_message_hook": bool(self._message_hooks),
             "has_notice_hook": bool(self._notice_hooks),
+            "events": sorted(self._event_handlers),
         }
 
 
