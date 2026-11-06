@@ -141,6 +141,13 @@ if ($existing -and -not $Force) {
 }
 
 Write-Step "starting the service"
+# Start-ScheduledTask on an already-running task is a no-op, so an update would keep
+# the old code in memory and look like the install did nothing. Stop first.
+$currentState = (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue).State
+if ($currentState -eq 'Running') {
+    Stop-ScheduledTask -TaskName $TaskName
+    Start-Sleep -Seconds 2
+}
 Start-ScheduledTask -TaskName $TaskName
 $deadline = (Get-Date).AddSeconds(60)
 $healthy = $false
