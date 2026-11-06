@@ -66,6 +66,17 @@ def test_installers_are_idempotent_about_the_data_directory() -> None:
     assert '[ ! -f "$ENV_FILE" ]' in sh
 
 
+def test_installers_fetch_code_even_when_the_directory_exists() -> None:
+    """"Rerun to update" only works if the code is re-fetched, not just the venv."""
+    ps1 = PS1.read_text(encoding="utf-8")
+    sh = SH.read_text(encoding="utf-8")
+
+    assert "reusing $Dir" not in ps1
+    assert 'if [ ! -d "$DIR" ]' not in sh
+    assert "soapbot-install.zip" in ps1
+    assert "TARBALL" in sh
+
+
 def test_shell_installer_fails_fast_and_cleans_up() -> None:
     sh = SH.read_text(encoding="utf-8")
     assert "set -euo pipefail" in sh

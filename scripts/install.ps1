@@ -66,21 +66,20 @@ if (-not $python) {
 }
 Write-Ok "found $($python.Exe)"
 
-if (-not (Test-Path -LiteralPath $Dir)) {
-    Write-Step "downloading soapbot into $Dir"
-    $zip = Join-Path $env:TEMP 'soapbot-install.zip'
-    Invoke-WebRequest -Uri $ZipUrl -OutFile $zip -UseBasicParsing
-    $unpacked = Join-Path $env:TEMP ('soapbot-unpacked-' + [guid]::NewGuid().ToString('N'))
-    Expand-Archive -LiteralPath $zip -DestinationPath $unpacked -Force
-    $inner = Get-ChildItem -LiteralPath $unpacked -Directory | Select-Object -First 1
-    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-    Copy-Item -Path (Join-Path $inner.FullName '*') -Destination $Dir -Recurse -Force
-    Remove-Item -LiteralPath $zip, $unpacked -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Ok "code extracted"
-} else {
-    Write-Step "reusing $Dir"
-    Write-Ok "existing data directory kept as-is"
-}
+# Always fetch. An earlier version only downloaded when the directory was missing, so
+# "rerun the installer to update" silently kept the old code — the one thing a
+# one-command installer has to get right. The archive contains no data/ or .venv, so
+# copying over an existing install leaves both alone.
+Write-Step "fetching the current code into $Dir"
+$zip = Join-Path $env:TEMP 'soapbot-install.zip'
+Invoke-WebRequest -Uri $ZipUrl -OutFile $zip -UseBasicParsing
+$unpacked = Join-Path $env:TEMP ('soapbot-unpacked-' + [guid]::NewGuid().ToString('N'))
+Expand-Archive -LiteralPath $zip -DestinationPath $unpacked -Force
+$inner = Get-ChildItem -LiteralPath $unpacked -Directory | Select-Object -First 1
+New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+Copy-Item -Path (Join-Path $inner.FullName '*') -Destination $Dir -Recurse -Force
+Remove-Item -LiteralPath $zip, $unpacked -Recurse -Force -ErrorAction SilentlyContinue
+Write-Ok "code updated; data\ and .venv untouched"
 
 $venv = Join-Path $Dir '.venv'
 $venvPython = Join-Path $venv 'Scripts\python.exe'
