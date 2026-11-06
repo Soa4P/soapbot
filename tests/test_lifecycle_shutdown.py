@@ -6,9 +6,8 @@ import os
 import time
 from pathlib import Path
 
-from soapbot.api import service_hint  # noqa: F401  (import keeps the module referenced)
+import soapbot.plugins.job_object as job_object
 from soapbot.config import settings
-from soapbot.plugins import job_object
 
 
 def test_shutdown_has_a_bound() -> None:
