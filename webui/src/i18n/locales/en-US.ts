@@ -376,11 +376,13 @@ export default {
   'security.roleConflictSave':
     'These accounts appear in more than one role: {detail}. The highest role wins, but the lists would contradict each other — keep only one.',
   'security.authoritySaved':
-    'Written to .env. Restart the panel to apply: schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel (or however you start it).',
+    'Written to .env. It takes effect after a restart; the command is shown below.',
+  'security.nothingToSave': 'No changes to save.',
   'security.authorityHint':
     "Changes are written to the server's .env (SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS) and need a panel restart. An owner from first_run_owner is kept automatically so you cannot lock yourself out.",
   'security.removeAria': 'Remove {id} from {role}',
-  'security.allowListHint': 'The allow-list comes only from server config. The switch below decides whether roles declared by the protocol side in a message are trusted:',
+  'security.allowListHint':
+    'Both the lists and the switch below come from server config and are read-only here; edit .env and restart. Enabling trust_protocol_roles trusts the role a message declares on the protocol side:',
   'security.trustWarn': 'When on, the protocol side may declare roles in a message — enable it only over a fully trusted transport.',
 
   // ---------------------------------------------------------------- 05 memory

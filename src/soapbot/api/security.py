@@ -129,6 +129,7 @@ from fastapi import HTTPException, Request  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from soapbot.api.admin import _role_of  # noqa: E402
+from soapbot.api.service_hint import restart_hint  # noqa: E402
 from soapbot.security.audit import get_audit_log as _get_audit_log  # noqa: E402
 from soapbot.security.principal import normalize_id  # noqa: E402
 
@@ -275,6 +276,7 @@ async def write_authority(
     return {
         "ok": True,
         "restart_required": True,
+        "restart_hint": restart_hint(),
         "owners": owners,
         "admins": admins,
         "members": members,

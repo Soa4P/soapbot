@@ -411,11 +411,13 @@ export default {
     '{id} 已经是 {role}，一个账号只能有一个角色。要改角色，请先从原列表里移除它。',
   'security.roleConflictSave':
     '这些账号同时出现在多个角色里：{detail}。按最高角色生效，但名单会自相矛盾，请只保留一个。',
-  'security.authoritySaved': '已写入 .env。重启面板后生效：schtasks /End /TN SoapbotPanel && schtasks /Run /TN SoapbotPanel（或你的启动方式）。',
+  'security.authoritySaved': '已写入 .env。重启后生效，命令见下方。',
+  'security.nothingToSave': '名单没有改动。',
   'security.authorityHint':
     '改动会写进服务端的 .env（SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS），保存后需重启面板生效；first_run_owner 里的 owner 会被自动保留，防止把自己锁在门外。',
   'security.removeAria': '把 {id} 从 {role} 中移除',
-  'security.allowListHint': '名单只来自服务端配置。下面的开关决定是否信任协议端在消息里声明的角色：',
+  'security.allowListHint':
+    '名单与下面的开关都只来自服务端配置，页面只读；改完 .env 后重启生效。开启 trust_protocol_roles 表示信任协议端在消息里声明的角色：',
   'security.trustWarn': '开启时协议端可以在消息里声明角色 —— 仅在完全可信的传输上才应开启。',
 
   // ---------------------------------------------------------------- 05 memory
