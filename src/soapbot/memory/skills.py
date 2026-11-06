@@ -91,6 +91,22 @@ def _is_traversal(name: str) -> bool:
     return name in (".", "..")
 
 
+#: Device names Windows reserves regardless of extension. ``mkdir("CON")`` either fails or
+#: — worse — succeeds in a way that redirects every subsequent write to the console device,
+#: so the skill silently vanishes with no error. A scope is transport-derived, so a group
+#: named ``NUL`` is enough to hit this.
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+#: Longest encoded directory name. Percent-encoding triples the size of non-ASCII, so a
+#: 128-character scope could otherwise produce a ~384-character component and blow past
+#: Windows' 260-character path limit without long-path opt-in.
+_MAX_DIR_NAME = 64
+
+
 def _dir_name(scope: str) -> str:
     """Encode a scope into a portable directory name.
 
@@ -98,17 +114,46 @@ def _dir_name(scope: str) -> str:
     ``group:1`` and ``group_1`` would share a folder and each would see the other's
     skills. Reversibility matters because the folder name is the only record of which
     scope a skill belongs to when the front matter is missing or hand-edited.
+
+    Three Windows hazards are handled here rather than at each call site, because a path
+    component has to be valid everywhere it is used:
+
+    * **Reserved device names** — ``NUL``, ``CON``, ``COM1`` … are legal identifiers and
+      legal file names, and writing to them goes to the device. Prefixed with ``_``.
+    * **Trailing dots and spaces** — Windows strips them, so ``a.`` and ``a`` would collide
+      and two scopes would share one folder. Encoded instead of stripped, so the mapping
+      stays reversible.
+    * **Length** — capped, with a digest of the full name appended when truncated, so two
+      long scopes cannot collapse onto the same prefix.
     """
-    return quote(scope, safe="")
+    encoded = quote(scope, safe="")
+    # ``quote`` leaves ``.`` alone (it is unreserved), so a trailing dot survives and then
+    # gets silently dropped by the filesystem. Encode it explicitly.
+    if encoded.endswith("."):
+        encoded = encoded[:-1] + "%2E"
+    if encoded.upper() in _WINDOWS_RESERVED:
+        encoded = "_" + encoded
+    if len(encoded) > _MAX_DIR_NAME:
+        digest = hashlib.sha1(scope.encode("utf-8")).hexdigest()[:8]
+        encoded = f"{encoded[:_MAX_DIR_NAME - 9]}-{digest}"
+    return encoded
 
 
 def _safe_scope(scope: str) -> bool:
-    """Whether ``scope`` may be used as a directory name.
+    """Whether ``scope`` may be used as a directory name *and* as front-matter text.
 
     One predicate for both the charset and the traversal check, so no call site can apply
     half of the rule. Every filesystem-touching method goes through this.
+
+    ``---`` is rejected even though it is a legal identifier: the scope is written into the
+    front matter verbatim, and a scope of ``---`` would produce a document whose header
+    delimiter appears twice in a row, so ``_parse`` would split in the wrong place and read
+    the body as metadata. Real scopes look like ``group:12345``, so nothing legitimate is
+    lost.
     """
-    return bool(_SCOPE_RE.match(scope)) and not _is_traversal(scope)
+    if not _SCOPE_RE.match(scope) or _is_traversal(scope):
+        return False
+    return "---" not in scope
 
 
 def _safe_skill_id(skill_id: str) -> bool:
@@ -306,8 +351,15 @@ class SkillForge:
                 title = line[2:].strip()
                 break
 
+        # The front matter is hand-editable, so ``id`` is untrusted input. A file whose
+        # ``id`` is ``../../etc/passwd`` would otherwise produce a ``Skill`` carrying that
+        # value, and any caller that later uses ``skill_id`` as a path or a URL would act
+        # on it. Falling back to the file name keeps the object honest: the id always
+        # names the file it was read from.
+        raw_id = (meta.get("id") or "").strip()
+        skill_id = raw_id if _safe_skill_id(raw_id) else path.stem
         return Skill(
-            skill_id=meta.get("id") or path.stem,
+            skill_id=skill_id,
             scope=meta.get("scope") or scope,
             title=title or path.stem,
             body=body,
@@ -345,10 +397,19 @@ def _slug(text: str) -> str:
     a 60-character prefix produced the same file name and the second ``save`` silently
     overwrote the first — a skill disappearing with no error, which is the worst shape a
     data-loss bug can take.
+
+    The digest is appended whenever the topic is truncated *or* the slug is not already a
+    faithful, case-stable rendering of the topic, because the same collision exists one
+    level up: ``Deploy`` and ``deploy`` are different topics that produce the same file
+    name on Windows and macOS, where the filesystem is case-insensitive. Lowercasing would
+    fix the collision by making it certain; a digest keeps both skills.
     """
     cleaned = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", text, flags=re.UNICODE).strip("-")
     cleaned = cleaned or "skill"
-    if len(cleaned) <= 60:
+    # A slug is returned verbatim only when it is short, unchanged by sanitising, and
+    # already lowercase — the three conditions under which it cannot collide with another
+    # topic's slug on a case-insensitive filesystem.
+    if len(cleaned) <= 60 and cleaned == text and text == text.lower():
         return cleaned
     digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
     return f"{cleaned[:51]}-{digest}"

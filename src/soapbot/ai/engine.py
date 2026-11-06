@@ -54,14 +54,22 @@ class AIRequest:
     scene_card_prompt: str = ""
     """The scene's index card: what this conversation is about, at a glance.
 
-    Separate from ``recall_prompt`` because it is not retrieved — it is always present,
-    and it is *trusted* in a way recall is not. The card is assembled from counts the host
-    computed (topics, participants), so it carries no user-authored prose and does not
-    need the untrusted-data wrapper. Recall is fragments of what people said; the card is
-    the host's own summary of them.
+    Separate from ``recall_prompt`` because it is not retrieved — it is always present.
+    It is *not* trusted, despite being shorter and more summary-shaped than recall: its
+    topics come from ``keywords``, which the extractor derives from message content, and
+    its participant list comes from ``subject``. Both are user-authored strings wearing the
+    host's formatting. An earlier version of this comment claimed the card was "assembled
+    from counts the host computed" and therefore needed no wrapper; that was wrong, and
+    wrong in the direction that lets a poisoned memory be re-injected as instruction text
+    on every turn. The card is wrapped like any other memory-derived text.
     """
     scene_portrait_prompt: str = ""
-    """The scene's portrait: slow-changing understanding, injected when confident enough."""
+    """The scene's portrait: slow-changing understanding, injected when confident enough.
+
+    Wrapped as untrusted for a stronger reason than the card: ``recurring_questions`` is
+    verbatim memory content, so this field is the one place where a whole user message
+    reaches the system prompt.
+    """
     knowledge_prompt: str = ""
     """RAG snippets injected as a system note."""
 
@@ -246,10 +254,16 @@ class AIEngine:
         # conversation is about, so the fragments below have somewhere to land. Placed
         # after recall it would read as an afterthought and the model would weight the
         # fragments more heavily than the summary.
+        #
+        # Wrapped, not pasted. The card's topics and participants are strings extracted
+        # from message content, and the portrait's recurring questions are verbatim memory
+        # content — so both are the same class of input as recall and get the same
+        # boundary. The wrapping is what makes "this is a summary" a claim the model can
+        # verify rather than one it has to take on faith.
         if req.scene_card_prompt:
-            notes.append(req.scene_card_prompt)
+            notes.append(wrap_untrusted(req.scene_card_prompt, kind="memory"))
         if req.scene_portrait_prompt:
-            notes.append(req.scene_portrait_prompt)
+            notes.append(wrap_untrusted(req.scene_portrait_prompt, kind="memory"))
         if req.recall_prompt:
             # Memory is advisory, not authoritative: a stale memory must never
             # outrank what the user says right now.
