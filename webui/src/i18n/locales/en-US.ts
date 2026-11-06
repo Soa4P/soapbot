@@ -427,6 +427,15 @@ export default {
     'Every conversation gets its own index card and portrait. The card is injected on every turn; the portrait only once there is enough evidence. Both are derived from stored memories, with no model call.',
   'memory.sceneEmpty':
     'No conversation has accumulated memories yet. Scenes appear here once the bot stores something.',
+  // An empty list has two unrelated causes that used to look identical: the bot is
+  // connected but nobody has spoken, or the bot is connected to nothing and can never
+  // produce a memory. Reporting the second as "no scenes yet" points at a layer that is
+  // working correctly instead of at adapters.yaml.
+  'memory.sceneNoAdapter':
+    'The bot is not connected to any protocol endpoint, so it receives no messages and can never produce a memory.',
+  'memory.sceneNoAdapterHint':
+    'This is not a scene-layer problem. Configure an adapter (onebot11, for example) in adapters.yaml and restart; only then does the bot start receiving messages.',
+  'memory.sceneNoAdapterAction': 'View runtime status',
   'memory.scenePick': 'Pick a scene on the left to see its card and portrait.',
   'memory.sceneNoCard': 'No card yet for this scene. Rebuild to derive one from stored memories.',
   'memory.sceneNoPortrait': 'Not enough evidence for a portrait yet.',

@@ -442,6 +442,14 @@ export default {
   'memory.sceneHint':
     '每个会话都有自己的定位卡与画像：卡片每轮注入，画像在证据足够时才注入。两者都由已存记忆推导，不调用模型。',
   'memory.sceneEmpty': '还没有任何会话积累到记忆。机器人收到消息并写入记忆后，这里会出现对应场景。',
+  // 空列表有两种完全不同的原因，而它们看起来一模一样：机器人连着但还没人说话，
+  // 或者机器人谁都没连、永远不可能产生记忆。后者是配置问题，说成「还没有场景」会
+  // 把人引向工作正常的那一层，而不是 adapters.yaml。
+  'memory.sceneNoAdapter':
+    '机器人当前没有连接任何协议端，因此不会收到消息，也就不会产生记忆。',
+  'memory.sceneNoAdapterHint':
+    '这不是场景层的问题。请在 adapters.yaml 里配置一个适配器（例如 onebot11），重启后机器人才能开始接收消息。',
+  'memory.sceneNoAdapterAction': '查看运行时状态',
   'memory.scenePick': '从左侧选择一个场景，查看它的定位卡与画像。',
   'memory.sceneNoCard': '这个场景还没有生成定位卡。点「重建」即可从已存记忆推导。',
   'memory.sceneNoPortrait': '证据不足，暂无画像。',
