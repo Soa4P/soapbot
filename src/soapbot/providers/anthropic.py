@@ -73,7 +73,7 @@ class AnthropicProvider(BaseProvider):
             resp = await self._request("POST", url, json=payload, headers=headers)
             if resp.status_code >= 400:
                 raise ProviderError(
-                    f"anthropic HTTP {resp.status_code}: {resp.text[:400]}",
+                    f"anthropic HTTP {resp.status_code}",
                     status=resp.status_code,
                     retry_after=retry_after_of(resp),
                 )

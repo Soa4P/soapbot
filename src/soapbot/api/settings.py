@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from soapbot import __version__
 from soapbot.api.auth import require_api_auth
+from soapbot.api.errors import safe_detail
 from soapbot.api.locale import request_locale
 from soapbot.config import settings
 from soapbot.core import config_write
@@ -298,7 +299,11 @@ async def write_settings(
 
         Settings(**{**candidates})
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid value: {exc}") from exc
+        # Pydantic's ValidationError contains the submitted value, the field path
+        # and sometimes a repr of the whole model. Putting that in `detail` would
+        # let a caller put arbitrary text (including fake log lines or a path)
+        # into a response. The real text stays in the server log.
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "settings")) from exc
 
     path = _env_path()
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""

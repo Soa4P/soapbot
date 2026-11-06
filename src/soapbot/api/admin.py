@@ -57,14 +57,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from soapbot import __version__
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
+from soapbot.api.errors import safe_detail
 from soapbot.api.locale import request_locale
 from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["admin"])
+# Every management read needs an identified caller. In strict mode an unauthenticated
+# loopback GET is only MEMBER, which is enough to see the views but not enough for
+# any write — authenticate() refuses those before a handler runs. Individual
+# handlers below keep their own stricter permission checks where they change state.
+router = APIRouter(prefix="/api", tags=["admin"], dependencies=[Depends(require_role(Role.MEMBER))])
 
 
 def _role_of(auth: dict[str, Any]) -> Role:
@@ -84,6 +89,21 @@ _PROMPT_PREVIEW_CHARS = 4000
 #: used in URL paths here, so the charset is narrow and traversal is impossible by
 #: construction rather than by a later check.
 _DOC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _require_doc_id(value: str, locale: str = "") -> str:
+    """One validator for every doc_id entry point.
+
+    Two of the four handlers used to skip this check. They reached a parameterised
+    SQL query rather than a filesystem path, so the practical risk was low — but
+    "low" was an accident of the storage layer, and the next backend to use the id
+    as a key would have inherited an unvalidated value. Validation belongs at the
+    boundary, not in whichever store happens to be installed today.
+    """
+    candidate = (value or "").strip()
+    if not _DOC_ID_RE.match(candidate):
+        raise HTTPException(status_code=400, detail=t("api.doc_id_invalid", locale))
+    return candidate
 
 
 def _runtime():
@@ -619,7 +639,7 @@ async def memory_timeline(
     try:
         rows = await runtime.memory.timeline(session_key, limit=limit)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "admin")) from exc
     return {"session_key": session_key, "messages": rows, "count": len(rows)}
 
 
@@ -689,8 +709,7 @@ async def upsert_knowledge(
     doc_id = body.doc_id.strip() or (
         "doc-" + hashlib.sha256(f"{body.title}\n{body.content}".encode()).hexdigest()[:16]
     )
-    if not _DOC_ID_RE.match(doc_id):
-        raise HTTPException(status_code=400, detail=t("api.doc_id_invalid", locale))
+    doc_id = _require_doc_id(doc_id, locale)
 
     result = await runtime.kb.ingest_document(doc_id, body.title.strip(), body.content)
     if result["chunks"] == 0:
@@ -703,6 +722,7 @@ async def delete_knowledge(
     doc_id: str, request: Request, _: dict = Depends(require_api_auth)
 ) -> dict:
     locale = request_locale(request)
+    doc_id = _require_doc_id(doc_id, locale)
     runtime = _runtime()
     if runtime.kb is None:
         raise HTTPException(status_code=503, detail=t("api.kb_disabled", locale))
@@ -717,6 +737,7 @@ async def knowledge_detail(
     doc_id: str, request: Request, _: dict = Depends(require_api_auth)
 ) -> dict:
     locale = request_locale(request)
+    doc_id = _require_doc_id(doc_id, locale)
     runtime = _runtime()
     if runtime.kb is None:
         raise HTTPException(status_code=503, detail=t("api.kb_disabled", locale))

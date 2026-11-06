@@ -27,7 +27,7 @@ from soapbot.providers.base import (
     ProviderConfig,
     ProviderError,
 )
-from soapbot.security.injection import scrub_prompt_echo
+from soapbot.security.injection import redact, scrub_prompt_echo
 
 logger = logging.getLogger(__name__)
 
@@ -195,14 +195,25 @@ class ProviderRouter:
                 stat.consecutive_failures = 0
                 stat.last_error = ""
                 self._close_breaker()
-                logger.info(
-                    "provider=%s ok slot=%s latency=%.0fms tokens=%s/%s",
-                    provider.id,
-                    slot,
-                    latency,
-                    resp.prompt_tokens,
-                    resp.completion_tokens,
-                )
+                # A line per successful call used to make the log ring a list of
+                # numbers. Only a call that crossed the threshold is worth a warning;
+                # the rest are debug so the threshold keeps its meaning.
+                if latency >= settings.slow_call_ms:
+                    logger.warning(
+                        "slow provider call provider=%s latency=%.0fms threshold=%dms",
+                        provider.id,
+                        latency,
+                        settings.slow_call_ms,
+                    )
+                else:
+                    logger.debug(
+                        "provider=%s ok slot=%s latency=%.0fms tokens=%s/%s",
+                        provider.id,
+                        slot,
+                        latency,
+                        resp.prompt_tokens,
+                        resp.completion_tokens,
+                    )
                 return resp
             except Exception as exc:
                 latency = (time.perf_counter() - t0) * 1000
@@ -215,7 +226,7 @@ class ProviderRouter:
                 # by /api/admin/providers) and into the log ring the WebUI streams. The
                 # scrub keeps the diagnostic part and cuts everything from the first
                 # prompt marker onward.
-                detail = scrub_prompt_echo(str(exc))
+                detail = redact(scrub_prompt_echo(str(exc)))[:200]
                 stat.last_error = detail
                 stat.last_latency_ms = round(latency, 2)
                 if stat.consecutive_failures >= 3:
@@ -346,7 +357,7 @@ class ProviderRouter:
                         self._close_breaker()
                         if on_pick is not None:
                             on_pick(provider.id)
-                        logger.info(
+                        logger.debug(
                             "provider=%s stream first-token latency=%.0fms",
                             provider.id,
                             stat.last_latency_ms,
@@ -359,13 +370,15 @@ class ProviderRouter:
                 stat.calls += 1 if not produced else 0
                 stat.failures += 1
                 stat.consecutive_failures += 1
-                stat.last_error = scrub_prompt_echo(str(exc))
+                stat.last_error = redact(scrub_prompt_echo(str(exc)))[:200]
                 errors.append(f"{provider.id}: {stat.last_error}")
                 if produced:
                     # Half an answer is already in the group. A second provider would
                     # continue someone else's sentence; surfacing the break is honest.
                     raise
-                logger.warning("provider=%s stream failed: %s", provider.id, exc)
+                logger.warning(
+                    "provider=%s stream failed: %s", provider.id, stat.last_error
+                )
 
         self._open_breaker(" | ".join(errors)[:300])
         raise ProviderError("all stream providers failed: " + " | ".join(errors))
@@ -383,8 +396,8 @@ class ProviderRouter:
             except Exception as exc:
                 stat = self._stats[provider.id]
                 stat.failures += 1
-                stat.last_error = str(exc)
-                errors.append(f"{provider.id}: {exc}")
+                stat.last_error = redact(scrub_prompt_echo(str(exc)))[:200]
+                errors.append(f"{provider.id}: {stat.last_error}")
         raise ProviderError("all embed providers failed: " + " | ".join(errors))
 
     async def transcribe(
@@ -408,7 +421,7 @@ class ProviderRouter:
             except Exception as exc:
                 stat = self._stats[provider.id]
                 stat.failures += 1
-                stat.last_error = str(exc)
+                stat.last_error = redact(scrub_prompt_echo(str(exc)))[:200]
                 errors.append(f"{provider.id}: {type(exc).__name__}")
         raise ProviderError("all transcribe providers failed: " + " | ".join(errors))
 

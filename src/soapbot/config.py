@@ -639,6 +639,31 @@ class Settings(BaseSettings):
     file it came from. Rejecting it here names the field and the accepted values."""
     log_json: bool = True
     log_ring_size: int = 2000
+    slow_call_ms: int = 3000
+    """A provider call slower than this is logged at WARNING. Below it the latency is
+    DEBUG, not INFO: one line per successful model call turned the log ring into a
+    list of numbers nobody reads, while the one slow call worth investigating had
+    the same visual weight as the other five thousand."""
+
+    # ---- request / auth boundary ----
+    strict_loopback_auth: bool = True
+    """When true, a loopback client needs a credential for any mutating request.
+    Reads stay open so ``http://127.0.0.1:6185`` still renders before login. Turning
+    this off restores the old "loopback is trusted for everything" behaviour; only
+    the test suite does that, so its business assertions do not each have to become
+    a login script. The strict path itself is pinned by tests/test_auth_cookie.py."""
+    cookie_secure: bool = False
+    """Set true behind an HTTPS reverse proxy. Over plain loopback HTTP a Secure
+    cookie is never sent back, which would make login look like a no-op."""
+    strict_startup: bool = True
+    """Abort startup when an enabled adapter cannot be constructed. Failing at boot
+    is the default: an adapter that only looks configured would otherwise surface
+    hours later as a silently missing connection. Set false for a panel-only install
+    that must come up even when an optional adapter is broken."""
+    max_regex_input_chars: int = 20_000
+    """Ceiling applied before any pattern runs over operator- or user-supplied text.
+    The stdlib ``re`` has no timeout argument; bounding the input is the enforceable
+    substitute without adding a dependency (``check_deps.py`` pins the runtime list)."""
 
     # ---- behaviour ----
     default_timezone: str = "Asia/Shanghai"

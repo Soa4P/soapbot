@@ -19,7 +19,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
+from soapbot.api.errors import safe_detail
 from soapbot.bilibili.client import (
     BilibiliError,
     BilibiliRateLimitedError,
@@ -27,9 +28,12 @@ from soapbot.bilibili.client import (
     BilibiliTierError,
 )
 from soapbot.config import settings
+from soapbot.security.principal import Role
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/bilibili", tags=["bilibili"])
+router = APIRouter(
+    prefix="/api/bilibili", tags=["bilibili"], dependencies=[Depends(require_role(Role.MEMBER))]
+)
 
 
 def _client():
@@ -86,13 +90,13 @@ async def bilibili_preview(
         video = await client.video(resolved)
         comments = await client.comments(video.aid, limit=settings.bilibili_max_comments)
     except BilibiliTierError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
     except BilibiliRateLimitedError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=429, detail=safe_detail(429, exc, "bilibili")) from exc
     except BilibiliRiskControlError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=safe_detail(502, exc, "bilibili")) from exc
     except BilibiliError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
 
     return {"video": video.to_dict(), "comments": [c.to_dict() for c in comments]}
 
@@ -114,11 +118,11 @@ async def bilibili_impression(
     try:
         report = await watcher.watch(target)
     except BilibiliTierError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
     except BilibiliRateLimitedError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=429, detail=safe_detail(429, exc, "bilibili")) from exc
     except BilibiliRiskControlError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=safe_detail(502, exc, "bilibili")) from exc
     except BilibiliError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
     return report.to_dict()

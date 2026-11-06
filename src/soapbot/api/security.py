@@ -11,7 +11,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
 from soapbot.api.locale import request_locale
 from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
@@ -24,7 +24,11 @@ from soapbot.security.principal import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/security", tags=["security"])
+# Audit records contain operator actions and refusal reasons. An anonymous viewer
+# should not be able to enumerate them from a loopback tab.
+router = APIRouter(
+    prefix="/api/security", tags=["security"], dependencies=[Depends(require_role(Role.MEMBER))]
+)
 
 
 @router.get("/audit")

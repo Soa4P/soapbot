@@ -12,7 +12,7 @@ else
 	BIN := $(VENV)/bin
 endif
 
-.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks ipc-audit guard
+.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks ipc-audit boundary-audit guard
 
 help:
 	@echo "make install    创建虚拟环境并安装开发依赖"
@@ -27,6 +27,7 @@ help:
 	@echo "make check      lint + contrast + a11y + gaps + doclinks + test（CI 阻断项同款）"
 	@echo "make deploy-check 容器部署配置静态检查（不需要 docker）"
 	@echo "make ipc-audit   插件进程 / IPC 边界静态审计（含在 check 内）"
+	@echo "make boundary-audit  18 项安全与错误日志边界审计（含在 check 内）"
 	@echo "make guard       只读巡检插件 worker 进程（需要 docker / ps）"
 	@echo "make ui         构建前端到 src/soapbot/webui/dist"
 	@echo "make progress   启动开发进度看板 http://127.0.0.1:8099/"
@@ -79,6 +80,11 @@ doclinks:
 ipc-audit:
 	$(BIN)/python scripts/check_plugin_ipc.py
 
+# The 18 contracts in docs/security-boundaries.md. Same command CI runs; a local
+# gate that differs from CI is a gate nobody trusts.
+boundary-audit:
+	$(BIN)/python scripts/check_security_boundaries.py
+
 # Read-only: reports worker count, zombies and health. Never restarts a process.
 guard:
 	$(BIN)/python scripts/plugin_worker_guard.py --self-test
@@ -95,7 +101,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint contrast a11y gaps doclinks ipc-audit test
+check: lint contrast a11y gaps doclinks ipc-audit boundary-audit test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:

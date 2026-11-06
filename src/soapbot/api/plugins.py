@@ -22,13 +22,21 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from soapbot.api.auth import require_role
+from soapbot.api.errors import safe_detail
 from soapbot.config import settings
+from soapbot.security.principal import Role
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/plugins", tags=["plugins"])
+# Installing, approving and loading a plugin executes third-party code in a worker
+# process. A MEMBER who can do that but cannot edit one config line is a permission
+# inversion, so the whole router starts at ADMIN.
+router = APIRouter(
+    prefix="/api/plugins", tags=["plugins"], dependencies=[Depends(require_role(Role.ADMIN))]
+)
 
 def _authorize(request: Request) -> None:
     """Require an operator credential for plugin management.
@@ -129,7 +137,7 @@ async def install_plugin(request: Request) -> dict:
         )
     except InstallError as exc:
         logger.warning("plugin install rejected: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "plugins")) from exc
 
     logger.info("plugin uploaded name=%s bytes=%d", result.name, len(payload))
     return result.to_dict()
@@ -336,7 +344,7 @@ async def delete_plugin(name: str, request: Request) -> dict:
     except ValueError as exc:
         # Path traversal attempt, or a symlink escaping the root. Never 500: the
         # refusal is the correct answer and the operator should see it verbatim.
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "plugins")) from exc
     except OSError as exc:
         logger.warning("plugin delete failed name=%s err=%s", name, type(exc).__name__)
         raise HTTPException(status_code=500, detail="delete failed") from exc

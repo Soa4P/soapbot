@@ -19,16 +19,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
+from soapbot.api.errors import safe_detail
 from soapbot.config import settings
 from soapbot.core import config_write
 from soapbot.core.config_files import ConfigError
 from soapbot.security.audit import get_audit_log
-from soapbot.security.principal import Permission
+from soapbot.security.principal import Permission, Role
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/config", tags=["config"])
+router = APIRouter(
+    prefix="/api/config", tags=["config"], dependencies=[Depends(require_role(Role.ADMIN))]
+)
 
 MASK_HINT = "字面量密钥显示为掩码；提交时用 __UNCHANGED__ 表示保留原值。"
 
@@ -84,7 +87,7 @@ async def read_adapters(
     except ConfigError as exc:
         # Reported, not swallowed into an empty form: saving over a file that merely had
         # a typo is worse than showing the typo.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_adapters")) from exc
 
     return {
         "document": config_write.mask_document(document),
@@ -117,7 +120,7 @@ async def diff_adapters(
             },
         ) from exc
     except ConfigError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_adapters")) from exc
 
     return {
         "diff": result.diff,
@@ -154,7 +157,7 @@ async def apply_adapters(
         ) from exc
     except ConfigError as exc:
         _audit(actor, "deny", "validation_failed", [])
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_adapters")) from exc
 
     if result.empty:
         return {"written": False, "reason": "no changes", "changed_fields": []}

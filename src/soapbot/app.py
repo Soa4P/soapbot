@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -59,6 +60,7 @@ from soapbot.api.bilibili import router as bilibili_router
 from soapbot.api.config_adapters import router as config_adapters_router
 from soapbot.api.config_probe import router as config_probe_router
 from soapbot.api.config_write import router as config_write_router
+from soapbot.api.errors import install_error_handlers
 from soapbot.api.napcat import router as napcat_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
@@ -66,6 +68,7 @@ from soapbot.api.protocol import router as protocol_router
 from soapbot.api.security import router as security_router
 from soapbot.api.settings import router as settings_router
 from soapbot.config import settings
+from soapbot.core import log_context
 from soapbot.logging_setup import setup_logging
 from soapbot.security.tokens import (
     BOOTSTRAP_FILE,
@@ -85,6 +88,11 @@ _STARTED_AT: dict[str, Any] = {}
 #: whatever it was sent, so "how much memory can a stranger make this process allocate"
 #: had no answer.
 MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024
+
+#: The Vite dev server only. In production the panel is served from this same origin.
+#: Kept as one constant so the non-wildcard assertion and the middleware cannot drift.
+_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 _PLUGIN_MANAGER: Any = None
 _RUNTIME: Any = None
 _SCHEDULER: Any = None
@@ -296,11 +304,15 @@ async def _attach_adapters(runtime) -> None:
         try:
             adapter = create_adapter(config.kind, **config.options)
         except Exception as exc:
-            # Recorded, not raised: one unusable adapter must not take the management
-            # API down with it, because that API is how the operator finds out.
+            # Recorded, and only raised when strict_startup is on. The default keeps
+            # the management API available — it is how the operator finds out — while
+            # an operator who wants a hard boundary can make a broken adapter abort
+            # boot instead of surfacing hours later as a missing connection.
             message = f"adapter {config.kind}: {type(exc).__name__}: {exc}"
             _STARTUP_ERRORS.append(message)
             logger.error("adapter construction failed: %s", message)
+            if settings.strict_startup:
+                raise RuntimeError(f"strict startup refused: {message}") from exc
             continue
         await runtime.add_adapter(adapter)
         logger.info("adapter registered: %s", config.kind)
@@ -449,20 +461,42 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    install_error_handlers(app)
+
     app.add_middleware(
         CORSMiddleware,
         # The Vite dev server only. In production the UI is served from this same
         # origin, so a wider list would be permission nobody needs — and
         # ``allow_credentials`` plus a wildcard origin is rejected by browsers anyway,
         # which makes a too-generous list misleading as well as unnecessary.
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=_CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # The wildcard would be a lie: browsers reject `allow_credentials` together with
+    # `*`, and an operator seeing `*` would assume the list is intentionally open.
+    assert "*" not in _CORS_ORIGINS, "CORS must stay an explicit allowlist"
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """Browser-side backstop for the one v-html sink and for cookie theft.
+
+        CSP does not replace output escaping — it limits what an escaping mistake can
+        do. ``connect-src 'self'`` also stops a injected script from quietly shipping
+        the page's data to another host.
+        """
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self' ws: wss:; "
+            "object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
     @app.middleware("http")
     async def _limit_body_size(request: Request, call_next: Callable[[Request], Any]) -> Any:
@@ -489,8 +523,9 @@ def create_app() -> FastAPI:
                     )
             except ValueError:
                 # A malformed Content-Length is the server's problem to reject, not to
-                # guess at; let the ASGI layer decide.
-                pass
+                # guess at; let the ASGI layer decide. The fixed message (never the
+                # header value) keeps a bad header from forging a log line.
+                logger.debug("ignoring a malformed Content-Length header")
 
         # Every method that can carry a body is guarded, not just POST/PUT/PATCH. A
         # DELETE with a body is legal HTTP, and leaving it unguarded made the one method
@@ -530,6 +565,25 @@ def create_app() -> FastAPI:
             request._stream = _replay()
 
         return await call_next(request)
+
+    # Registered last so it is the outermost user middleware. Body-size rejection
+    # returns 413 without calling call_next; if this ran inside that middleware,
+    # the 413 response would have no request id and its log line no context.
+    @app.middleware("http")
+    async def _request_context(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        """Bind locating fields for every log line produced by this request."""
+        request_id = request.headers.get("X-Request-ID", "") or secrets.token_hex(8)
+        tokens = log_context.bind(
+            request_id=request_id,
+            trace_id=request.headers.get("X-Trace-ID", "") or request_id,
+            message_id=request.headers.get("X-Message-ID", ""),
+        )
+        try:
+            response = await call_next(request)
+            response.headers.setdefault("X-Request-ID", request_id)
+            return response
+        finally:
+            log_context.reset(tokens)
 
     @app.get("/api/health", tags=["system"])
     async def health() -> JSONResponse:

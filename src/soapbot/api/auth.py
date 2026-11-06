@@ -1,19 +1,19 @@
 """Authentication for the management API.
 
-Two ways in, and only two:
+The browser uses an ``HttpOnly`` session cookie. A bearer token remains available for
+scripts and the CLI, which cannot rely on a browser cookie jar. Both carry the same
+signed token, so revocation and expiry work identically on either path.
 
-1. **A bearer token** obtained from ``POST /api/auth/login`` using the bootstrap
-   token. This is the only path that works from another machine, and the only one
-   that should exist once a reverse proxy is in front of the service.
-2. **A loopback client with no token**, kept for local development and for the
-   single-operator case where the WebUI is opened on the same host.
+A loopback client with no credential may still *read*. It may not change anything
+once ``strict_loopback_auth`` is on (the default). That distinction matters: a
+reverse proxy in front of the service makes remote requests genuinely arrive from
+loopback, so "came from 127.0.0.1" was never proof of being the operator.
 
-The second path is deliberately narrow rather than absent: an operator who starts the
-service and opens ``http://127.0.0.1:6185`` should not have to read a log to find a
-token before the dashboard renders anything. It is *not* a security boundary — a
-reverse proxy makes remote requests genuinely arrive from loopback, which is why it is
-paired with an Origin check (see ``_reject_cross_site``) and why the docs say to set
-``SOAPBOT_INIT_TOKEN`` and go through login on any exposed deployment.
+Cookie-authenticated writes also need a same-origin ``Origin`` and a CSRF header
+matching a separate readable cookie. A browser attaches cookies automatically; it
+cannot attach the header from another origin without a preflight we do not allow.
+Bearer-authenticated writes are exempt because a cross-site page cannot supply a
+bearer token in the first place.
 
 Login is rate limited: the bootstrap token is short, high-value, and the endpoint is
 reachable without any credential at all.
@@ -21,11 +21,13 @@ reachable without any credential at all.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import secrets
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from soapbot.config import settings
@@ -42,6 +44,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient", ""})
+
+SESSION_COOKIE = "soapbot_session"
+CSRF_COOKIE = "soapbot_csrf"
+CSRF_HEADER = "X-CSRF-Token"
+"""The session cookie is unreadable from JavaScript; the CSRF cookie is deliberately
+readable, because the double-submit check needs the page to echo its value in a
+header. Two values, not one: echoing the session cookie itself would put the
+credential back into script-reachable space."""
 
 _token_service: TokenService | None = None
 _bootstrap: BootstrapToken | None = None
@@ -116,6 +126,93 @@ def _bearer(request: Request) -> str:
     return ""
 
 
+def _cookie(request: Request) -> str:
+    # ``getattr`` rather than a direct attribute read: several callers (and the
+    # unit tests that pin the loopback rules) build a minimal request stand-in
+    # without a cookie jar. A missing jar means "no cookie", not a crash.
+    cookies = getattr(request, "cookies", None) or {}
+    return cookies.get(SESSION_COOKIE, "") or ""
+
+
+def _credential(request: Request) -> tuple[str, str]:
+    """Return ``(token, carrier)``. A bearer header wins over the cookie.
+
+    The header wins so a script can deliberately use a different identity from the
+    one in its browser cookie jar, instead of getting a confusing mix of both.
+    """
+    bearer = _bearer(request)
+    if bearer:
+        return bearer, "token"
+    cookie = _cookie(request)
+    if cookie:
+        return cookie, "cookie"
+    return "", "none"
+
+
+def _set_session(response: Response, token: str, ttl_seconds: int) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=max(1, ttl_seconds),
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+    # Readable on purpose. Rotated on every login so an old value cannot be
+    # replayed against a new session.
+    response.set_cookie(
+        CSRF_COOKIE,
+        secrets.token_urlsafe(24),
+        max_age=max(1, ttl_seconds),
+        httponly=False,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+
+
+def _clear_session(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="lax")
+    response.delete_cookie(CSRF_COOKIE, path="/", httponly=False, samesite="lax")
+
+
+def _origin_allowed(request: Request) -> bool:
+    """Reject a cross-site Origin, including opaque ones.
+
+    ``Origin: null`` (a sandboxed iframe, or some file:// pages) used to pass
+    because ``urlsplit("null").hostname`` is None and the empty string was in the
+    loopback set. An opaque origin is not a loopback origin: it means we cannot
+    tell where the request came from, which is a reason to refuse, not to trust.
+    """
+    origin = request.headers.get("Origin", "") or ""
+    if not origin:
+        # Non-browser clients (curl, TestClient, the CLI) send no Origin.
+        return True
+    host = urlsplit(origin).hostname or ""
+    if not host:
+        return False
+    own_host = getattr(request.url, "hostname", "") or ""
+    return host in _LOOPBACK_HOSTS or host == own_host
+
+
+def _verify_csrf(request: Request) -> None:
+    """Double-submit check for cookie-authenticated state changes."""
+    if request.method not in _MUTATING:
+        return
+    if _bearer(request):
+        # A cross-site page cannot attach a bearer header; no CSRF exposure here.
+        return
+    cookies = getattr(request, "cookies", None) or {}
+    expected = cookies.get(CSRF_COOKIE, "") or ""
+    supplied = request.headers.get(CSRF_HEADER, "") or ""
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        raise HTTPException(status_code=403, detail="CSRF token missing or mismatched")
+    if not _origin_allowed(request):
+        logger.warning("blocked cross-origin cookie write origin=%s", request.headers.get("Origin"))
+        raise HTTPException(status_code=403, detail="cross-site request refused")
+
+
 _MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -132,15 +229,18 @@ def _reject_cross_site(request: Request) -> None:
     """
     if request.method not in _MUTATING:
         return
-    origin = request.headers.get("Origin", "") or ""
-    if not origin:
-        # Non-browser clients (curl, the test client, the CLI) send no Origin. Allowing
-        # them is the point of the loopback path.
-        return
-    host = urlsplit(origin).hostname or ""
-    if host not in _LOOPBACK_HOSTS:
-        logger.warning("blocked cross-site API call origin=%s path=%s", origin, request.url.path)
+    if not _origin_allowed(request):
+        logger.warning(
+            "blocked cross-site API call origin=%s path=%s",
+            request.headers.get("Origin"),
+            request.url.path,
+        )
         raise HTTPException(status_code=403, detail="cross-site request refused")
+
+
+def _loopback_role() -> str:
+    """Read-only loopback is a viewer, not an operator, once strict mode is on."""
+    return "member" if settings.strict_loopback_auth else "owner"
 
 
 def authenticate(request: Request) -> dict[str, Any]:
@@ -151,8 +251,9 @@ def authenticate(request: Request) -> dict[str, Any]:
     and converting every call site to an ``await`` would be churn with no benefit.
     Decoding an HS256 token is CPU-only, so there is nothing to await.
     """
-    token = _bearer(request)
+    token, carrier = _credential(request)
     if token:
+        _verify_csrf(request)
         service = _token_service
         if service is None:
             raise HTTPException(status_code=503, detail="auth is not initialised")
@@ -171,9 +272,10 @@ def authenticate(request: Request) -> dict[str, Any]:
                 headers={"WWW-Authenticate": "Bearer"},
             ) from exc
         request.state.claims = claims
-        request.state.auth_mode = "token"
+        request.state.auth_mode = carrier
         return {
             "mode": "token",
+            "carrier": carrier,
             "subject": claims.subject,
             "role": claims.role,
             "expires_at": claims.expires_at,
@@ -193,13 +295,67 @@ def authenticate(request: Request) -> dict[str, Any]:
         )
 
     _reject_cross_site(request)
+    if settings.strict_loopback_auth and request.method in _MUTATING:
+        get_audit_log().record(
+            kind="authz",
+            action="loopback_write",
+            outcome="deny",
+            detail=f"method={request.method} path={request.url.path}",
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="a credential is required to change state",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     request.state.auth_mode = "loopback"
-    return {"mode": "loopback", "subject": "", "role": "owner", "expires_at": 0}
+    return {
+        "mode": "loopback",
+        "carrier": "loopback",
+        "subject": "",
+        "role": _loopback_role(),
+        "expires_at": 0,
+    }
 
 
 async def require_api_auth(request: Request) -> dict[str, Any]:
     """FastAPI dependency wrapper around :func:`authenticate`."""
     return authenticate(request)
+
+
+def require_role(minimum):
+    """Build a dependency that authenticates and then checks an authority floor.
+
+    Kept as a factory so a router can declare one floor for all its routes while a
+    single handler can ask for a higher one. Authentication always happens first:
+    a role check over an unauthenticated request would compare "anonymous" against
+    a floor and leak which endpoints are more sensitive than others.
+    """
+    from soapbot.security.principal import Role
+
+    async def _dep(
+        request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+    ) -> dict[str, Any]:
+        # ``require_api_auth`` is a nested dependency rather than a direct call so
+        # FastAPI's dependency_overrides still work for tests that build a bare app
+        # and supply a caller. Calling authenticate() here would ignore those
+        # overrides and turn a role test into an "auth not initialised" 503.
+        raw = str(auth.get("role") or "anonymous").lower()
+        try:
+            role = Role(raw)
+        except ValueError:
+            role = Role.ANONYMOUS
+        if role.rank < minimum.rank:
+            get_audit_log().record(
+                kind="authz",
+                action="role_gate",
+                outcome="deny",
+                role=role.value,
+                detail=f"requires={minimum.value} path={request.url.path}",
+            )
+            raise HTTPException(status_code=403, detail="insufficient role")
+        return auth
+
+    return _dep
 
 
 # ----------------------------------------------------------------- endpoint
@@ -209,13 +365,16 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(payload: LoginRequest, request: Request) -> dict:
+async def login(payload: LoginRequest, request: Request, response: Response) -> dict:
     """Exchange the one-time bootstrap token for an API token.
 
     Returns 401 for both "wrong token" and "already used" — distinguishing them would
     tell an attacker whether the operator has already logged in, and tells a legitimate
     operator nothing they cannot learn from the startup log.
     """
+    # This endpoint sets cookies without having a session yet, so the CSRF
+    # double-submit check cannot apply. Refuse a cross-site Origin instead.
+    _reject_cross_site(request)
     host = _client_host(request)
     limit = _login_limiter.check(host or "unknown")
     if limit.limited:
@@ -253,6 +412,11 @@ async def login(payload: LoginRequest, request: Request) -> dict:
         detail=f"issued operator token from={host} ttl={service.ttl_seconds}s",
     )
     _login_limiter.reset(host or "unknown")
+    _set_session(response, token, service.ttl_seconds)
+    # ``access_token`` stays in the body for scripts and the CLI, which cannot use a
+    # browser cookie jar. The panel ignores it entirely: its only credential is the
+    # HttpOnly cookie above. A browser-side XSS can read this one response, but it
+    # cannot read the cookie, cannot replay it later, and cannot persist the token.
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -263,25 +427,29 @@ async def login(payload: LoginRequest, request: Request) -> dict:
 
 
 @router.post("/refresh")
-async def refresh(request: Request) -> dict:
+async def refresh(
+    request: Request, response: Response, _auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
     """Re-issue a token from a still-valid one.
 
-    Requires a bearer token explicitly: refreshing on the loopback fallback would let
-    any local process mint a long-lived credential without ever knowing the bootstrap
-    secret.
+    Requires an existing credential explicitly: refreshing on the loopback fallback
+    would let any local process mint a long-lived token without ever knowing the
+    bootstrap secret. A cookie-backed session gets a fresh cookie back.
     """
-    token = _bearer(request)
+    token, carrier = _credential(request)
     service = _token_service
     if service is None:
         raise HTTPException(status_code=503, detail="auth is not initialised")
     if not token:
-        raise HTTPException(status_code=401, detail="a bearer token is required to refresh")
+        raise HTTPException(status_code=401, detail="a credential is required to refresh")
     try:
         claims = service.verify(token)
     except TokenError as exc:
         raise HTTPException(status_code=401, detail="invalid or expired token") from exc
 
     new_token, new_claims = service.issue(claims.subject, role=claims.role)
+    if carrier == "cookie":
+        _set_session(response, new_token, service.ttl_seconds)
     get_audit_log().record(
         kind="login",
         action="refresh",
@@ -305,7 +473,7 @@ async def auth_status(request: Request) -> dict:
     required before it can decide what to render, and this endpoint reveals nothing
     beyond "a token is or is not configured".
     """
-    token = _bearer(request)
+    token, _carrier = _credential(request)
     mode = "none"
     subject = ""
     expires_at = 0
@@ -343,7 +511,9 @@ async def auth_status(request: Request) -> dict:
 
 # ------------------------------------------------------------- revocation
 @router.post("/logout")
-async def logout(request: Request, auth: dict[str, Any] = Depends(require_api_auth)) -> dict:
+async def logout(
+    request: Request, response: Response, auth: dict[str, Any] = Depends(require_api_auth)
+) -> dict:
     """Revoke the caller's own token.
 
     Until this existed there was no way to end a session: a signed token was valid for
@@ -374,12 +544,13 @@ async def logout(request: Request, auth: dict[str, Any] = Depends(require_api_au
             + ("" if revoked else " (already revoked)")
         ),
     )
+    _clear_session(response)
     return {"ok": True, "revoked": revoked}
 
 
 @router.post("/revoke-all")
 async def revoke_all_tokens(
-    request: Request, auth: dict[str, Any] = Depends(require_api_auth)
+    request: Request, response: Response, auth: dict[str, Any] = Depends(require_api_auth)
 ) -> dict:
     """Invalidate every token issued so far. Owner only.
 
@@ -433,6 +604,10 @@ async def revoke_all_tokens(
         )
         replacement = new_token
         expires_at = new_claims.expires_at
+        # A cookie-backed operator would otherwise be logged out by their own
+        # "revoke everything" click, with no bootstrap token left to get back in.
+        if auth.get("carrier") == "cookie":
+            _set_session(response, new_token, service.ttl_seconds)
     else:
         expires_at = 0
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { api, setToken } from '@/api/client'
+import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { datetime, num } from '@/lib/format'
@@ -183,10 +183,10 @@ async function revokeEveryToken(): Promise<void> {
   tokenNote.value = ''
   tokenError.value = ''
   try {
-    const result = await api.revokeAllTokens()
-    // The server hands back a replacement. Keeping it is not optional: the bootstrap
-    // token was consumed at first login, so dropping this one locks the operator out.
-    if (result.access_token) setToken(result.access_token)
+    await api.revokeAllTokens()
+    // The server rotates the session cookie in the same response. Dropping the
+    // replacement in the client would lock the operator out: the bootstrap token
+    // was consumed at first login and cannot be reused.
     tokenNote.value = t('security.tokensRevoked')
     await revocations.reload()
     await auth.refresh()

@@ -137,3 +137,21 @@ pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 > `edge-tts` 曾因「语音合成不存在」被一并移除。语音现在存在了，所以它回到了
 > **可选** extra 里，而不是默认依赖：它是一个大多数部署永远不会调用的厂商网络
 > 客户端，放进默认集只会让「pip install 就能跑」为单个功能变重。
+
+---
+
+## 边界与可观测性
+
+这一组决定「谁可以改状态」以及「日志里留下什么」，默认值都按严格一侧选。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SOAPBOT_STRICT_LOOPBACK_AUTH` | `true` | 回环客户端可以读，但任何写操作都要有效凭据。关掉它等于恢复「本机即管理员」的旧行为，只应在测试里出现；`tests/conftest.py` 就是这么做的，认证边界本身由 `tests/test_auth_cookie.py` 在严格模式下验证 |
+| `SOAPBOT_COOKIE_SECURE` | `false` | 放在 HTTPS 反代后面时设为 `true`。本地纯 HTTP 打开时设 `true` 会让浏览器不回传会话 Cookie，表现为「登录没反应」 |
+| `SOAPBOT_STRICT_STARTUP` | `true` | 已启用的适配器构造失败就在启动阶段中止，而不是几小时后表现为「连不上」。面板专用、允许可选适配器坏掉也要起服务的部署才设 `false` |
+| `SOAPBOT_SLOW_CALL_MS` | `3000` | Provider 调用超过这个毫秒数才记 WARNING；低于阈值记 DEBUG。每次成功调用都记 INFO 会让真正慢的那一次淹没在数字里 |
+| `SOAPBOT_MAX_REGEX_INPUT_CHARS` | `20000` | 任何跑在用户或运维输入上的正则，匹配前先按这个长度截断。标准库 `re` 没有超时参数，这是不加依赖时唯一可验证的上界 |
+
+`SOAPBOT_STRICT_LOOPBACK_AUTH` 与 `SOAPBOT_COOKIE_SECURE` 是安全边界，不是性能旋钮：
+前者不能靠环境变量随手关掉来获得「方便」，后者设错会直接导致无法登录。两项的当前值都
+能在 `POST /api/auth/status` 与 `soapbot doctor` 里核对。

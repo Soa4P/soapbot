@@ -78,6 +78,23 @@
   绝不自动重启
 - 容器：non-root（uid 10001）、只读根文件系统、`cap_drop: ALL`、
   `no-new-privileges`、宿主机侧仅绑定 loopback
+- 会话凭据：`HttpOnly` + `SameSite` Cookie，页面脚本读不到；写操作另需
+  `X-CSRF-Token` 与同源 `Origin`。脚本/CLI 仍可用 Bearer，两者共用同一套撤销与过期
+- 认证分级：管理路由按 `OWNER / ADMIN / MEMBER` 声明最低角色；回环只读不再等于
+  owner，写操作一律要凭据（`SOAPBOT_STRICT_LOOPBACK_AUTH` 默认开）
+- 错误响应：全局 `AppError` 映射，只回稳定短句与类别标签，完整异常进服务端日志；
+  响应不含堆栈、不含异常原文
+- 日志出口：`json.dumps` 序列化，控制字符（含换行）转义后再写；结构化字段带
+  `trace_id` / `message_id` / `plugin` / `provider`；日志环不含 traceback
+- 日志内容：Provider 响应正文不进 `last_error`、不进日志环；用户消息正文不写日志；
+  慢调用按 `SOAPBOT_SLOW_CALL_MS` 告警，成功调用降为 DEBUG
+- 输入与上传：正则入口先按 `SOAPBOT_MAX_REGEX_INPUT_CHARS` 截断；上传校验 zip
+  魔数与条目后缀白名单；`doc_id` 由统一函数校验
+- 18 项契约：`scripts/check_security_boundaries.py` 在 CI 双矩阵与 `make check`
+  中运行，逐条打印证据行
+
+18 项逐条证据与残余风险见 [docs/security-boundaries.md](docs/security-boundaries.md)，
+认证行为见 [docs/security-model.md](docs/security-model.md)。
 
 ## 部署基线
 
