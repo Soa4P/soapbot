@@ -315,7 +315,9 @@ def build_pipeline(
         pipeline.add(SafetyStage())
 
     # --- delivery and post-processing ---
-    pipeline.add(ReplyStage(tts=tts))
+    pipeline.add(
+        ReplyStage(tts=tts, loader=plugin_manager.loader if plugin_manager is not None else None)
+    )
     if memory is not None:
         pipeline.add(PersistReplyStage(memory))
         if extractor is not None:
