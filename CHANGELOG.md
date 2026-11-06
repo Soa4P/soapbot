@@ -10,6 +10,48 @@
 
 ## [Unreleased]
 
+### 安全边界与错误日志治理
+
+运营者提出 18 项风险。逐条核实后：6 项已经解决或不适用（`shell=True`、pickle /
+`yaml.load`、`v-html` 渲染用户内容、CORS 通配带凭证、Jinja 渲染用户内容、上传体积
+校验），1 项属实（token 存 `localStorage`），其余部分属实。口径是**全量加固**：
+18 项每项都要有一条能验证的防线，已解决项用负向静态断言锁住不许退回去，不重复
+写第二套实现。
+
+原来错在哪：
+
+- 认证：浏览器把签名 token 存在 `localStorage`，页面里任何脚本都能读走并长期复用；
+  `api/auth.py` 对回环请求无条件给 `owner`，77 个管理路由只有「要不要认证」没有
+  「谁可以改」。现在会话是 `HttpOnly` + `SameSite` Cookie，写操作另需 CSRF 双提交与
+  同源 `Origin`；回环只读降为 `MEMBER`，写操作要凭据；配置写入要求 `ADMIN`，
+  撤销全部仍要求 `OWNER`。Bearer 保留给脚本和 CLI。
+- 错误：二十多处 `HTTPException(..., detail=str(exc))` 把配置解析错误、插件异常文本
+  甚至路径回显到浏览器。现在统一异常分层与状态码映射，响应只给稳定短句加白名单
+  类别标签（如 `traversal`、`YAML`、未设置的环境变量名），完整异常进服务端日志。
+- 日志：`logging_setup.py` 手工拼 JSON 字符串，用户内容里的换行能伪造出第二行日志；
+  日志环存原文；Provider 响应正文经 `last_error` 被管理 API 返回并写进日志环。
+  现在用 `json.dumps` 序列化、出口剥离控制字符、`ContextVar` 贯穿 `trace_id` 等定位
+  字段、慢调用按阈值告警；Provider 异常只带 `kind + HTTP status`。
+- 输入：正则跑在用户可控文本上，执行前没有统一长度上限；上传只查 zip 结构不查
+  文件类型；`doc_id` 有四处入口，两处漏了校验。现在分别补上 `bounded_scan()`、
+  zip 魔数与后缀白名单、`_require_doc_id()`。标准库 `re` 没有超时参数，长度上限是
+  不加依赖时唯一可验证的替代，文档里如实写明它不是硬超时。
+- 异常吞没：三处 `except ...: pass` 有注释说明但没有任何动作，改成显式降级日志。
+
+新增 `scripts/check_security_boundaries.py`（57 条不变量，接进 CI 双矩阵与
+`make check`）、`docs/security-boundaries.md`（18 项逐条证据）、
+`tests/test_security_boundaries.py`、`tests/test_auth_cookie.py`、
+`tests/test_logging_hardening.py`、`tests/test_error_mapping.py`。
+`deploy/backup.sh` 把命令字符串拼接改成显式函数与引号路径。
+
+参考了 SnowLuma / NapCatQQ / MaiBot 等 23 个仓库，按 5 类生态抽样。学的是把边界
+写在哪、把校验放在哪、把恢复写成显式动作，没有搬任何功能、源码或依赖。逐条
+「改什么、为什么、不改什么」在 `docs/reference-ecosystem.md`。
+
+README 按四块重写（定位 / 启动 / 边界 / 门禁），安装细节迁到 `docs/guide.md`，
+排障与部署迁到 `docs/operations.md`。删掉宣传语，只写事实、命令和取舍。
+`tests/test_readme_claims.py` 的环境变量表仍在 `docs/configuration.md`，断言保持。
+
 ### 插件进程与 IPC 边界加固
 
 对运营者提出的十项风险做了**逐项核实**，其中六项在当前代码中已经解决，本轮只修真实缺口，

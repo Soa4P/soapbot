@@ -12,13 +12,18 @@ set -eu
 
 BACKUP_DIR="${BACKUP_DIR:-/opt/soapbot/backups}"
 KEEP="${KEEP:-3}"
-COMPOSE="${COMPOSE:-docker compose -f /opt/soapbot/deploy/docker-compose.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-/opt/soapbot/deploy/docker-compose.yml}"
+
+# A function, not a command string. Expanding an unquoted $COMPOSE relied on
+# word-splitting to turn one variable into four arguments, which breaks on a path
+# with a space. Only the file path is configurable now.
+compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
 mkdir -p "$BACKUP_DIR"
 
 # Ask the running container which volume is actually mounted at /data, rather than
 # assuming the compose project name -- a renamed directory changes it.
-VOLUME=$($COMPOSE ps -q soapbot 2>/dev/null | head -1 | xargs -r docker inspect -f \
+VOLUME=$(compose ps -q soapbot 2>/dev/null | head -1 | xargs -r docker inspect -f \
     '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' 2>/dev/null || true)
 if [ -z "${VOLUME}" ]; then
     VOLUME="${SOAPBOT_VOLUME:-deploy_soapbot-data}"

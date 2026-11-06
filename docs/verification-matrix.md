@@ -42,7 +42,11 @@
 | 进度看板契约 | `docs/progress/` | `tests/test_progress_board.py`（8 项：时间戳带时区、状态枚举、blocked 必须写原因、done 不得留未完成文件） | 浏览器打开：显示「最后更新 32 秒前」，无陈旧横幅 | **自动 + 实测** |
 | 插件 IPC 请求关联与帧预算 | `plugins/supervisor.py`、`plugins/isolation.py` | `tests/test_plugin_ipc_hardening.py`（伪造/迟到结果丢弃、未绑定回调拒绝、父子帧上限一致、出站超限含实际字节）、`tests/test_worker_limits.py`（两个 `-I` 子脚本的 AST 名检查） | 本机实跑 `scripts/check_plugin_ipc.py`，逐条打印证据行并全部成立 | **自动 + 实测**（本机；生产容器内的帧洪水与真实崩溃仍按下方「未验证」处理） |
 | 进程数上限与统一回收 | `config.py`、`core/builder.py`、`plugins/loader.py`、`app.py` | `tests/test_plugin_ipc_hardening.py`（容量 fail-closed、非法值拒绝、退出看护 reap 与代际守卫）、`tests/test_deploy_isolation.py`（熔断不随时间自动恢复） | — | **仅自动** |
-| 离线审计门禁与只读巡检 | `scripts/check_plugin_ipc.py`、`scripts/plugin_worker_guard.py`、`deploy/plugin-worker-guard.{service,timer}` | `tests/test_plugin_ipc_hardening.py`（门禁对故意移除不变量会失败、巡检自检的解析断言）、`make ipc-audit`、`make guard` | 本机执行过门禁与 `--self-test`；**未**在生产上执行过 `docker compose ps` / `ps` 的真实巡检 | **仅自动**（真实 docker/ps 路径未验证） |
+| 离线审计门禁与只读巡检 | `scripts/check_plugin_ipc.py`、`scripts/plugin_worker_guard.py`、`deploy/plugin-worker-guard.{service,timer}` | `tests/test_plugin_ipc_hardening.py`（门禁对故意移除不变量会失败、巡检自检的解析断言）、`make ipc-audit`、`make guard` | 本机跑过门禁与 `--self-test`；生产上实跑 `--json`，输出 `warnings: []`、`restart_performed: false`、退出码 0 | **自动 + 实测** |
+| 18 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、18 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
+| Cookie 会话与角色分级 | `api/auth.py`、`webui/src/api/client.ts`、`webui/src/stores/auth.ts` | `tests/test_auth_cookie.py`（Cookie 标志、CSRF/Origin、角色门槛、回环读写分离、登录登出） | 本机 TestClient 覆盖；云服务器上的登录/登出见本轮发布验收 | **仅自动**（云服务器实测见发布记录） |
+| 日志净化与统一错误层 | `logging_setup.py`、`core/log_context.py`、`api/errors.py`、`security/audit.py` | `tests/test_logging_hardening.py`（控制字符、ContextVar 不串请求、有界正则）、`tests/test_error_mapping.py`（状态码映射、响应不含异常原文） | 本机跑过；日志环与 `X-Request-ID` 由 TestClient 断言 | **仅自动** |
+| 生态对照与落地抉择 | `docs/reference-ecosystem.md` | `scripts/check_doc_links.py`、`scripts/check_test_gaps.py --strict` | 5 类抽样，每条对照对应本仓库一处改动或不改的理由 | **仅自动**（文档） |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 

@@ -73,6 +73,12 @@ jobs:
         # correlation ids, parent-side authorization, stdout drain and process cap.
         run: python scripts/check_plugin_ipc.py
 
+      - name: Security boundary audit
+        # The 18 contracts in docs/security-boundaries.md. Mostly negative
+        # invariants (no shell=True, no localStorage token, no raw exception text),
+        # which a passing unit test cannot keep from quietly coming back.
+        run: python scripts/check_security_boundaries.py
+
       - name: Lint
         run: python -m ruff check src tests
 

@@ -1,15 +1,14 @@
 /**
  * Thin fetch wrapper.
  *
- * Two deliberate choices:
+ * The session is an HttpOnly cookie set by /api/auth/login. Nothing here reads or
+ * stores a credential: a token in localStorage survives a tab close and is readable
+ * by any script that runs on the page. The cookie is neither. Scripts and the CLI
+ * can still use a bearer token, but the panel never handles one.
  *
- * 1. **The token lives in localStorage, not a cookie.** The API is same-origin but a
- *    cookie would be attached by the browser to *any* cross-site request aimed at it,
- *    which is the CSRF shape the backend's Origin check exists to defend against. A
- *    header cannot be forged cross-origin without CORS, so it is the narrower choice
- *    for an admin surface.
- * 2. **A 401 clears the token and raises an event.** Silently retrying or rendering an
- *    empty page would make an expired session look like an empty system.
+ * A cookie is attached by the browser to cross-site requests, so every state change
+ * also echoes a separate readable CSRF cookie in X-CSRF-Token. The server compares
+ * the two and checks Origin. A 401 raises an event instead of rendering an empty page.
  */
 
 import { locale, t } from '@/i18n'
@@ -18,8 +17,19 @@ import { locale, t } from '@/i18n'
  * that a restarting panel does not leave a button spinning. */
 const REQUEST_TIMEOUT_MS = 45_000
 
-const TOKEN_KEY = 'soapbot.token'
+const CSRF_COOKIE = 'soapbot_csrf'
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
 export const UNAUTHORIZED_EVENT = 'soapbot:unauthorized'
+
+/** The CSRF cookie is deliberately readable; the session cookie is not. */
+function csrfToken(): string {
+  for (const part of document.cookie.split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name === CSRF_COOKIE) return decodeURIComponent(rest.join('='))
+  }
+  return ''
+}
 
 export class ApiError extends Error {
   status: number
@@ -31,33 +41,8 @@ export class ApiError extends Error {
   }
 }
 
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-export function setToken(token: string): void {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
-  } catch {
-    // Private mode: the session will not survive a reload. Nothing to recover — the
-    // token is already in memory and every request reads it from there.
-    return
-  }
-  }
-
-export function clearToken(): void {
-  setToken('')
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
-  const token = getToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
   // The panel's chosen language, not the browser's. The two disagree whenever someone
   // switches the console to English on a Chinese system — and the browser's own header
   // is what the server would otherwise negotiate on, so half the page came back
@@ -68,6 +53,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
+  if (MUTATING.has((init.method ?? 'GET').toUpperCase())) {
+    const csrf = csrfToken()
+    if (csrf) headers.set('X-CSRF-Token', csrf)
+  }
 
   // Every request is bounded. Without this a probe button spins forever when the server
   // is restarting, and "测试中…" never resolves into an answer — which is exactly how a
@@ -77,7 +66,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   let response: Response
   try {
-    response = await fetch(path, { ...init, headers, signal: init.signal ?? controller.signal })
+    response = await fetch(path, {
+      ...init,
+      headers,
+      credentials: 'include',
+      signal: init.signal ?? controller.signal,
+    })
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new ApiError(0, t('api.timeout', { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) }))
@@ -90,7 +84,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (response.status === 401) {
-    clearToken()
+    // The server clears the cookie on logout. A 401 here means it expired or was
+    // revoked; showing the login dialog is the only useful local reaction.
     window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
   }
 

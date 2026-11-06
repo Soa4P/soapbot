@@ -49,7 +49,10 @@ def count_tokens(text: str) -> int:
         try:
             return len(enc.encode(text, disallowed_special=()))
         except Exception:  # pragma: no cover - fall through to heuristic
-            pass
+            # The encoder is an optional dependency; a broken one must not stop a
+            # reply. Logging the type (not the text) keeps the estimate auditable
+            # without putting prompt content in the log.
+            logger.debug("token encoder failed; using the heuristic", exc_info=True)
     return _heuristic_count(text)
 
 

@@ -37,7 +37,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
+from soapbot.api.errors import safe_detail
 from soapbot.api.locale import request_locale
 from soapbot.config import settings
 from soapbot.core import config_write, mcp_write
@@ -48,7 +49,11 @@ from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/config", tags=["config"])
+# Config files decide what the bot is allowed to do. The diff endpoint is a read,
+# but it still exposes hashes and structure, so the whole router starts at ADMIN.
+router = APIRouter(
+    prefix="/api/config", tags=["config"], dependencies=[Depends(require_role(Role.ADMIN))]
+)
 
 
 def _require_permission(auth: dict[str, Any], request: Request, permission: Permission) -> None:
@@ -128,7 +133,7 @@ async def read_providers(
         # Parse failure is reported, not swallowed into an empty form. An operator who
         # sees an empty form and presses save would overwrite a file that merely had a
         # typo in it.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     return {
         "document": config_write.mask_document(document),
@@ -165,7 +170,7 @@ async def diff_providers(
             },
         ) from exc
     except ConfigError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     return {
         "diff": result.diff,
@@ -209,7 +214,7 @@ async def apply_providers(
         ) from exc
     except ConfigError as exc:
         _audit(actor, "deny", "validation_failed", [])
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     if result.empty:
         # Not an error, and not a write: an empty patch must not touch mtime or hash,
@@ -350,7 +355,7 @@ async def read_mcp(_auth: dict[str, Any] = Depends(require_api_auth)) -> dict[st
     try:
         document = config_write.read_document(path)
     except ConfigError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     return {
         "servers": mcp_write.public_servers(document),
@@ -386,7 +391,7 @@ async def diff_mcp(
             },
         ) from exc
     except ConfigError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     return {
         "diff": result.diff,
@@ -430,7 +435,7 @@ async def apply_mcp(
         ) from exc
     except ConfigError as exc:
         _audit(actor, "deny", "mcp_validation_failed", [])
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_detail(422, exc, "config_write")) from exc
 
     if result.empty:
         return {"written": False, "reason": "no changes", "changed_fields": []}

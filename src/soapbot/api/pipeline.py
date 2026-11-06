@@ -21,13 +21,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from soapbot.api.auth import require_api_auth
+from soapbot.api.auth import require_api_auth, require_role
 from soapbot.api.locale import request_locale
 from soapbot.core.trace import build_topology, violated_constraints
 from soapbot.i18n import t
+from soapbot.security.principal import Role
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
+# Metrics and traces are read-only views. MEMBER is enough; the panel already hides
+# the technical detail fields from non-admins, so a second gate here would remove
+# the summary those users are supposed to see.
+router = APIRouter(
+    prefix="/api/pipeline", tags=["pipeline"], dependencies=[Depends(require_role(Role.MEMBER))]
+)
 
 
 def _runtime():

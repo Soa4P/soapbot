@@ -120,6 +120,24 @@ def strip_invisible(text: str) -> str:
     return _CONTROL_RE.sub("", text.translate(_INVISIBLE))
 
 
+def bounded_scan(pattern: re.Pattern[str], text: str, *, limit: int | None = None) -> bool:
+    """Run one precompiled pattern over a bounded prefix of untrusted text.
+
+    The stdlib ``re`` has no timeout. A pathological pattern over an unbounded
+    message is a CPU stall that no request timeout inside Python can interrupt.
+    Adding a third-party ``regex`` module would break ``check_deps.py``, so the
+    enforceable substitute is a single entry point that truncates first. All
+    patterns in this module are precompiled with bounded quantifiers; this is the
+    place that guarantees the *input* is bounded too.
+    """
+    from soapbot.config import settings
+
+    ceiling = limit if limit is not None else settings.max_regex_input_chars
+    if ceiling <= 0:
+        return False
+    return bool(pattern.search(text[:ceiling]))
+
+
 #: How many independent signals make a message hostile enough to refuse. Shared by
 #: every entry point that inspects untrusted text — typed messages and transcribed
 #: speech — because two paths with two thresholds means the weaker one decides.
@@ -168,7 +186,7 @@ def looks_like_injection(text: str) -> tuple[bool, list[str]]:
     normalized = strip_invisible(unicodedata.normalize("NFKC", text))
     hits: list[str] = []
     for label, pattern in _INJECTION_PATTERNS:
-        if pattern.search(normalized):
+        if bounded_scan(pattern, normalized):
             hits.append(label)
     return bool(hits), hits
 
@@ -208,7 +226,7 @@ def vet_memory(content: str) -> tuple[bool, str]:
 
     normalized = strip_invisible(unicodedata.normalize("NFKC", content))
     for pattern in _PRIVILEGE_MEMORY_PATTERNS:
-        if pattern.search(normalized):
+        if bounded_scan(pattern, normalized):
             return False, "privilege_claim"
 
     suspicious, labels = looks_like_injection(normalized)

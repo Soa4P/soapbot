@@ -26,6 +26,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from soapbot.core import log_context
 from soapbot.core.adapter import Adapter
 from soapbot.core.message import IncomingMessage, OutgoingMessage
 from soapbot.i18n import DEFAULT_LOCALE
@@ -100,9 +101,14 @@ class Pipeline:
         # through, and a provider call made from a stage that forgot to bind would
         # otherwise be untraceable — which is exactly the bug being fixed.
         token = set_trace_id(ctx.event.trace_id)
+        # Same id into the logging context, otherwise a provider failure during a
+        # chat message has a trace in /api/pipeline/traces but not in the JSON log
+        # line, and the two cannot be joined.
+        log_tokens = log_context.bridge_trace_id(ctx.event.trace_id)
         try:
             return await self._run_stages(ctx)
         finally:
+            log_context.reset(log_tokens)
             reset_trace_id(token)
 
     async def _run_stages(self, ctx: PipelineContext) -> PipelineContext:
