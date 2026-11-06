@@ -110,6 +110,13 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host or settings.host,
             port=args.port or settings.port,
             reload=args.reload,
+            # Without this uvicorn installs its own logging config, which replaces the
+            # root handlers ``setup_logging`` just built: the panel's log ring goes
+            # quiet and requests keep reaching stdout unfiltered.
+            log_config=None,
+            # A read loop stuck in a dead socket otherwise holds the process open until
+            # the supervisor escalates; every restart looks like a hang.
+            timeout_graceful_shutdown=settings.shutdown_grace_seconds,
         )
         return 0
 
