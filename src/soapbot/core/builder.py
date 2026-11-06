@@ -213,6 +213,10 @@ def build_pipeline(
                 # principal was resolved from, or "who outranks whom" would have
                 # two different answers inside one request.
                 authority=principal_resolver.authority,
+                # ``/forget`` deletes evidence, so it has to rebuild the derived views
+                # the same way a write does. Sharing one SceneMemory instance keeps the
+                # two paths from drifting apart.
+                scene=SceneMemory(memory.db),
             )
         )
 

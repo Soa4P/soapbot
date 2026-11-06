@@ -303,6 +303,8 @@ class Database:
         self._session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
         """Serialises transactions that write. See :meth:`write`."""
+        self._write_owner: asyncio.Task[Any] | None = None
+        """The task currently inside :meth:`write`, used to detect reentry."""
 
         from sqlalchemy import event
 
@@ -413,18 +415,38 @@ class Database:
         same boundary rolls back explicitly instead of relying on ``close()`` to do
         it as a side effect.
         """
-        async with self._write_lock, self._session_factory() as session:
+        # Refuse reentry instead of deadlocking. The lock is not reentrant, so a nested
+        # ``async with db.write()`` — the obvious way to make "rebuild then persist"
+        # atomic — would block forever with no error, no log line, and no traceback: the
+        # task simply stops. Raising turns a silent hang into a bug report.
+        #
+        # Checked against the *owning task*, not ``lock.locked()``: the lock being held by
+        # another coroutine is ordinary contention that must wait, and treating it as
+        # reentry would turn every concurrent write into a crash.
+        current = asyncio.current_task()
+        if self._write_owner is not None and self._write_owner is current:
+            raise RuntimeError(
+                "Database.write() is not reentrant: a nested write would deadlock. "
+                "Pass the session down instead of opening a second write transaction."
+            )
+        async with self._write_lock:
+            self._write_owner = current
             try:
-                yield session
-                await session.commit()
-            except BaseException:
-                # BaseException, not Exception: a cancelled archive must not leave a
-                # half-written transaction behind for the next writer to inherit.
-                # A rollback that itself fails (lost connection, cancellation already
-                # delivered) must not replace the original error with a confusing one.
-                with suppress(Exception):
-                    await session.rollback()
-                raise
+                async with self._session_factory() as session:
+                    try:
+                        yield session
+                        await session.commit()
+                    except BaseException:
+                        # BaseException, not Exception: a cancelled archive must not leave
+                        # a half-written transaction behind for the next writer to inherit.
+                        # A rollback that itself fails (lost connection, cancellation
+                        # already delivered) must not replace the original error with a
+                        # confusing one.
+                        with suppress(Exception):
+                            await session.rollback()
+                        raise
+            finally:
+                self._write_owner = None
 
     async def close(self) -> None:
         await self.engine.dispose()

@@ -372,6 +372,7 @@ class CommandStage(Stage):
         budget=None,
         bilibili=None,
         authority: AuthorityConfig | None = None,
+        scene: SceneMemory | None = None,
     ) -> None:
         self.store = store
         self.kb = kb
@@ -386,6 +387,11 @@ class CommandStage(Stage):
         # Same pattern: ``None`` means the feature is off, and ``/help`` omits the line
         # so the help text never advertises a command that answers "未启用".
         self.bilibili = bilibili
+        # Deleting a memory invalidates the derived views, so ``/forget`` has to rebuild
+        # them. Without this, the scene layer only ever refreshed on *writes*, and the
+        # "drop a portrait that lost its evidence" branch was unreachable from the one
+        # path that removes evidence — the card kept describing rows the user had deleted.
+        self.scene = scene
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         segments = ctx.extras.get("clean_segments") or ctx.event.segments
@@ -557,6 +563,10 @@ class CommandStage(Stage):
             return not_found
 
         ok = await self.store.delete_memory(memory_id)
+        if ok:
+            # The row is gone, so any edge pointing at it is now dangling and the card
+            # still counts it. Both are cheap to fix here and expensive to notice later.
+            await self._forget_scene_traces(item.scope, memory_id)
         self.audit.record(
             kind="memory",
             action="forget",
@@ -566,6 +576,22 @@ class CommandStage(Stage):
             trace_id=ctx.event.trace_id,
         )
         return f"已删除记忆 #{memory_id}" if ok else not_found
+
+    async def _forget_scene_traces(self, scope: str, memory_id: int) -> None:
+        """Drop the deleted memory's edges and rebuild the scope's derived views.
+
+        Failures are logged, never raised: the memory is already deleted, and a derived
+        view that lags by one turn is a cosmetic problem, whereas a ``/forget`` that
+        reports failure after succeeding would make the user try again and get "not
+        found".
+        """
+        if self.scene is None:
+            return
+        try:
+            await self.scene.unlink_all(memory_id)
+            await self.scene.refresh(scope)
+        except Exception as exc:
+            logger.warning("scene refresh failed after forget: %s", exc)
 
     @staticmethod
     def _owns_scope(principal, scope: str, *, write: bool = True) -> bool:
