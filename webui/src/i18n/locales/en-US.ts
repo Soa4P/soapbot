@@ -421,6 +421,48 @@ export default {
   'memory.deleteConfirm': 'Delete document "{name}" and all of its chunks?',
   'memory.deleted': 'Deleted {n} chunks.',
 
+  // Scene layer: a per-conversation index card, a portrait, and private skills.
+  'memory.sceneLayer': 'Scene layer',
+  'memory.sceneHint':
+    'Every conversation gets its own index card and portrait. The card is injected on every turn; the portrait only once there is enough evidence. Both are derived from stored memories, with no model call.',
+  'memory.sceneEmpty':
+    'No conversation has accumulated memories yet. Scenes appear here once the bot stores something.',
+  'memory.scenePick': 'Pick a scene on the left to see its card and portrait.',
+  'memory.sceneNoCard': 'No card yet for this scene. Rebuild to derive one from stored memories.',
+  'memory.sceneNoPortrait': 'Not enough evidence for a portrait yet.',
+  'memory.card': 'Index card',
+  'memory.portrait': 'Portrait',
+  'memory.rebuild': 'Rebuild',
+  'memory.rebuilding': 'Rebuilding…',
+  'memory.rebuilt': 'Card and portrait rebuilt.',
+  'memory.portraitWithheld':
+    'Below the evidence threshold, so the portrait was cleared rather than left stale.',
+  'memory.topics': 'Topics',
+  'memory.people': 'People',
+  'memory.themes': 'Long-term themes',
+  'memory.tone': 'Register',
+  'memory.questions': 'Recurring questions',
+  'memory.confidence': 'Confidence',
+  'memory.injectedPrompt': 'Injected text',
+  'memory.injectedHint':
+    'This is the exact text that enters the system prompt, wrapped as untrusted data.',
+  'memory.memoryCount': '{n} memories',
+  'memory.skills': 'Private skills',
+  'memory.skillsHint':
+    'Topics that keep recurring get distilled into Markdown skills, private to this scene and readable in Obsidian.',
+  'memory.skillEmpty': 'No skills for this scene yet. Pick a candidate below.',
+  'memory.skillCandidates': 'Candidate topics',
+  'memory.skillCandidatesHint':
+    'Clustered by keyword; a topic needs at least {n} supporting memories to appear.',
+  'memory.skillNoCandidates': 'No topic has enough memories behind it yet.',
+  'memory.skillSupport': '{n} supporting',
+  'memory.skillCreate': 'Create skill',
+  'memory.skillRegenerate': 'Regenerate',
+  'memory.skillCreated': 'Created skill "{name}".',
+  'memory.skillDeleteConfirm': 'Delete skill "{name}"? The file is removed from the data directory.',
+  'memory.skillDeleted': 'Deleted skill "{name}".',
+  'memory.skillFile': 'File',
+
   // ---------------------------------------------------------------- 08 logs
   'logs.title': 'Runtime log',
   'logs.level': 'Level',

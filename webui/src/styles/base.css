@@ -910,6 +910,158 @@ textarea.field {
   animation-delay: 200ms;
 }
 
+/* ---------------------------------------------------------------- scene layer
+   Two columns: a list of conversations, and the selected one's card, portrait and
+   skills. The list stays narrow because a scope key is a short string; the detail
+   column is wide because the rendered prompt is the thing worth reading. */
+.scene-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .scene-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.scene-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 460px;
+  overflow-y: auto;
+}
+.scene-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.scene-item:hover {
+  background: var(--surface-2);
+}
+.scene-item--on {
+  background: var(--surface-2);
+  border-color: var(--line-2);
+}
+.scene-item__name {
+  font-size: 13px;
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.scene-detail {
+  min-width: 0;
+}
+.scene-block {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scene-block__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scene-block__head h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+.scene-headline {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+.scene-questions {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+/* The injected text is shown verbatim, so it must not be reformatted: whitespace and
+   line breaks are part of what the model receives. */
+.scene-prompt {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.skill-list,
+.candidate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.skill-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skill-item__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.skill-item__head strong {
+  font-size: 13px;
+}
+.candidate-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+.candidate-item__topic {
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
