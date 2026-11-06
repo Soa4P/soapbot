@@ -99,6 +99,19 @@ const counters = computed(() => [
     </div>
   </div>
 
+  <section class="panel runtime-explain">
+    <div class="panel__head">
+      <h2>{{ t('runtime.scheduler') }}</h2>
+      <span class="pill" :class="scheduler.running ? 'ok' : 'bad'">
+        <i class="dot" />{{ scheduler.running ? 'TICKING' : 'STOPPED' }}
+      </span>
+    </div>
+    <div class="panel__body runtime-explain__body">
+      <p>{{ t('runtime.schedulerExplain') }}</p>
+      <p class="hint">{{ t('runtime.schedulerAction') }}</p>
+    </div>
+  </section>
+
   <div class="grid cols-2">
     <section class="panel">
       <div class="panel__head">
@@ -171,6 +184,7 @@ const counters = computed(() => [
           <tr>
             <th scope="col">{{ t('common.name') }}</th>
             <th scope="col">{{ t('common.status') }}</th>
+            <th scope="col">{{ t('runtime.healthReason') }}</th>
             <th scope="col">{{ t('runtime.connectedAt') }}</th>
             <th scope="col" class="num">{{ t('runtime.reconnects') }}</th>
             <th scope="col">{{ t('common.capability') }}</th>
@@ -181,10 +195,11 @@ const counters = computed(() => [
           <tr v-for="row in adapterRows" :key="row.name">
             <td class="key">{{ row.display_name || row.name }}</td>
             <td>
-              <span class="pill" :class="row.online ? 'ok' : 'bad'">
-                <i class="dot" />{{ row.online ? t('overview.online') : t('overview.offline') }}
+              <span class="pill" :class="row.health_level === 'healthy' ? 'ok' : row.health_level === 'warning' ? 'warn' : 'bad'">
+                <i class="dot" />{{ row.health_level === 'healthy' ? t('runtime.healthHealthy') : row.health_level === 'warning' ? t('runtime.healthWarning') : t('runtime.healthDanger') }}
               </span>
             </td>
+            <td>{{ row.health_reason || row.last_error || '—' }}</td>
             <td v-if="row.connected_at">{{ datetime(row.connected_at) }} · {{ fromNow(row.connected_at) }}</td>
             <td v-else class="faint">—</td>
             <td class="num">{{ row.reconnect_attempts }}</td>
@@ -202,6 +217,7 @@ const counters = computed(() => [
         to="/settings"
         :action="t('runtime.noAdaptersAction')"
       />
+      <p class="hint" style="padding: 8px 14px">{{ t('runtime.healthRule') }}</p>
     </div>
   </section>
 

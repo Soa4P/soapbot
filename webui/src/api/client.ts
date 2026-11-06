@@ -337,7 +337,12 @@ export const api = {
     reply_groups: string[]
     memory_collect_groups: string[]
   }) =>
-    request<{ ok: boolean; restart_required: boolean }>('/api/security/group-scope', {
+    request<{
+      ok: boolean
+      restart_required: boolean
+      reply_groups: string[]
+      memory_collect_groups: string[]
+    }>('/api/security/group-scope', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

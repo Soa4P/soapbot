@@ -15,7 +15,13 @@ from soapbot.voice.stt import (
     http_fetch,
     render_prompt,
 )
-from soapbot.voice.tts import DEFAULT_MAX_CHARS, EdgeTts, TtsEngine, VoiceUnavailableError
+from soapbot.voice.tts import (
+    DEFAULT_MAX_CHARS,
+    EdgeTts,
+    ProviderTts,
+    TtsEngine,
+    VoiceUnavailableError,
+)
 
 __all__ = [
     "DEFAULT_MAX_CHARS",
@@ -23,6 +29,7 @@ __all__ = [
     "AudioFetcher",
     "EdgeTts",
     "ProviderTranscriber",
+    "ProviderTts",
     "Transcription",
     "TtsEngine",
     "VoiceError",

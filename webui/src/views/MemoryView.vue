@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
+import GroupScopeCard from '@/components/GroupScopeCard.vue'
 import { t } from '@/i18n'
 import { datetime, fromNow, num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
@@ -195,6 +196,19 @@ const sceneRows = computed<any[]>(() => scenes.data.value?.scenes ?? [])
  */
 let sceneRequest = 0
 
+function selectScene(scope: string): void {
+  if (scope) {
+    void openScene(scope)
+    return
+  }
+  ++sceneRequest
+  sceneScope.value = ''
+  sceneCard.value = null
+  scenePortrait.value = null
+  skills.value = []
+  candidates.value = []
+}
+
 async function openScene(scope: string): Promise<void> {
   const token = ++sceneRequest
   sceneScope.value = scope
@@ -331,6 +345,7 @@ function confidencePct(value: number): string {
 </script>
 
 <template>
+  <GroupScopeCard />
   <div class="grid cols-3">
     <div class="readout">
       <span class="readout__label">{{ t('memory.entries') }}</span>
@@ -549,6 +564,21 @@ function confidencePct(value: number): string {
       <span class="hint">{{ t('memory.sceneHint') }}</span>
     </div>
     <div class="panel__body">
+      <label class="field-label" style="max-width: 420px; margin-bottom: 12px">
+        <span class="eyebrow">{{ t('memory.scopeSelector') }}</span>
+        <select
+          class="field"
+          :value="sceneScope"
+          :disabled="!sceneRows.length"
+          @change="selectScene(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">{{ t('memory.scenePick') }}</option>
+          <option v-for="row in sceneRows" :key="row.scope" :value="row.scope">
+            {{ row.scope }} · {{ t('memory.memoryCount', { n: row.memory_count }) }}
+          </option>
+        </select>
+        <span class="hint">{{ t('memory.scopeIsolation') }}</span>
+      </label>
       <div v-if="scenes.error.value" class="error-banner">{{ scenes.error.value }}</div>
 
       <!--

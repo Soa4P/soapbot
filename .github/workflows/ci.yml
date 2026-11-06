@@ -48,6 +48,9 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
 
+      - name: Secret and production artifact gate
+        run: python scripts/check_secrets.py --committed
+
       - name: Install
         run: |
           python -m pip install --upgrade pip

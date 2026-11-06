@@ -435,7 +435,17 @@ async def apply_mcp(
     if result.empty:
         return {"written": False, "reason": "no changes", "changed_fields": []}
 
-    if payload.approved_hash and payload.approved_hash != result.new_hash:
+    if not payload.approved_hash:
+        _audit(actor, "deny", "mcp_missing_approval", result.changed_fields)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "请先预览并确认 MCP 改动后再写入。",
+                "expected_hash": result.new_hash,
+            },
+        )
+
+    if payload.approved_hash != result.new_hash:
         _audit(actor, "deny", "mcp_unapproved_diff", result.changed_fields)
         raise HTTPException(
             status_code=409,

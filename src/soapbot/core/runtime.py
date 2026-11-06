@@ -351,6 +351,29 @@ class BotRuntime:
                 name: {
                     "online": a.health.online,
                     "last_error": a.health.last_error,
+                    "connected_at": a.health.connected_at,
+                    "last_seen_at": a.health.last_seen_at,
+                    "silent_for": (
+                        round(time.time() - a.health.last_seen_at, 1)
+                        if a.health.last_seen_at
+                        else None
+                    ),
+                    "reconnect_attempts": a.health.reconnect_attempts,
+                    "health_level": (
+                        "danger"
+                        if not a.health.online
+                        else "warning"
+                        if a.health.last_error or (
+                            a.health.last_seen_at
+                            and time.time() - a.health.last_seen_at > 300
+                        )
+                        else "healthy"
+                    ),
+                    "health_reason": (
+                        (a.health.last_error or "no liveness evidence")
+                        if not a.health.online
+                        else "recent transport activity"
+                    ),
                     "capabilities": sorted(str(c) for c in a.capabilities),
                     # Dispatch backpressure, per adapter. A cap whose drops are
                     # invisible is a cap nobody can tell apart from a quiet group,

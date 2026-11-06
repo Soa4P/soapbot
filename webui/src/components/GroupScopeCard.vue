@@ -57,12 +57,13 @@ async function save(): Promise<void> {
   saved.value = false
   error.value = ''
   try {
-    await api.writeGroupScope({
+    const result = await api.writeGroupScope({
       reply_groups: replyIds(),
       memory_collect_groups: collectIds(),
     })
+    draftReply.value = result.reply_groups.join(', ')
+    draftCollect.value = result.memory_collect_groups.join(', ')
     saved.value = true
-    await scope.reload()
   } catch (err) {
     error.value = (err as Error).message
   } finally {

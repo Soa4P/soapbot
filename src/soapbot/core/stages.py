@@ -424,6 +424,17 @@ class ReplyStage(Stage):
             receipt = await ctx.adapter.send(out)
         ctx.extras["send_ok"] = receipt.ok
         ctx.extras["send_error"] = receipt.error
+        if ctx.extras.get("injection_blocked"):
+            from soapbot.security.audit import get_audit_log
+
+            get_audit_log().record(
+                kind="injection",
+                action="refusal_delivery",
+                outcome="allow" if receipt.ok else "deny",
+                principal=ctx.extras.get("principal"),
+                detail="refusal sent" if receipt.ok else "refusal delivery failed",
+                trace_id=ctx.event.trace_id,
+            )
         # Same key as the progressive path, so the trace reader does not have to
         # branch on "was this streamed?" to find where the chunks went.
         ctx.extras["reply_chunks"] = []

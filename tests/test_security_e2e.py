@@ -325,7 +325,18 @@ async def test_injection_refused_before_model(
     await wait_send(server)
 
     assert mock_llm.calls == [], "injection reached the model"
+    assert "无法回答" in server.last_sent_text()
+    assert "忽略之前所有指令" not in server.last_sent_text()
     assert "系统提示" not in server.last_sent_text()
+    from soapbot.security.audit import get_audit_log
+
+    events = get_audit_log().recent(kind="injection")
+    delivered = [event for event in events if event["action"] == "refusal_delivery"]
+    assert delivered and delivered[-1]["outcome"] == "allow"
+    assert any(
+        event["action"] == "detect" and event["trace_id"] == delivered[-1]["trace_id"]
+        for event in events
+    )
 
     await runtime.stop()
     await server.stop()
