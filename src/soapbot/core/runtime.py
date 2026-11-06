@@ -43,6 +43,7 @@ class BotRuntime:
         mcp=None,
         passive=None,
         scene=None,
+        layers=None,
         skills=None,
         locale: str = "",
     ) -> None:
@@ -97,6 +98,14 @@ class BotRuntime:
 
         Kept so the panel can show how many messages were read without being answered.
         A passive mode with no counter is indistinguishable from one that never ran.
+        """
+
+        self.layers = layers
+        """Optional :class:`soapbot.memory.layers.MemoryLayers`.
+
+        Exposed so the panel can read L1-L4 and the timeline from the same object the
+        pipeline writes to. A second reader would eventually disagree about what is
+        current.
         """
 
         self.scene = scene

@@ -7,7 +7,7 @@ history provider, closing the loop: archive -> compress -> recall.
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, SegmentType
@@ -38,8 +38,9 @@ class PersistStage(Stage):
 
     name = "persist"
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(self, store: MemoryStore, *, layers: Any = None) -> None:
         self.store = store
+        self.layers = layers
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         # The collect list decides this, not the wake check. An un-mentioned message in
@@ -76,6 +77,16 @@ class PersistStage(Stage):
         except Exception as exc:
             logger.error("failed to archive inbound message: %s", exc)
             ctx.extras["persist_error"] = str(exc)
+        if self.layers is not None and ctx.extras.get("persisted_inbound"):
+            # Deliberately not the message text: the timeline is an index of events,
+            # not a second copy of the archive, and copying prose there would create a
+            # second place PII has to be redacted from.
+            await self.layers.record_event(
+                "chat",
+                f"收到 1 条消息（{ctx.event.sender.display_name or ctx.event.sender.user_id}）",
+                ref=ctx.event.message_id,
+                session_key=ctx.event.session_key,
+            )
         return StageResult()
 
 
@@ -119,6 +130,7 @@ class RecallStage(Stage):
         top_k: int = 6,
         min_chars: int = 4,
         scene: SceneMemory | None = None,
+        layers: Any = None,
     ) -> None:
         self.store = store
         self.top_k = top_k
@@ -128,6 +140,10 @@ class RecallStage(Stage):
         # to the territory. Without it, recall still works; it just has no sense of what
         # the conversation *is*.
         self.scene = scene
+        #: L1/L4/timeline reader. ``Any`` rather than the concrete type because
+        #: ``memory.layers`` imports ``memory.db`` and a strict annotation here would
+        #: make the import graph circular for no benefit.
+        self.layers = layers
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         segments = ctx.extras.get("clean_segments") or ctx.event.segments
@@ -167,7 +183,55 @@ class RecallStage(Stage):
                 {"id": it.id, "content": it.content, "score": it.score, "source": it.source}
                 for it in result.items
             ]
+
+        if self.layers is not None:
+            await self._inject_layers(ctx)
         return StageResult()
+
+    async def _inject_layers(self, ctx: PipelineContext) -> None:
+        """Add L1/L4/timeline as labelled blocks ahead of the recalled fragments.
+
+        Prefixed rather than merged: the model reads "会话摘要" and "检索到的记忆" as
+        different kinds of evidence, and an operator reading the pipeline trace can
+        tell which layer produced a line. Self-notes are only added on a session's
+        first turn — repeating them every turn would pay for the same tokens forever.
+        """
+        blocks: list[str] = []
+        try:
+            summary = await self.layers.latest_summary(ctx.event.session_key)
+            if summary and summary.get("summary"):
+                blocks.append("【会话摘要】" + str(summary["summary"])[:600])
+            first_turn = False
+            try:
+                first_turn = not await self.store.history(ctx.event.session_key, limit=1)
+            except Exception as exc:
+                logger.debug("first-turn probe failed: %s", type(exc).__name__)
+            if first_turn:
+                notes = await self.layers.self_notes(limit=8)
+                if notes:
+                    blocks.append(
+                        "【自我提醒】" + "；".join(str(n["content"])[:160] for n in notes)
+                    )
+            from soapbot.config import settings
+
+            events = await self.layers.recent_events(
+                ctx.event.session_key, limit=settings.timeline_window
+            )
+            if events:
+                blocks.append(
+                    "【近期事件】"
+                    + "；".join(
+                        f"{item['kind']}:{str(item['summary'])[:80]}" for item in events
+                    )
+                )
+        except Exception as exc:
+            logger.warning("memory layers unavailable: %s", type(exc).__name__)
+            return
+        if not blocks:
+            return
+        existing = str(ctx.extras.get("recall_prompt") or "")
+        ctx.extras["recall_prompt"] = "\n".join((*blocks, existing) if existing else blocks)
+        ctx.extras["layers_used"] = [block.split("】")[0] + "】" for block in blocks]
 
 
 class KnowledgeStage(Stage):

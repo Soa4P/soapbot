@@ -53,6 +53,10 @@
 | `PERSONA_GROWTH_ENABLED` | `true` | 允许模型改写人格卡并**立即生效**，不经过人工批准。每次写入前落一个不可变版本，面板可按版本回滚；只允许改 `system_prompt`、`style`、`banned_words`、`max_reply_chars`，身份字段与开关永不可写。关掉后成长接口直接拒绝，历史版本仍可读 |
 | `PERSONA_GROWTH_MAX_CHARS` | `2000` | 单张卡渲染后的字符上限，范围 `200..20000`。超出通常意味着模型在倾倒上下文，而不是人格变具体了 |
 | `PERSONA_GROWTH_PER_HOUR` | `6` | 每张卡每小时允许的模型写入次数，范围 `1..60`。起点版本与人工回滚不计入额度，否则第一次成长就会把额度占满 |
+| `SELF_NOTES_LIMIT` | `40` | L4 selfNote 保留条数，范围 `1..200`。同句只刷新时间不新增，超出按 `updated_at` 淘汰最旧的一条 |
+| `COMPACTION_IDLE_MINUTES` | `30` | 会话安静多少分钟后才有资格压缩，范围 `0..1440`；`0` 表示关闭。与 `COMPACTION_TOKEN_THRESHOLD` 同时满足才触发 |
+| `COMPACTION_TOKEN_THRESHOLD` | `6000` | 估算上下文达到多少 token 才值得多花一次模型调用，范围 `0..200000`；`0` 表示关闭 |
+| `TIMELINE_WINDOW` | `10` | 注入「近期事件」的条数上限，范围 `1..50`。时间线只记事件摘要，不复制消息正文 |
 | `ENABLE_RUNTIME` | `true` | 关掉则只提供 HTTP API |
 | `ENABLE_BUDGET` / `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
 | `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |

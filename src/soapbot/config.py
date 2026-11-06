@@ -678,6 +678,16 @@ class Settings(BaseSettings):
     """How many growth writes one card may receive per hour. Bounds a loop that
     would otherwise rewrite the card on every message."""
 
+    self_notes_limit: int = Field(default=40, ge=1, le=200)
+    """How many L4 self-notes are kept. The oldest is evicted, not the newest:
+    a note that survived many turns is more likely to describe a real pattern."""
+    compaction_idle_minutes: int = Field(default=30, ge=0, le=1440)
+    """Quiet time before a session is eligible for compaction. ``0`` disables it."""
+    compaction_token_threshold: int = Field(default=6000, ge=0, le=200_000)
+    """Context size that makes compaction worth a second model call. ``0`` disables."""
+    timeline_window: int = Field(default=10, ge=1, le=50)
+    """How many recent timeline events are shown to the model."""
+
     # ---- behaviour ----
     default_timezone: str = "Asia/Shanghai"
 

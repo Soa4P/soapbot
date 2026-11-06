@@ -118,5 +118,5 @@ async def rollback(persona_id: str, version: int) -> dict[str, Any]:
     try:
         created = growth.rollback(store, persona_id, version, actor="operator")
     except PersonaGrowthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=exc.public_detail()) from exc
     return {"ok": True, "version": created.version, "restored_from": version}
