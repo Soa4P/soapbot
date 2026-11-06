@@ -384,6 +384,38 @@ async def _shutdown() -> None:
     logger.info("soapbot stopped")
 
 
+def _clean_stale_temp() -> None:
+    """Delete leftovers under ``data/tmp`` older than a day.
+
+    Uploads and probes stage files there. A process that dies mid-write leaves them
+    behind forever, and on a container with a small volume that eventually fills the
+    disk — a failure whose cause is a file nobody remembers creating.
+    """
+    import shutil
+    import time
+
+    from soapbot.config import settings
+
+    root = settings.data_dir / "tmp"
+    if not root.is_dir():
+        return
+    cutoff = time.time() - 24 * 3600
+    removed = 0
+    for entry in root.iterdir():
+        try:
+            if entry.stat().st_mtime >= cutoff:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        logger.info("removed %d stale temporary entr(ies) from %s", removed, root)
+
+
 def _audit_env_file() -> None:
     """Report misspelled ``SOAPBOT_*`` keys in the ``.env`` this process reads.
 
@@ -423,6 +455,7 @@ async def lifespan(app: FastAPI):
 
     _audit_env_file()
     _init_auth()
+    _clean_stale_temp()
 
     # Seed regardless of the runtime switch. The panel edits providers/adapters whether or
     # not the bot itself is running, and on a fresh Windows install with

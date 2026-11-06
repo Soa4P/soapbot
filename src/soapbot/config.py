@@ -688,6 +688,13 @@ class Settings(BaseSettings):
     timeline_window: int = Field(default=10, ge=1, le=50)
     """How many recent timeline events are shown to the model."""
 
+    shutdown_grace_seconds: int = Field(default=10, ge=1, le=120)
+    """How long shutdown may take before the process exits anyway.
+
+    Without a bound, one adapter stuck in a read loop keeps the process alive until
+    the supervisor escalates to SIGKILL, which looks like a hang on every restart.
+    """
+
     # ---- behaviour ----
     default_timezone: str = "Asia/Shanghai"
 
