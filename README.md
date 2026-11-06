@@ -7,7 +7,27 @@ QQ 群里的 AI 机器人。Python 3.12 / FastAPI / Vue3。第三方插件跑在
 
 ## 启动
 
-需要 Python 3.12+。面板产物随包发布，只有改面板才需要 Node 20+。
+三条命令，选一条。Windows 和 Linux 只需要 Python 3.12+，Docker 连 Python 都不用装。
+
+```powershell
+# Windows，管理员 PowerShell
+irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 | iex
+```
+
+```bash
+# Linux
+curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.sh | bash
+```
+
+```bash
+# Docker
+docker compose up -d
+```
+
+装完打开 `http://127.0.0.1:6185`，一次性登录令牌在 `data/init_token.txt`（Docker 里是
+`docker compose exec soapbot cat /data/init_token.txt`）。脚本不会把令牌打进终端。
+
+从源码跑（改代码时用）：
 
 ```bash
 python -m venv .venv
@@ -22,7 +42,8 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 启动后在面板第 07 页填「模型 Key」和「QQ 接入」，两行各点一次「测试」。不用手改
 YAML：`config/` 是模板，首次启动播种到 `data/config`，`git pull` 不会覆盖你的那份。
 
-安装细节、面板 12 页、群范围、语音、远程访问和登录在 [docs/guide.md](docs/guide.md)。
+三条路径的细节、常见失败和卸载在 [docs/deploy-quickstart.md](docs/deploy-quickstart.md)。
+面板 12 页、群范围、语音、远程访问和登录在 [docs/guide.md](docs/guide.md)。
 
 ## 边界
 
