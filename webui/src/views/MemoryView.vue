@@ -11,6 +11,27 @@ const sessions = useAsync(() => api.memorySessions(100))
 const stats = useAsync(() => api.memoryStats())
 const knowledge = useAsync(() => api.knowledge())
 
+/**
+ * Adapter count, for the empty state only.
+ *
+ * An empty scene list has two completely different causes and they looked identical: the
+ * bot is connected but nobody has talked to it yet, or the bot is connected to *nothing*
+ * and cannot ever produce a memory. The second is a configuration mistake, and reporting
+ * it as "no scenes yet" sends the operator looking at the scene layer — which is working
+ * correctly — instead of at ``adapters.yaml``. This is the same failure the runtime page
+ * was built to expose; the memory page just did not ask.
+ *
+ * Failure is swallowed on purpose: this is a hint, not the page's data. If ``/api/runtime``
+ * is unavailable the empty state falls back to its generic wording rather than showing an
+ * error banner above an otherwise fine page.
+ */
+const runtime = useAsync(() => api.runtime().catch(() => null))
+const adapterCount = computed<number | null>(() => {
+  const value = runtime.data.value
+  if (!value) return null
+  return Number(value.adapter_count ?? 0)
+})
+
 const selected = ref('')
 const timeline = ref<any[]>([])
 const timelineError = ref('')
@@ -158,7 +179,6 @@ const rebuilding = ref(false)
 
 const skills = ref<any[]>([])
 const candidates = ref<any[]>([])
-const skillsLoading = ref(false)
 const skillError = ref('')
 const skillNotice = ref('')
 const generating = ref('')
@@ -531,9 +551,18 @@ function confidencePct(value: number): string {
     <div class="panel__body">
       <div v-if="scenes.error.value" class="error-banner">{{ scenes.error.value }}</div>
 
+      <!--
+        An empty list with zero adapters is not "nothing has happened yet" — it is "nothing
+        can happen". Saying the former sends the operator to inspect a scene layer that is
+        working correctly, which is exactly how a missing ``adapters.yaml`` entry gets
+        mistaken for a broken panel.
+      -->
       <EmptyState
         v-else-if="!scenes.loading.value && sceneRows.length === 0"
-        :lead="t('memory.sceneEmpty')"
+        :lead="adapterCount === 0 ? t('memory.sceneNoAdapter') : t('memory.sceneEmpty')"
+        :hint="adapterCount === 0 ? t('memory.sceneNoAdapterHint') : ''"
+        :to="adapterCount === 0 ? '/runtime' : ''"
+        :action="adapterCount === 0 ? t('memory.sceneNoAdapterAction') : ''"
       />
 
       <div v-else class="scene-grid">
