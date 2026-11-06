@@ -318,3 +318,168 @@ def test_endpoints_answer_503_without_a_runtime(monkeypatch) -> None:
             response = c.get(path)
             assert response.status_code == 503, path
             assert "not initialised" in response.json()["detail"]
+
+
+# ------------------------------------------------------- findings from the review
+#
+# Each of these is a defect the cross-review found in the first version of this API. They
+# are kept as tests because every one of them was invisible from the outside: the
+# endpoints answered 200, the panel rendered, and the tests passed.
+
+
+def test_scene_reads_require_the_config_permission(client: TestClient) -> None:
+    """A card summarises a conversation; a skill body quotes it verbatim.
+
+    The persona read already requires ``MANAGE_CONFIG``, and a scene card is strictly more
+    sensitive than a persona card — it is a summary of what a group actually said. Gating
+    only the mutations would leave ``/memory/scenes``, which enumerates every scope, open
+    to any authenticated caller.
+    """
+    from soapbot.api.admin import require_api_auth
+
+    client.app.dependency_overrides[require_api_auth] = lambda: {"role": "viewer"}
+    try:
+        for path in (
+            "/api/memory/scenes",
+            "/api/memory/scene?scope=group:api",
+            "/api/memory/skills?scope=group:api",
+            "/api/memory/skills/candidates?scope=group:api",
+        ):
+            response = client.get(path)
+            assert response.status_code == 403, f"{path} was readable by a viewer"
+    finally:
+        client.app.dependency_overrides.pop(require_api_auth, None)
+
+
+def test_an_invalid_scope_is_a_400_on_every_endpoint(client: TestClient) -> None:
+    """Same input, same status.
+
+    Before this, an unsafe scope returned an empty list from ``/skills`` (because ``load``
+    swallows it), an empty list from ``/candidates``, and a 500 from ``POST /skills``. The
+    empty list is the worst of the three: it reads as "this scene has no skills" rather
+    than "you asked for something that cannot exist".
+    """
+    bad = "group:1/../../etc"
+    for path in (
+        f"/api/memory/skills?scope={bad}",
+        f"/api/memory/skills/candidates?scope={bad}",
+    ):
+        response = client.get(path)
+        assert response.status_code == 400, f"{path} -> {response.status_code}"
+
+    response = client.post("/api/memory/skills", json={"scope": bad, "topic": "x"})
+    assert response.status_code == 400
+    response = client.delete("/api/memory/skills/x", params={"scope": bad})
+    assert response.status_code == 400
+
+
+def test_generation_is_idempotent_and_names_the_file_by_slug(client: TestClient) -> None:
+    """Generating the same topic twice must leave one file, not two.
+
+    The endpoint matches on the **slug** rather than the raw topic, because the slug is
+    what names the file. That matters less than it looks: ``_slug`` appends a digest
+    whenever the slug is not a faithful rendering of the topic, so two different topics
+    almost never share a name. The property worth pinning is the one that *is* reachable —
+    repeated generation is idempotent, and the id the API returns is the file name, so the
+    panel's delete button addresses exactly the file it listed.
+    """
+    from soapbot.memory.skills import _slug
+
+    _seed(
+        client,
+        "group:api",
+        [
+            "部署脚本要先跑迁移",
+            "部署失败先看日志",
+            "部署前备份数据库",
+            "部署完成后检查健康接口",
+        ],
+    )
+    candidates = client.get("/api/memory/skills/candidates", params={"scope": "group:api"}).json()[
+        "candidates"
+    ]
+    topic = candidates[0]["topic"]
+
+    first = client.post("/api/memory/skills", json={"scope": "group:api", "topic": topic})
+    assert first.status_code == 200
+    assert first.json()["skill_id"] == _slug(topic), "the id must be the file name"
+
+    second = client.post("/api/memory/skills", json={"scope": "group:api", "topic": topic})
+    assert second.status_code == 200
+    assert second.json()["skill_id"] == first.json()["skill_id"]
+
+    listed = client.get("/api/memory/skills", params={"scope": "group:api"}).json()
+    assert listed["count"] == 1, "regenerating the same topic produced a second file"
+
+
+def test_refresh_returns_the_same_portrait_shape_as_the_read(client: TestClient) -> None:
+    """Both endpoints must describe "no portrait" the same way.
+
+    ``refresh`` used to return an empty portrait object while ``GET /scene`` returned
+    ``null`` for the same state. The panel rendered a portrait block with no content after
+    a rebuild, and then made it vanish on the next read.
+    """
+    _seed(client, "group:api", ["一句话", "另一句话"])
+
+    refreshed = client.post("/api/memory/scene/refresh", params={"scope": "group:api"}).json()
+    read = client.get("/api/memory/scene", params={"scope": "group:api"}).json()
+
+    assert refreshed["portrait_withheld"] is True
+    assert refreshed["portrait"] is None
+    assert read["portrait"] is None
+
+
+def test_refresh_builds_both_views_from_one_sample(client: TestClient) -> None:
+    """The card and portrait must describe the same evidence.
+
+    They are injected together, so a card that claims a topic the portrait does not
+    mention gives the model two summaries of two different moments. Both are now derived
+    from a single sample inside ``refresh``.
+    """
+    from soapbot.memory.scene import PORTRAIT_MIN_MEMORIES
+
+    texts = [
+        "部署脚本要先跑迁移",
+        "部署失败先看日志",
+        "部署前备份数据库",
+        "部署完成后检查健康接口",
+        "部署回滚要先停服务",
+        "部署前确认配置文件已更新",
+        "部署窗口安排在凌晨",
+        "部署后要验证核心链路",
+        "部署脚本要幂等",
+        "部署前通知值班同学",
+        "部署日志要留档",
+        "部署完成后更新变更记录",
+    ]
+    assert len(texts) >= PORTRAIT_MIN_MEMORIES, "seed must clear the portrait threshold"
+    _seed(client, "group:api", texts)
+    body = client.post("/api/memory/scene/refresh", params={"scope": "group:api"}).json()
+
+    card = body["card"]
+    portrait = body["portrait"]
+    assert portrait is not None, f"{len(texts)} memories should clear the threshold"
+    assert card["memory_count"] == portrait["memory_count"] == len(texts)
+    # Every theme on the portrait has to be visible in the card's topics; they came from
+    # the same rows, so a theme the card never saw would mean two samples.
+    for theme in portrait["themes"]:
+        assert theme in card["topics"], f"portrait theme {theme!r} absent from the card"
+
+
+def test_the_pipeline_and_the_panel_share_one_scene_object(client: TestClient) -> None:
+    """``MemoryWriteStage`` must not construct its own ``SceneMemory``.
+
+    It was the one stage that did, so the object that *writes* the card after every turn
+    was not the object the panel reads through. Harmless while ``SceneMemory`` holds only
+    ``db``; a cache-coherency bug the moment it holds anything else.
+    """
+    from soapbot.app import get_runtime
+
+    runtime = get_runtime()
+    stages = getattr(runtime.pipeline, "stages", [])
+    writers = [s for s in stages if type(s).__name__ == "MemoryWriteStage"]
+    assert writers, "no MemoryWriteStage in the pipeline"
+    for stage in writers:
+        assert stage.scene is runtime.scene, (
+            "MemoryWriteStage holds a different SceneMemory than the runtime exposes"
+        )

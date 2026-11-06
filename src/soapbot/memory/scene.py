@@ -268,6 +268,38 @@ def _keywords_of(row: MemoryRow) -> list[str]:
     return out
 
 
+def _card_values(card: SceneCard) -> dict[str, Any]:
+    """Row values for a card.
+
+    Module-level so ``refresh`` can write the same shape it would have written through
+    ``save_card``. Duplicating the mapping is how the two paths drift: a column added to
+    one and not the other produces rows that read back with a default, silently.
+    """
+    return {
+        "scope": card.scope,
+        "title": card.title,
+        "summary": card.summary,
+        "topics": "\n".join(card.topics),
+        "people": "\n".join(card.people),
+        "memory_count": card.memory_count,
+        "updated_at": card.updated_at or time.time(),
+    }
+
+
+def _portrait_values(portrait: ScenePortrait) -> dict[str, Any]:
+    """Row values for a portrait. See :func:`_card_values`."""
+    return {
+        "scope": portrait.scope,
+        "headline": portrait.headline,
+        "themes": "\n".join(portrait.themes),
+        "tone": portrait.tone,
+        "recurring_questions": "\n".join(portrait.recurring_questions),
+        "memory_count": portrait.memory_count,
+        "confidence": portrait.confidence,
+        "updated_at": portrait.updated_at or time.time(),
+    }
+
+
 class SceneMemory:
     """Reads and writes the scene layer.
 
@@ -343,7 +375,10 @@ class SceneMemory:
         async with self.db.session_factory()() as session:
             rows = await self._sample(session, scope)
             total = await self._total(session, scope)
+        return self._card_from(scope, title, rows, total)
 
+    def _card_from(self, scope: str, title: str, rows: list[Any], total: int) -> SceneCard:
+        """Pure derivation, so ``refresh`` can build both views from one sample."""
         card = SceneCard(scope=scope, title=title or scope, memory_count=total)
         if not rows:
             return card
@@ -384,15 +419,7 @@ class SceneMemory:
         group produces. ``ON CONFLICT`` makes "one row per scope" a property of the
         statement instead of a property of the interleaving.
         """
-        values = {
-            "scope": card.scope,
-            "title": card.title,
-            "summary": card.summary,
-            "topics": "\n".join(card.topics),
-            "people": "\n".join(card.people),
-            "memory_count": card.memory_count,
-            "updated_at": card.updated_at or time.time(),
-        }
+        values = _card_values(card)
         async with self.db.write() as session:
             await session.execute(
                 sqlite_insert(SceneCardRow)
@@ -430,7 +457,10 @@ class SceneMemory:
         async with self.db.session_factory()() as session:
             rows = await self._sample(session, scope)
             total = await self._total(session, scope)
+        return self._portrait_from(scope, rows, total)
 
+    def _portrait_from(self, scope: str, rows: list[Any], total: int) -> ScenePortrait:
+        """Pure derivation, so ``refresh`` can build both views from one sample."""
         portrait = ScenePortrait(scope=scope, memory_count=total)
         if total < PORTRAIT_MIN_MEMORIES:
             return portrait
@@ -489,16 +519,7 @@ class SceneMemory:
         finish their refresh at the same moment, and the loser of a select-then-insert
         race would crash on the UNIQUE constraint instead of simply overwriting.
         """
-        values = {
-            "scope": portrait.scope,
-            "headline": portrait.headline,
-            "themes": "\n".join(portrait.themes),
-            "tone": portrait.tone,
-            "recurring_questions": "\n".join(portrait.recurring_questions),
-            "memory_count": portrait.memory_count,
-            "confidence": portrait.confidence,
-            "updated_at": portrait.updated_at or time.time(),
-        }
+        values = _portrait_values(portrait)
         async with self.db.write() as session:
             await session.execute(
                 sqlite_insert(ScenePortraitRow)
@@ -734,18 +755,53 @@ class SceneMemory:
         This is the "write back to the scene layer" step: after new memories land, the
         derived views are recomputed and stored, so the next turn reads a card instead of
         recomputing one.
+
+        Both views are derived from **one** sample and written in **one** transaction.
+        The obvious implementation — ``build_card``, ``build_portrait``, ``save_card``,
+        ``save_portrait`` — reads the scope twice and commits twice, and both splits are
+        observable:
+
+        * two reads can see different evidence, so the card can claim a topic the portrait
+          does not mention. They are injected together, so the model gets two summaries of
+          two different moments;
+        * two commits leave a window in which the card is new and the portrait is old. A
+          concurrent ``/forget`` that drops the portrait between them is then undone by
+          this call's write, resurrecting a summary of deleted rows — the exact stale view
+          the drop exists to prevent.
+
+        One transaction does not make this serialisable against a concurrent delete, but it
+        removes the window this method itself opens, which is the part it can control.
         """
-        card = await self.build_card(scope, title=title)
-        portrait = await self.build_portrait(scope)
-        await self.save_card(card)
-        if portrait.memory_count >= PORTRAIT_MIN_MEMORIES:
-            await self.save_portrait(portrait)
-        else:
-            # Drop a portrait that no longer has enough evidence behind it. Memories can be
-            # deleted, and leaving the old portrait in place would keep injecting a summary
-            # of rows that no longer exist — the one case where a stale derived view is
-            # actively wrong rather than merely old.
-            await self.drop_portrait(scope)
+        async with self.db.session_factory()() as session:
+            rows = await self._sample(session, scope)
+            total = await self._total(session, scope)
+
+        card = self._card_from(scope, title, rows, total)
+        portrait = self._portrait_from(scope, rows, total)
+        keep_portrait = portrait.memory_count >= PORTRAIT_MIN_MEMORIES
+
+        async with self.db.write() as session:
+            await session.execute(
+                sqlite_insert(SceneCardRow)
+                .values(**_card_values(card))
+                .on_conflict_do_update(index_elements=["scope"], set_=_card_values(card))
+            )
+            if keep_portrait:
+                await session.execute(
+                    sqlite_insert(ScenePortraitRow)
+                    .values(**_portrait_values(portrait))
+                    .on_conflict_do_update(
+                        index_elements=["scope"], set_=_portrait_values(portrait)
+                    )
+                )
+            else:
+                # Drop a portrait that no longer has enough evidence behind it. Memories
+                # can be deleted, and leaving the old portrait in place would keep
+                # injecting a summary of rows that no longer exist — the one case where a
+                # stale derived view is actively wrong rather than merely old.
+                await session.execute(
+                    delete(ScenePortraitRow).where(ScenePortraitRow.scope == scope)
+                )
         return card, portrait
 
     async def drop_portrait(self, scope: str) -> bool:

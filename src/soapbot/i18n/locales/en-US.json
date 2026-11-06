@@ -10,6 +10,7 @@
     "api.content_empty": "Nothing to store: the content was empty",
     "api.skill_no_evidence": "Not enough memories support that topic to build a skill",
     "api.skill_not_found": "Skill not found",
+    "api.scope_invalid": "Invalid scene key: it becomes a directory name, so it cannot contain path separators or end with a dot",
     "api.write_failed": "Write failed; the file was left unchanged.",
     "api.personaIdInvalid": "A persona id may contain only letters, digits, underscore and hyphen (it becomes a file name).",
     "api.authorityLastOwner": "At least one owner must remain, or nobody can edit permissions again.",

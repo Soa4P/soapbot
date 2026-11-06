@@ -303,10 +303,14 @@ def build_pipeline(
     if memory is not None:
         pipeline.add(PersistReplyStage(memory))
         if extractor is not None:
+            # The shared instance, not a fresh one. This is the stage that *produces* the
+            # card and portrait after every turn, so constructing its own ``SceneMemory``
+            # here meant the write path and the read path were different objects — the
+            # exact drift the shared instance exists to prevent. Harmless while
+            # ``SceneMemory`` holds only ``db``; a cache-coherency bug the moment it holds
+            # anything else, which is the natural next optimisation.
             pipeline.add(
-                MemoryWriteStage(
-                    memory, extractor, audit=audit_log, scene=SceneMemory(memory.db)
-                )
+                MemoryWriteStage(memory, extractor, audit=audit_log, scene=scene)
             )
     return pipeline
 

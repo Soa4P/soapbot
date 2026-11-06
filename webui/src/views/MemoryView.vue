@@ -165,53 +165,101 @@ const generating = ref('')
 
 const sceneRows = computed<any[]>(() => scenes.data.value?.scenes ?? [])
 
+/**
+ * Monotonic token for scene loads.
+ *
+ * Clicking through a long list fires overlapping requests, and the network does not
+ * answer in order. Without this, the slower response for scene A lands after the faster
+ * response for scene B and overwrites it — the panel then shows B's header with A's
+ * card, which looks like the backend returning the wrong data.
+ */
+let sceneRequest = 0
+
 async function openScene(scope: string): Promise<void> {
+  const token = ++sceneRequest
   sceneScope.value = scope
   sceneLoading.value = true
   sceneError.value = ''
   sceneNotice.value = ''
   skillError.value = ''
   skillNotice.value = ''
-  try {
-    const [detail, skillList, candidateList] = await Promise.all([
-      api.memoryScene(scope),
-      api.memorySkills(scope),
-      api.memorySkillCandidates(scope),
-    ])
-    sceneCard.value = detail.card
-    scenePortrait.value = detail.portrait
-    skills.value = skillList.skills ?? []
-    candidates.value = candidateList.candidates ?? []
-  } catch (err) {
-    sceneError.value = (err as Error).message
+
+  // ``allSettled``, not ``all``: the three endpoints fail independently. With ``all``, a
+  // 503 from the skill forge — which is a *state*, not an error — blanked the card and
+  // portrait too, so a working scene rendered as a failure banner. Each failure is now
+  // reported where it belongs and the other two still render.
+  const [detail, skillList, candidateList] = await Promise.allSettled([
+    api.memoryScene(scope),
+    api.memorySkills(scope),
+    api.memorySkillCandidates(scope),
+  ])
+
+  // A newer click already won; discarding this response is the whole point of the token.
+  if (token !== sceneRequest) return
+
+  if (detail.status === 'fulfilled') {
+    sceneCard.value = detail.value.card
+    scenePortrait.value = detail.value.portrait
+  } else {
+    sceneError.value = (detail.reason as Error).message
     sceneCard.value = null
     scenePortrait.value = null
-    skills.value = []
-    candidates.value = []
-  } finally {
-    sceneLoading.value = false
   }
+
+  if (skillList.status === 'fulfilled') {
+    skills.value = skillList.value.skills ?? []
+  } else {
+    skillError.value = (skillList.reason as Error).message
+    skills.value = []
+  }
+
+  if (candidateList.status === 'fulfilled') {
+    candidates.value = candidateList.value.candidates ?? []
+  } else if (!skillError.value) {
+    skillError.value = (candidateList.reason as Error).message
+    candidates.value = []
+  }
+
+  sceneLoading.value = false
 }
 
 async function rebuildScene(): Promise<void> {
   if (!sceneScope.value) return
+  const scope = sceneScope.value
   rebuilding.value = true
   sceneError.value = ''
   sceneNotice.value = ''
   try {
-    const result = await api.memorySceneRefresh(sceneScope.value)
+    const result = await api.memorySceneRefresh(scope)
+    if (scope !== sceneScope.value) return
     sceneCard.value = result.card
     scenePortrait.value = result.portrait
     sceneNotice.value = result.portrait_withheld
       ? t('memory.portraitWithheld')
       : t('memory.rebuilt')
+
     // The list carries `has_card` and the portrait confidence, so it has to be re-read:
     // leaving it alone would show "not built" next to a card the operator just built.
     await scenes.reload()
-    const candidateList = await api.memorySkillCandidates(sceneScope.value)
-    candidates.value = candidateList.candidates ?? []
+
+    // If the scope lost its last memory between opening and rebuilding, it is no longer in
+    // the list — and the detail pane would keep showing a card for a scene that no longer
+    // exists. Clearing it is the honest outcome; a stale card here is exactly the failure
+    // ``refresh`` deletes portraits to avoid, reproduced in the UI.
+    if (!sceneRows.value.some((row: any) => row.scope === scope)) {
+      sceneScope.value = ''
+      sceneCard.value = null
+      scenePortrait.value = null
+      skills.value = []
+      candidates.value = []
+      sceneNotice.value = ''
+      return
+    }
+
+    const candidateList = await api.memorySkillCandidates(scope)
+    if (scope === sceneScope.value) candidates.value = candidateList.candidates ?? []
   } catch (err) {
-    sceneError.value = (err as Error).message
+    if (scope === sceneScope.value) sceneError.value = (err as Error).message
   } finally {
     rebuilding.value = false
   }
