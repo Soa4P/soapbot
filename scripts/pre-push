@@ -1,3 +1,9 @@
 #!/usr/bin/env sh
 set -eu
-python scripts/check_secrets.py --pre-push
+if [ -x .venv/Scripts/python.exe ]; then
+  .venv/Scripts/python.exe scripts/check_secrets.py --pre-push
+elif [ -x .venv/bin/python ]; then
+  .venv/bin/python scripts/check_secrets.py --pre-push
+else
+  python3 scripts/check_secrets.py --pre-push
+fi
