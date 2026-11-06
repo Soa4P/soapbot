@@ -59,6 +59,9 @@ const addId = ref('')
 const authorityBusy = ref(false)
 const authorityNote = ref('')
 const authorityError = ref('')
+//: The command the server says restarts *this* deployment. Rendered verbatim: a
+//: hard-coded one named the wrong Windows task and made a successful save look broken.
+const restartHint = ref('')
 
 function seedDraft(): void {
   draft.value = {
@@ -76,15 +79,15 @@ watch(access.data, () => {
  * button explains itself instead of the operator discovering the rule from a 400. */
 const noOwnerLeft = computed(() => draft.value.owners.length === 0)
 
-function addEntry(): void {
+function addEntry(): boolean {
   const raw = addId.value.trim()
-  if (!raw) return
+  if (!raw) return false
   // Digits-only pre-check so a paste with spaces/labels is normalised, but a non-number
   // is refused in place rather than stored and rejected by the server later.
   const id = String(raw).replace(/[＋+]/g, '').replace(/\D/g, '')
   if (!id) {
     authorityError.value = t('security.qqInvalid')
-    return
+    return false
   }
   authorityError.value = ''
   // One account, one role. Permission resolution takes the highest rank, so adding the
@@ -99,12 +102,13 @@ function addEntry(): void {
       id,
       role: other,
     })
-    return
+    return false
   }
   const list = draft.value[roleKey[addRole.value]]
   if (!list.includes(id)) list.push(id)
   addId.value = ''
   dirty.value = true
+  return true
 }
 
 /** Every QQ that appears in more than one list, with the roles it holds. */
@@ -133,6 +137,14 @@ function removeEntry(role: 'owner' | 'admin' | 'member', id: string): void {
 }
 
 async function saveAuthority(): Promise<void> {
+  // A number typed into the box but never "added" is exactly the state an operator
+  // believes is saved. Commit it first; leaving the button disabled with no message
+  // is what made the page look broken.
+  if (addId.value.trim()) addEntry()
+  if (!dirty.value && !noOwnerLeft.value && !conflicts.value.length) {
+    authorityNote.value = t('security.nothingToSave')
+    return
+  }
   if (noOwnerLeft.value) {
     authorityError.value = t('security.lastOwnerGuard')
     return
@@ -156,6 +168,7 @@ async function saveAuthority(): Promise<void> {
     draft.value = { owners: body.owners, admins: body.admins, members: body.members }
     dirty.value = false
     authorityNote.value = t('security.authoritySaved')
+    restartHint.value = String(body.restart_hint || '')
     await access.reload()
   } catch (error) {
     authorityError.value = (error as Error).message
@@ -411,7 +424,7 @@ async function revokeEveryToken(): Promise<void> {
           <button
             class="btn"
             type="button"
-            :disabled="authorityBusy || (!dirty && !noOwnerLeft) || conflicts.length > 0"
+            :disabled="authorityBusy || conflicts.length > 0"
             @click="saveAuthority"
           >
             {{ authorityBusy ? t('security.saving') : t('security.save') }}
@@ -419,6 +432,9 @@ async function revokeEveryToken(): Promise<void> {
         </div>
         <p v-if="authorityNote" class="hint" style="margin: 0; color: var(--ok)">
           {{ authorityNote }}
+          <span v-if="restartHint" class="mono" style="display: block; margin-top: 4px">
+            {{ restartHint }}
+          </span>
         </p>
         <p v-if="authorityError" class="hint" style="margin: 0; color: var(--danger)">
           {{ authorityError }}
