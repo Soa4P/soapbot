@@ -52,8 +52,10 @@ async function loadTraces(keepSelection = true): Promise<void> {
       // local state would keep showing numbers that are no longer in the buffer.
       const still = body.traces.find((t) => t.trace_id === selected.value?.trace_id)
       selected.value = still ?? null
-    } else if (!selected.value && body.traces.length) {
-      selected.value = body.traces[0]
+    } else if (!selected.value) {
+      // `?.` rather than `body.traces[0]`: an empty list is the normal state right after
+      // a restart, and indexing it would put `undefined` into a ref typed as a trace.
+      selected.value = body.traces[0] ?? null
     }
   } catch (err) {
     error.value = (err as Error).message

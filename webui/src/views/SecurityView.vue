@@ -11,12 +11,30 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 
 const kind = ref('')
-const audit = useAsync(() => api.audit(300, kind.value))
+
+/**
+ * How much of the audit ring this page asks for.
+ *
+ * The endpoint caps at 1000 (`Query(1000)`), and the ring itself is bounded, so this is
+ * a window rather than a page-through. Growing it on demand keeps the first paint cheap
+ * on a busy deployment while still letting an operator widen the view during triage —
+ * the alternative was a fixed 300 that silently hid the events they were looking for.
+ */
+const AUDIT_STEP = 300
+const AUDIT_MAX = 1000
+const auditLimit = ref(AUDIT_STEP)
+const audit = useAsync(() => api.audit(auditLimit.value, kind.value))
 const access = useAsync(() => api.access())
 
-// ``useAsync`` already reloads on the global refresh signal; only the local filter
-// needs its own trigger.
-watch(kind, () => void audit.reload())
+const canLoadMoreAudit = computed(() => auditLimit.value < AUDIT_MAX)
+
+function loadMoreAudit(): void {
+  auditLimit.value = Math.min(auditLimit.value + AUDIT_STEP, AUDIT_MAX)
+}
+
+// ``useAsync`` already reloads on the global refresh signal; only the local filter and
+// the requested window need their own trigger.
+watch([kind, auditLimit], () => void audit.reload())
 
 const events = computed<any[]>(() => [...(audit.data.value?.events ?? [])].reverse())
 
@@ -315,6 +333,15 @@ async function revokeEveryToken(): Promise<void> {
         <option value="">{{ t('security.allKinds') }}</option>
         <option v-for="item in kinds" :key="item" :value="item">{{ item }}</option>
       </select>
+      <button
+        v-if="canLoadMoreAudit && events.length"
+        class="btn ghost"
+        type="button"
+        :disabled="audit.loading.value"
+        @click="loadMoreAudit"
+      >
+        {{ t('common.loadMore') }}
+      </button>
     </div>
     <!-- The page used to be a table with no explanation of what gets recorded. Answering
          "what counts as an event" on the page itself is cheaper than making someone read
