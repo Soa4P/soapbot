@@ -388,8 +388,8 @@ async def write_persona_binding(
     dropped silently at load time, which reads as "the binding does not work" — the
     person has no way to tell a wrong ID from a broken feature.
     """
-    from soapbot.api.settings import _env_path, _rewrite_env
-    from soapbot.core.config_write import write_atomic
+    from soapbot.api.settings import _env_path
+    from soapbot.core import config_write
     from soapbot.security.principal import Role
 
     role = _role_of(auth)
@@ -426,7 +426,7 @@ async def write_persona_binding(
     value = ",".join(pairs)
     path = _env_path()
     try:
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        config_write.write_env_updates(path, {"SOAPBOT_GROUP_PERSONAS": value})
     except OSError as exc:
         raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
 
@@ -437,7 +437,6 @@ async def write_persona_binding(
         role=role.value,
         detail=f"bindings={len(pairs)}",
     )
-    write_atomic(path, _rewrite_env(existing, {"SOAPBOT_GROUP_PERSONAS": value}))
     return {"ok": True, "restart_required": True, "group_personas": value}
 
 

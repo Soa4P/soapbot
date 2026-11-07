@@ -5,6 +5,11 @@
 # Scratch files used while preparing a commit (message drafts, CI log dumps, one-off
 # probes). `git add -A` swept a message draft into a commit once; these are never sources.
 .msg.tmp
+# Advisory lock sidecar created by `config_write.env_transaction` next to the .env it
+# serialises. The lock is a kernel-owned handle, so the empty file is safe to share —
+# but it is never source and must not be committed.
+*.env.lock
+.env.lock
 .ci-*.txt
 .ci-*.log
 .ci-*.json

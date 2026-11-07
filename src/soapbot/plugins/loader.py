@@ -48,6 +48,7 @@ import re
 import shutil
 import sys
 import time
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,16 @@ attempt to make validation read attacker-sized input."""
 
 class PluginLoadError(RuntimeError):
     """Raised when a plugin cannot be loaded. Never swallowed silently."""
+
+
+class PluginBlockedError(PluginLoadError):
+    """The exact release on disk is on a blocklist.
+
+    A subclass so the API can say *why* a load was refused without echoing the
+    refusal text: the generic load handler deliberately strips exception messages
+    because plugin-authored text is attacker-controlled, but "this version is
+    blocked" is a host decision and the operator needs to be told it.
+    """
 
 
 @dataclass(slots=True)
@@ -190,8 +201,18 @@ class PluginLoader:
         worker_timeout: float = 8.0,
         worker_memory_bytes: int = DEFAULT_PLUGIN_MEMORY_BYTES,
         approvals=None,
+        blocked_provider: Callable[[], Awaitable[Mapping[str, str]]] | None = None,
+        blocklist_path: Path | None = None,
     ) -> None:
         self.plugins_dir = Path(plugins_dir)
+        # A version blocked *after* it was installed must not run on the next restart.
+        # ``blocked_provider`` is an async source for the full map (shipped blocks plus
+        # whatever the community index learned); it is installed by PluginManager, which
+        # owns the IndexClient. Embedded loaders without a manager still get the shipped
+        # list, so this check never becomes "no blocks because nobody wired the network".
+        self.blocked_provider = blocked_provider
+        self._blocklist_path = blocklist_path
+        self._local_blocked: dict[str, str] | None = None
         # When present, plugins load into their own process instead of this one.
         # ``None`` keeps the legacy in-process behaviour so existing tests and
         # embedded deployments (and platforms where subprocess isolation is
@@ -525,6 +546,39 @@ class PluginLoader:
         )
         return "changed"
 
+    async def _blocked_reason(self, name: str, version: str) -> str:
+        """Return why this exact release must not run, or ``""``.
+
+        ``install_from_zip`` refuses a blocked version at upload time, but that says
+        nothing about a version installed *before* it was blocked — which is the common
+        case: a vulnerability is found, the index adds a block, and every deployment
+        that already has the package on disk keeps executing it at every restart. The
+        shipped blocklist is checked first and unconditionally, so a network outage or
+        a hostile index cannot talk the loader out of a decision this release made.
+
+        Failure of the *remote* provider is fail-open for remote blocks only: a plugin
+        that was fine yesterday is not broken by GitHub being down, while the local
+        blocks still apply.
+        """
+        from soapbot.plugins.index_client import load_local_blocklist
+        from soapbot.plugins.manifest import block_key
+
+        if self._local_blocked is None:
+            self._local_blocked = load_local_blocklist(self._blocklist_path)
+        key = block_key(name, version)
+        reason = self._local_blocked.get(key, "")
+        if reason or self.blocked_provider is None:
+            return reason
+        try:
+            blocked = await self.blocked_provider()
+        except Exception:
+            logger.exception(
+                "plugin blocklist refresh failed while loading %s; using the shipped list",
+                name,
+            )
+            return ""
+        return blocked.get(key, "")
+
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         """Load one plugin by name. Explicit; never triggered by discovery."""
         if name in self._loaded:
@@ -560,6 +614,24 @@ class PluginLoader:
             raise PluginLoadError(f"plugin directory {name} escapes the plugins root")
 
         manifest = self._read_manifest(directory)
+
+        # Refuse a blocked release before *any* import. This check is deliberately not
+        # gated on ``force``: reload passes ``force=True`` to skip re-asking for an
+        # approval the operator already gave, but a block is a statement about these
+        # bytes, not about permission. Letting ``reload`` skip it would turn a hot
+        # reload into a one-click bypass of the installed-version protection.
+        blocked_reason = await self._blocked_reason(manifest.name, manifest.version)
+        if blocked_reason:
+            self.audit.record(
+                kind="plugin",
+                action="load",
+                outcome="deny",
+                detail=f"blocked version {manifest.version}: {blocked_reason}",
+                plugin=name,
+            )
+            raise PluginBlockedError(
+                f"plugin {name} version {manifest.version} is blocked: {blocked_reason}"
+            )
 
         if not self.is_approved(name) and not force:
             self.audit.record(
