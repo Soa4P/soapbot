@@ -8,6 +8,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
     "jsx": "preserve",
     "resolveJsonModule": true,
     "isolatedModules": true,

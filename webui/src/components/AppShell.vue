@@ -87,10 +87,11 @@ async function loadHealth(): Promise<void> {
   }
 }
 
+// Delegated to the store, which owns the re-entrancy guard. Calling `refresh()` here
+// directly is what made an expired cookie loop: the refresh itself answers 401 and
+// dispatches this same event again.
 function onUnauthorized(): void {
-  void auth.refresh().then(() => {
-    if (!auth.authenticated) auth.openDialog()
-  })
+  void auth.handleUnauthorized()
 }
 
 onMounted(() => {
