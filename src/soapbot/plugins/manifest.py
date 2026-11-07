@@ -340,6 +340,34 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(p) for p in core.split(".") if p.isdigit())
 
 
+def version_key(text: str) -> str:
+    """Canonical form of a version, for comparing one against a blocklist.
+
+    ``_VERSION_RE`` accepts both ``1.0`` and ``1.0.0``, so the same release can be
+    written two ways and a blocklist keyed on the literal string only blocks one of
+    them. Blocking ``evil@1.0.0`` and then uploading a manifest that says ``1.0``
+    would install the exact bytes the block was meant to stop — the check would pass
+    while looking like it ran.
+
+    Normalising to three numeric components (plus the pre-release tag) makes the two
+    spellings collide, which is what a blocklist needs. This is deliberately *not* a
+    full PEP 440 implementation: versions here are already restricted by
+    ``_VERSION_RE`` to ``N.N[.N][abrcN]``, so there is nothing else to normalise, and
+    a partial reimplementation of packaging's rules would be a new source of bugs.
+    """
+    core = re.split(r"[abrc]", text, maxsplit=1)[0]
+    parts = [int(p) for p in core.split(".") if p.isdigit()]
+    while len(parts) < 3:
+        parts.append(0)
+    suffix = text[len(core) :]
+    return ".".join(str(p) for p in parts) + suffix
+
+
+def block_key(name: str, version: str) -> str:
+    """The key a blocklist is indexed by. One spelling per release, by construction."""
+    return f"{name}@{version_key(version)}"
+
+
 def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
     """Validate a decoded manifest mapping.
 
