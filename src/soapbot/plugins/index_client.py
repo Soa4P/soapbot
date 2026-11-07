@@ -35,6 +35,7 @@ from typing import Any
 import httpx
 
 from soapbot.core.jsonguard import JsonTooDeepError, check_depth
+from soapbot.plugins.manifest import block_key
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +103,14 @@ class IndexSnapshot:
         }
 
     def blocked_reason(self, name: str, version: str) -> str:
-        """Why this exact version must not be installed, or ``""``."""
-        return self.blocked.get(f"{name}@{version}", "")
+        """Why this exact version must not be installed, or ``""``.
+
+        Uses the canonical key so the answer matches what the installer enforces.
+        A literal lookup here would report "not blocked" for a version the installer
+        refuses — the panel would say a plugin is fine and the upload would then fail
+        with no visible reason.
+        """
+        return self.blocked.get(block_key(name, version), "")
 
 
 def _text(value: Any, limit: int = 300) -> str:
@@ -158,7 +165,13 @@ def _parse_entries(raw: Any) -> tuple[IndexEntry, ...]:
 
 
 def _parse_blocked(raw: Any) -> dict[str, str]:
-    """Parse ``[{"name":…, "version":…, "reason":…}]`` into ``name@version -> reason``."""
+    """Parse ``[{"name":…, "version":…, "reason":…}]`` into ``name@version -> reason``.
+
+    Keys go through :func:`block_key`, so a remote entry for ``1.0.0`` also covers a
+    package that spells the same release ``1.0``. The index is third-party data and
+    the version string in it is a claim; normalising on both sides is what makes the
+    two spellings the same block instead of two different ones.
+    """
     if not isinstance(raw, list):
         return {}
     blocked: dict[str, str] = {}
@@ -169,7 +182,7 @@ def _parse_blocked(raw: Any) -> dict[str, str]:
         version = _text(item.get("version"), 32)
         if not name or not version:
             continue
-        blocked[f"{name}@{version}"] = _text(item.get("reason"), 300) or "已被索引标记为不安全"
+        blocked[block_key(name, version)] = _text(item.get("reason"), 300) or "已被索引标记为不安全"
     return blocked
 
 
