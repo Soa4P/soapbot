@@ -80,6 +80,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from soapbot.config import settings
+from soapbot.core.jsonguard import check_depth
 from soapbot.plugins.isolation import (
     DEFAULT_PLUGIN_MEMORY_BYTES,
     MAX_FRAME_BYTES,
@@ -191,8 +193,25 @@ _stdout = sys.stdout.buffer
 # Injected from the host's isolation.MAX_FRAME_BYTES at module load. The child runs
 # under a fresh -I interpreter: a host module name here would raise NameError.
 _MAX_FRAME_BYTES = __MAX_FRAME_BYTES__
+_MAX_DEPTH = __MAX_JSON_DEPTH__
 _frame_limit = [_MAX_FRAME_BYTES]
 _current_rid = [""]
+
+
+def _depth(raw):
+    # Inlined rather than imported: this file runs under a fresh -I interpreter that
+    # must not be able to import the host package. Same algorithm as
+    # soapbot.core.jsonguard.depth_of, kept here because the child cannot reach it.
+    depth = deepest = 0
+    for byte in raw:
+        if byte in (0x7B, 0x5B):      # { [
+            depth += 1
+            if depth > deepest:
+                deepest = depth
+        elif byte in (0x7D, 0x5D):    # } ]
+            if depth:
+                depth -= 1
+    return deepest
 
 
 def _read_frame():
@@ -202,8 +221,15 @@ def _read_frame():
     n = int.from_bytes(head, "big")
     if n <= 0 or n > _frame_limit[0]:
         raise ValueError("inbound frame too large: %d bytes > %d limit" % (n, _frame_limit[0]))
+    body = _stdin.read(n)
+    # Before the decode: json.loads recurses, and a deeply nested frame raises
+    # RecursionError, which is not a ValueError and so escapes the handler below —
+    # killing this process rather than failing one call.
+    deepest = _depth(body)
+    if deepest > _MAX_DEPTH:
+        raise ValueError("inbound frame nested %d deep > %d limit" % (deepest, _MAX_DEPTH))
     try:
-        return json.loads(_stdin.read(n).decode("utf-8"))
+        return json.loads(body.decode("utf-8"))
     except Exception:
         return None
 
@@ -678,6 +704,7 @@ asyncio.run(_serve())
 # the one shared protocol constant as a literal so the two ends cannot drift (the
 # child used to hardcode 8 MiB while the parent allowed 4 MiB).
 _CHILD_WORKER = _CHILD_WORKER.replace("__MAX_FRAME_BYTES__", str(MAX_FRAME_BYTES))
+_CHILD_WORKER = _CHILD_WORKER.replace("__MAX_JSON_DEPTH__", str(settings.max_json_depth))
 
 
 # -------------------------------------------------------------------------- parent
@@ -700,6 +727,9 @@ async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
             f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
         )
     body = await asyncio.wait_for(reader.readexactly(length), timeout=30)
+    # Same reason as ``_read_frame``: a nested frame raises RecursionError, which is not
+    # a ValueError, so it would escape the caller's error handling.
+    check_depth(body)
     return json.loads(body.decode("utf-8"))
 
 

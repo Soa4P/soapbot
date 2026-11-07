@@ -149,6 +149,16 @@ class BotRuntime:
             "handled": 0,
             "halted": 0,
             "failed": 0,
+            # Counted separately from ``halted`` because it is not a decision the pipeline
+            # made — it is input that was never a message. Folding it into ``halted`` would
+            # make a group of people sending stickers look like a wall of permission
+            # denials, and the operator would go looking for an authorization bug.
+            "dropped_blank": 0,
+            # Messages that arrived over-long and were shortened. Surfaced because a bot
+            # that silently answers the first 8000 characters of a 40 000-character paste
+            # looks like it ignored the rest, and the operator needs to be able to see
+            # that this is what happened rather than guess.
+            "truncated": 0,
             "started_at": 0.0,
         }
 
@@ -227,6 +237,28 @@ class BotRuntime:
         if event.event_type is EventType.NOTICE:
             await self._on_notice(event)
             return
+
+        # Dropped here rather than in a stage: a blank message has no identity worth
+        # resolving, no scope worth checking, and no content worth screening. Running it
+        # through the pipeline would spend a principal resolution and a whitelist lookup
+        # to reach the conclusion that there is nothing to answer — and worse, a group
+        # full of stickers would inflate ``halted`` until the panel's denial counter
+        # looked like an attack.
+        if event.is_blank:
+            self.metrics["dropped_blank"] += 1
+            logger.debug(
+                "dropped blank message trace=%s adapter=%s", event.trace_id, event.adapter
+            )
+            return
+
+        if event.truncated:
+            self.metrics["truncated"] += 1
+            logger.info(
+                "inbound message truncated trace=%s adapter=%s chars=%d",
+                event.trace_id,
+                event.adapter,
+                len(event.text),
+            )
 
         # A crashed message used to leave no trace at all: it returned before
         # publishing, so the panel's "failed" bar could never move and the one

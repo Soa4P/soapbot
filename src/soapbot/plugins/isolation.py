@@ -56,6 +56,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from soapbot.config import settings
+from soapbot.core.jsonguard import JsonTooDeepError, check_depth
+
 logger = logging.getLogger(__name__)
 
 #: Address-space ceiling for a plugin process, in bytes.
@@ -273,6 +276,23 @@ import asyncio, importlib.util, inspect, json, os, sys, traceback
 # Injected from the host's MAX_FRAME_BYTES at module load. This script is executed
 # by a fresh -I interpreter, so a host module name here would raise NameError.
 _MAX_FRAME_BYTES = __MAX_FRAME_BYTES__
+_MAX_DEPTH = __MAX_JSON_DEPTH__
+
+
+def _depth(raw):
+    # Inlined, not imported: this script runs under a fresh -I interpreter that must not
+    # be able to import the host package. Same algorithm as
+    # soapbot.core.jsonguard.depth_of.
+    depth = deepest = 0
+    for byte in raw:
+        if byte in (0x7B, 0x5B):      # { [
+            depth += 1
+            if depth > deepest:
+                deepest = depth
+        elif byte in (0x7D, 0x5D):    # } ]
+            if depth:
+                depth -= 1
+    return deepest
 
 class _HostPackageBlocker:
     """Refuse to import the host package inside a plugin process.
@@ -377,6 +397,11 @@ def main():
                % (len(raw), _MAX_FRAME_BYTES)})
         return
     try:
+        # Before the decode: a nested request raises RecursionError, which is not a
+        # ValueError and would escape this handler.
+        deepest = _depth(raw)
+        if deepest > _MAX_DEPTH:
+            raise ValueError("request nested %d deep > %d limit" % (deepest, _MAX_DEPTH))
         req = json.loads(raw.decode("utf-8"))
         if not isinstance(req, dict):
             raise ValueError("request is not an object")
@@ -431,6 +456,9 @@ if __name__ == "__main__":
 # constant as a literal so the parent, the resident worker and the one-shot runner
 # can never disagree about the frame budget.
 _CHILD_BOOTSTRAP = _CHILD_BOOTSTRAP.replace("__MAX_FRAME_BYTES__", str(MAX_FRAME_BYTES))
+_CHILD_BOOTSTRAP = _CHILD_BOOTSTRAP.replace(
+    "__MAX_JSON_DEPTH__", str(settings.max_json_depth)
+)
 
 
 async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any]:
@@ -441,6 +469,14 @@ async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any]:
             f"refusing frame of {length} bytes (limit {MAX_FRAME_BYTES})"
         )
     body = await reader.readexactly(length)
+    # Depth before decode. A plugin is untrusted code by definition, and ``json.loads``
+    # on a deeply nested frame raises ``RecursionError`` — not a ``ValueError``, so it
+    # would escape the handler below and kill the awaiting task instead of failing the
+    # call. The size limit above does not help: 64 KB of ``[`` is 65536 levels.
+    try:
+        check_depth(body)
+    except JsonTooDeepError as exc:
+        raise IsolationError(str(exc)) from exc
     return json.loads(body.decode("utf-8"))
 
 
@@ -598,6 +634,9 @@ class IsolatedRunner:
             body = stdout[4 : 4 + length]
             if len(body) != length:
                 raise ValueError("truncated frame body")
+            # A reply is plugin-controlled too. ``check_depth`` raises ``JsonTooDeep``,
+            # a ``ValueError``, so it lands in the handler below rather than escaping.
+            check_depth(body)
             reply = json.loads(body.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise IsolationError("plugin sent a malformed frame") from exc
