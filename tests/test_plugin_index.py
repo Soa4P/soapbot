@@ -21,7 +21,13 @@ from soapbot.plugins.index_client import (
     load_local_blocklist,
 )
 from soapbot.plugins.installer import InstallError, install_from_zip
-from soapbot.plugins.manifest import Channel, ManifestError, parse_manifest
+from soapbot.plugins.manifest import (
+    Channel,
+    ManifestError,
+    block_key,
+    parse_manifest,
+    version_key,
+)
 
 
 def _transport(payload: bytes | None, *, status: int = 200) -> httpx.MockTransport:
@@ -351,3 +357,110 @@ def test_blocked_reason_matches_the_key_the_installer_uses() -> None:
     assert snapshot.blocked_reason("demo", "1.0") == "凭据泄露"
     assert snapshot.blocked_reason("demo", "1.0.0") == "凭据泄露"
     assert snapshot.blocked_reason("demo", "1.0.1") == ""
+
+
+# ---------------------------------------------------------------- key normalisation
+
+
+def test_trailing_newline_version_is_refused_by_the_manifest_parser() -> None:
+    """`$` in a Python regex also matches *before* a trailing newline.
+
+    `version: |` is the most natural YAML block scalar and yields `"1.2.3\n"`. It used
+    to pass the shape check, then `version_key` dropped the non-numeric `"3\n"` segment
+    and padded it back to `1.2.0`, so the installer looked up a key that no blocklist
+    could ever contain. Anchoring with `\\Z` rejects it at the door.
+    """
+    with pytest.raises(ManifestError, match="version"):
+        parse_manifest(_manifest(version="1.2.3\n"))
+
+
+def test_trailing_newline_cannot_be_used_to_install_a_blocked_release(tmp_path: Path) -> None:
+    """End-to-end form of the above: the bytes must not land on disk."""
+    package = _zip(
+        {
+            "plugin.yaml": (
+                "name: demo\nversion: |\n  1.2.3\nentry: main:Demo\n"
+                "capabilities:\n  - command\n"
+            ),
+            "main.py": "class Demo:\n    pass\n",
+        }
+    )
+
+    with pytest.raises(InstallError):
+        install_from_zip(package, tmp_path, blocked={"demo@1.2.3": "凭据泄露"})
+
+    assert not (tmp_path / "demo").exists()
+
+
+def test_block_key_normalises_the_name_too() -> None:
+    """Manifest names are forced lower case; a hand-written blocklist is not.
+
+    `"Demo"` in the blocklist used to produce `Demo@1.2.3`, which could never match the
+    `demo@1.2.3` the installer builds from the manifest.
+    """
+    assert block_key("Demo", "1.2.3") == block_key("demo", "1.2.3")
+    assert block_key("  Demo ", "1.2") == "demo@1.2.0"
+
+
+def test_malformed_blocklist_version_cannot_collide_with_a_real_release() -> None:
+    """Junk from a third-party index must not raise, and must not match a release."""
+    junk = version_key("1.0.0; rm -rf /")
+
+    assert junk.startswith("?")
+    assert junk != version_key("1.0.0")
+    assert version_key("") != version_key("0.0.0")
+
+
+# ---------------------------------------------------------------- failed refresh
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_does_not_lift_remote_blocks() -> None:
+    """A timeout must not silently unblock a version blocked fifteen minutes ago.
+
+    `_fetch` starts from the local list, so caching its failure snapshot replaced the
+    last good `blocked` map with local-only. The install endpoint explicitly relies on
+    the opposite: a stale cache is used on purpose. Merging preserves every learned
+    block while still reporting the fetch failure to the panel.
+    """
+    state = {"fail": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state["fail"]:
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(200, content=_index())
+
+    client = IndexClient(
+        "https://example.invalid/plugins.json",
+        timeout=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+    first = await client.snapshot()
+    assert first.blocked_reason("weather", "1.0.0") == "凭据泄露"
+
+    state["fail"] = True
+    second = await client.snapshot(force=True)
+
+    assert not second.available
+    assert second.blocked_reason("weather", "1.0.0") == "凭据泄露"
+    assert second.to_dict()["blocked"].get("weather@1.0.0") == "凭据泄露"
+
+
+@pytest.mark.asyncio
+async def test_broken_local_blocklist_is_visible_in_the_api_payload(tmp_path: Path) -> None:
+    """A wheel that lost or corrupted its blocklist used to look like a clean install.
+
+    Only a server-side log line distinguished "nothing is blocked" from "we could not
+    read the list of blocked things" — the exact ambiguity an operator must not have to
+    resolve after installing a known-bad version.
+    """
+    bad = tmp_path / "blocked.json"
+    bad.write_text("{not json", encoding="utf-8")
+
+    client = IndexClient("", blocklist_path=bad)
+    snapshot = await client.snapshot()
+
+    assert any("封禁表" in warning for warning in snapshot.warnings)
+    assert any("封禁表" in warning for warning in snapshot.to_dict()["warnings"])
+    # Still a warning, not an outage: the catalogue itself is fine.
+    assert snapshot.error == ""

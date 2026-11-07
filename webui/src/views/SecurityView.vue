@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 
-import { api } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
 import { t } from '@/i18n'
 import { datetime, num } from '@/lib/format'
@@ -88,28 +88,75 @@ const restartHint = ref('')
 type RestartState = 'idle' | 'restarting' | 'done' | 'failed'
 const restartState = ref<RestartState>('idle')
 let restartAborted = false
+/** Invalidates any poll loop started by an earlier save. */
+let restartRun = 0
+let pollTimer: ReturnType<typeof setTimeout> | undefined
 
 onUnmounted(() => {
   restartAborted = true
+  restartRun += 1
+  if (pollTimer) clearTimeout(pollTimer)
 })
 
-async function waitForRestart(): Promise<void> {
-  const deadline = Date.now() + 60_000
-  while (!restartAborted && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000))
-    if (restartAborted) return
-    try {
-      const response = await fetch('/api/health', { cache: 'no-store' })
-      if (response.ok) {
-        restartState.value = 'done'
-        await access.reload()
-        return
-      }
-    } catch {
-      // degraded: the server is still down, keep polling until the deadline
-    }
+const HEALTH_TIMEOUT_MS = 3_000
+
+async function probeHealth(): Promise<{ ok: boolean; uptime: number }> {
+  // A half-open connection (proxy accepts TCP, never answers) used to pin the poll
+  // loop forever: the 60 s deadline was only checked at the top of the while body,
+  // which the pending fetch never returned to.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS)
+  try {
+    const response = await fetch('/api/health', {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!response.ok) return { ok: false, uptime: 0 }
+    const body = await response.json()
+    return { ok: true, uptime: Number(body?.uptime_seconds) || 0 }
+  } finally {
+    clearTimeout(timer)
   }
-  if (!restartAborted) restartState.value = 'failed'
+}
+
+async function waitForRestart(run: number, baselineUptime: number): Promise<void> {
+  const deadline = Date.now() + 60_000
+  let sawDown = false
+  try {
+    while (!restartAborted && run === restartRun && Date.now() < deadline) {
+      await new Promise<void>((resolve) => {
+        pollTimer = setTimeout(resolve, 2_000)
+      })
+      if (restartAborted || run !== restartRun) return
+      try {
+        const probe = await probeHealth()
+        if (!probe.ok) {
+          sawDown = true
+          continue
+        }
+        // A 200 from the OLD process is not a restart. `/api/health` is unauthenticated
+        // and the old process keeps answering it happily, so polling for "healthy"
+        // declared success even when `POST /api/system/restart` was refused outright —
+        // the panel then showed the new list as effective while it was still only on
+        // disk. A restarted process has a smaller uptime than the one that saved.
+        const restarted =
+          probe.uptime < baselineUptime - 0.5 || (sawDown && baselineUptime < 2)
+        if (!restarted) continue
+        if (restartAborted || run !== restartRun) return
+        await access.reload()
+        if (restartAborted || run !== restartRun) return
+        // `useAsync.reload()` resolves even on failure and exposes the message on
+        // `error`; without this check a 502 during startup still showed "已生效".
+        restartState.value = access.error.value ? 'failed' : 'done'
+        return
+      } catch {
+        sawDown = true // server is down mid-restart, keep polling
+      }
+    }
+    if (!restartAborted && run === restartRun) restartState.value = 'failed'
+  } finally {
+    if (pollTimer) clearTimeout(pollTimer)
+  }
 }
 
 function seedDraft(): void {
@@ -186,6 +233,9 @@ function removeEntry(role: 'owner' | 'admin' | 'member', id: string): void {
 }
 
 async function saveAuthority(): Promise<void> {
+  // A second click while a restart is in flight starts a second poll loop sharing the
+  // same state ref; the older loop then overwrites `done` with `failed` on timeout.
+  if (authorityBusy.value || restartState.value === 'restarting') return
   // A number typed into the box but never "added" is exactly the state an operator
   // believes is saved. Commit it first; leaving the button disabled with no message
   // is what made the page look broken.
@@ -209,6 +259,16 @@ async function saveAuthority(): Promise<void> {
   authorityBusy.value = true
   authorityError.value = ''
   try {
+    // Read the old process's uptime BEFORE asking it to restart. It is the only
+    // evidence the poll loop has that a healthy 200 came from a new process.
+    let baselineUptime = 0
+    try {
+      baselineUptime = (await probeHealth()).uptime
+    } catch {
+      // fallback: health already unreachable means `sawDown` in the poll loop will be
+      // the restart signal instead of the uptime comparison.
+    }
+
     const body = await api.writeAuthority({
       owners: draft.value.owners,
       admins: draft.value.admins,
@@ -219,15 +279,28 @@ async function saveAuthority(): Promise<void> {
     authorityNote.value = t('security.authoritySaved')
     restartHint.value = String(body.restart_hint || '')
     restartState.value = 'restarting'
+    const run = ++restartRun
     try {
       await api.restartService()
-    } catch {
-      // ignored: the process may exit before the response lands, and the health poll
-      // decides whether it came back. Surfacing it would report an error on success.
+    } catch (err) {
+      if (err instanceof ApiError && err.status >= 400) {
+        // A 401/403/409 is a refusal, not a race: the process never intended to
+        // leave. Silently treating it like a dropped connection and polling health
+        // would report a restart that cannot happen.
+        restartState.value = 'failed'
+        authorityError.value = err.message
+        return
+      }
+      // status 0 is a transport failure — the process may have exited before the
+      // response landed, which is the expected success path. Let the poll decide.
     }
-    void waitForRestart()
+    void waitForRestart(run, baselineUptime)
   } catch (error) {
     authorityError.value = (error as Error).message
+    // Clear a stale "已生效"/"重启失败" banner from a previous attempt; otherwise it
+    // sits directly above this error and contradicts it.
+    restartState.value = 'idle'
+    restartHint.value = ''
   } finally {
     authorityBusy.value = false
   }
@@ -492,10 +565,16 @@ async function revokeEveryToken(): Promise<void> {
           <button
             class="btn"
             type="button"
-            :disabled="authorityBusy || conflicts.length > 0"
+            :disabled="authorityBusy || restartState === 'restarting' || conflicts.length > 0"
             @click="saveAuthority"
           >
-            {{ authorityBusy ? t('security.saving') : t('security.save') }}
+            {{
+              authorityBusy
+                ? t('security.saving')
+                : restartState === 'restarting'
+                  ? t('security.restarting')
+                  : t('security.save')
+            }}
           </button>
         </div>
         <p v-else class="hint" style="margin: 0">

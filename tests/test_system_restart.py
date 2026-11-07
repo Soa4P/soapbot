@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from typing import Any
 
@@ -106,3 +107,52 @@ def test_task_name_is_never_interpreted_by_a_shell(
 def test_restart_delay_is_short_but_not_zero() -> None:
     """Zero would race the response; long enough to be safe, short enough to feel instant."""
     assert 0.1 <= system_api.RESTART_DELAY_SECONDS <= 3.0
+
+
+def test_concurrent_restart_requests_schedule_only_one_exit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending restart must not create a second exit task.
+
+    On Linux SIGTERM triggers a graceful shutdown rather than an immediate exit, so a
+    second request arriving in that window really did schedule a second signal and
+    kept accepting writes against a process that was already going down.
+    """
+    calls: list[float] = []
+
+    async def _fake_schedule(*, delay: float = 0) -> None:
+        calls.append(delay)
+
+    monkeypatch.setattr(system_api, "schedule_restart", _fake_schedule)
+    # Simulate a task that has been created but has not completed yet.
+    monkeypatch.setattr(system_api, "_pending_restarts", {object()})
+
+    response = _post(client, "admin")
+
+    assert response.status_code == 200
+    assert response.json()["scheduled"] is False
+    assert response.json()["already_scheduled"] is True
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_spawn_failure_is_logged_instead_of_being_swallowed(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`scheduled: True` with a dead exit task is a restart that never happens.
+
+    The task used to have no exception consumer, so a `Popen` OSError produced only
+    asyncio's "Task exception was never retrieved" while the endpoint had already
+    told the panel everything was fine.
+    """
+
+    def _boom() -> None:
+        raise OSError("schtasks unavailable")
+
+    monkeypatch.setattr(system_api, "_perform_now", _boom)
+
+    with caplog.at_level(logging.ERROR):
+        await system_api.schedule_restart(delay=0)
+
+    assert "restart failed" in caplog.text
+    assert "schtasks unavailable" in caplog.text

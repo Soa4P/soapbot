@@ -302,6 +302,7 @@ export const api = {
       source: string
       fetched_at: number
       error: string
+      warnings: string[]
     }>(`/api/plugins/discover${refresh ? '?refresh=true' : ''}`),
 
   // External tool sources. `refreshMcp` is a write, not a read: it spawns the

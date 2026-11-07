@@ -38,13 +38,25 @@ export const useAuthStore = defineStore('auth', () => {
     () => role.value === 'admin' || role.value === 'owner',
   )
 
+  /**
+   * Whether the current `error` came from a failed login attempt.
+   *
+   * A 401 on `/api/auth/login` also dispatches the global unauthorized event, whose
+   * handler ends in `refresh()` and then `openDialog()`. Both used to overwrite the
+   * reason `login()` had just written, so typing a wrong bootstrap token produced a
+   * login dialog with no explanation at all.
+   */
+  let loginErrorPending = false
+
   async function refresh(): Promise<void> {
     try {
       status.value = await api.authStatus()
     } catch (err) {
       // 401 here means the stored token is dead; the request layer already cleared it.
       status.value = null
-      error.value = err instanceof ApiError ? err.message : String(err)
+      if (!loginErrorPending) {
+        error.value = err instanceof ApiError ? err.message : String(err)
+      }
     }
   }
 
@@ -83,6 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(initToken: string): Promise<boolean> {
     busy.value = true
     error.value = ''
+    loginErrorPending = false
     try {
       await api.login(initToken.trim())
       // The response still carries access_token for scripts. The panel ignores it:
@@ -92,6 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
       return true
     } catch (err) {
       error.value = err instanceof ApiError ? err.message : String(err)
+      loginErrorPending = true
       return false
     } finally {
       busy.value = false
@@ -119,12 +133,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function openDialog(): void {
-    error.value = ''
+    if (!loginErrorPending) error.value = ''
     dialogOpen.value = true
   }
 
   function closeDialog(): void {
     dialogOpen.value = false
+    loginErrorPending = false
   }
 
   return {

@@ -118,4 +118,35 @@ describe('useAsync request sequencing', () => {
     expect(hook.error.value).toBe('not initialised')
     expect(hook.loading.value).toBe(false)
   })
+
+  it('clears a previous error as soon as a new request starts', async () => {
+    const first = deferred<string>()
+    const second = deferred<string>()
+    const loader = queuedLoader([first, second])
+    const { hook } = mountHook(loader)
+
+    first.reject(new ApiError(500, 'old failure'))
+    await Promise.resolve()
+    expect(hook.error.value).toBe('old failure')
+
+    const retry = hook.reload()
+    expect(hook.error.value).toBe('')
+    second.resolve('ok')
+    await retry
+    expect(hook.data.value).toBe('ok')
+  })
+
+  it('does not apply a result that arrives after the component is gone', async () => {
+    const only = deferred<string>()
+    const loader = queuedLoader([only])
+    const { hook, wrapper } = mountHook(loader)
+
+    wrapper.unmount()
+    only.resolve('late')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(hook.data.value).toBeNull()
+    expect(hook.error.value).toBe('')
+  })
 })
