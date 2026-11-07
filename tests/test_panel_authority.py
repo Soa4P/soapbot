@@ -60,6 +60,56 @@ async def test_access_matrix_carries_the_hint(monkeypatch) -> None:
     assert "trust_protocol_roles" in payload
 
 
+def test_shell_metacharacters_in_a_task_name_are_never_emitted_as_a_command(
+    monkeypatch,
+) -> None:
+    """A hint is pasted into a shell by a human, so it needs its own defence.
+
+    The automatic restart passes the name as argv and is safe, but
+    ``SOAPBOT_SERVICE_NAME="Soapbot & calc"`` used to come back in the API response as
+    ``schtasks /End /TN Soapbot & calc && ...`` — a second command, run with the
+    operator's rights. Refusing to print a command is the only safe option for a name
+    cmd.exe cannot express.
+    """
+    monkeypatch.setattr(service_hint, "in_container", lambda: False)
+    monkeypatch.setattr(
+        service_hint,
+        "os",
+        SimpleNamespace(name="nt", environ={"SOAPBOT_SERVICE_NAME": "Soapbot & calc"}),
+    )
+
+    hint = service_hint.restart_hint()
+
+    assert "calc" not in hint
+    assert "schtasks" not in hint
+    assert "&&" not in hint
+
+
+def test_task_name_with_spaces_is_quoted(monkeypatch) -> None:
+    """Windows task names may contain spaces; quoting keeps them one argument."""
+    monkeypatch.setattr(service_hint, "in_container", lambda: False)
+    monkeypatch.setattr(
+        service_hint,
+        "os",
+        SimpleNamespace(name="nt", environ={"SOAPBOT_SERVICE_NAME": "Soapbot Bot"}),
+    )
+
+    assert service_hint.restart_hint() == (
+        'schtasks /End /TN "Soapbot Bot" && schtasks /Run /TN "Soapbot Bot"'
+    )
+
+
+def test_linux_service_name_is_shell_quoted(monkeypatch) -> None:
+    monkeypatch.setattr(service_hint, "in_container", lambda: False)
+    monkeypatch.setattr(
+        service_hint,
+        "os",
+        SimpleNamespace(name="posix", environ={"SOAPBOT_SERVICE_NAME": "demo; id"}),
+    )
+
+    assert service_hint.restart_hint() == "systemctl restart 'demo; id'"
+
+
 @pytest.mark.parametrize("empty_value", ["", "   "])
 def test_blank_service_name_falls_back(monkeypatch, empty_value: str) -> None:
     monkeypatch.setattr(service_hint, "in_container", lambda: False)

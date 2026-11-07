@@ -13,20 +13,30 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import { t } from '@/i18n'
+import { blockKey } from '@/lib/pluginVersions'
 import { useAsync } from '@/lib/useAsync'
 
-const catalogue = useAsync(() => api.discoverPlugins())
+/**
+ * `forceNext` is read by the loader at request time. The button must send
+ * `?refresh=true`: without it the request hits the server's 15-minute cache and
+ * "重新获取" is a no-op that looks like a broken index.
+ */
+const forceNext = ref(false)
+const catalogue = useAsync(() => api.discoverPlugins(forceNext.value))
 
 const refreshing = ref(false)
 
 const entries = computed(() => catalogue.data.value?.entries ?? [])
 const blocked = computed<Record<string, string>>(() => catalogue.data.value?.blocked ?? {})
 const available = computed(() => catalogue.data.value?.available ?? false)
+const warnings = computed(() => catalogue.data.value?.warnings ?? [])
 
 /** A plugin is "blocked" if any of its listed versions is blocked. */
 function blockedVersions(name: string, versions: string[]): { version: string; reason: string }[] {
   return versions
-    .map((version) => ({ version, reason: blocked.value[`${name}@${version}`] ?? '' }))
+    // Canonical key, not `${name}@${version}`: the backend normalises versions when
+    // it writes this map, so `1.0` in the index must match a block on `1.0.0`.
+    .map((version) => ({ version, reason: blocked.value[blockKey(name, version)] ?? '' }))
     .filter((item) => item.reason !== '')
 }
 
@@ -36,9 +46,11 @@ function isBlocked(name: string, versions: string[]): boolean {
 
 async function refresh(): Promise<void> {
   refreshing.value = true
+  forceNext.value = true
   try {
     await catalogue.reload()
   } finally {
+    forceNext.value = false
     refreshing.value = false
   }
 }
@@ -51,6 +63,13 @@ async function refresh(): Promise<void> {
       <button class="btn ghost" type="button" :disabled="refreshing" @click="refresh">
         {{ t('plugins.refreshIndex') }}
       </button>
+    </div>
+
+    <!-- Degraded but still usable: the most important one is a missing/corrupt local
+         blocklist, which otherwise reads exactly like "nothing is blocked". Rendered
+         before the state chain so it does not break the v-if / v-else-if sequence. -->
+    <div v-for="warning in warnings" :key="warning" class="warn-banner" role="status">
+      {{ warning }}
     </div>
 
     <!-- Three distinct states, because "cannot discover" and "nothing listed" need

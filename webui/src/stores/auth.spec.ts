@@ -14,7 +14,7 @@ vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
   return {
     ...actual,
-    api: { ...actual.api, authStatus: vi.fn() },
+    api: { ...actual.api, authStatus: vi.fn(), login: vi.fn() },
   }
 })
 
@@ -23,7 +23,10 @@ import type { AuthStatus } from '@/api/client'
 
 import { useAuthStore } from './auth'
 
-const mocked = api as unknown as { authStatus: ReturnType<typeof vi.fn> }
+const mocked = api as unknown as {
+  authStatus: ReturnType<typeof vi.fn>
+  login: ReturnType<typeof vi.fn>
+}
 
 function status(overrides: Partial<AuthStatus> = {}): AuthStatus {
   return {
@@ -45,6 +48,19 @@ describe('auth store 401 handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mocked.authStatus.mockReset()
+    mocked.login.mockReset()
+  })
+
+  it('keeps a failed login reason visible while the 401 handler opens the dialog', async () => {
+    const store = useAuthStore()
+    mocked.login.mockRejectedValue(new ApiError(401, 'invalid bootstrap token'))
+    mocked.authStatus.mockRejectedValue(new ApiError(401, 'unauthorized'))
+
+    expect(await store.login('wrong-token')).toBe(false)
+    await store.handleUnauthorized()
+
+    expect(store.dialogOpen).toBe(true)
+    expect(store.error).toBe('invalid bootstrap token')
   })
 
   it('refreshes once even when the refresh itself answers 401', async () => {

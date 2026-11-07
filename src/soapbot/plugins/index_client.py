@@ -91,6 +91,10 @@ class IndexSnapshot:
     source: str = ""
     fetched_at: float = 0.0
     error: str = ""
+    warnings: tuple[str, ...] = ()
+    """Degraded but usable states. Kept separate from ``error``: a broken *local*
+    blocklist does not mean the catalogue could not be fetched, and collapsing the two
+    would show "index unavailable" while listing plugins normally."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +104,7 @@ class IndexSnapshot:
             "source": self.source,
             "fetched_at": self.fetched_at,
             "error": self.error,
+            "warnings": list(self.warnings),
         }
 
     def blocked_reason(self, name: str, version: str) -> str:
@@ -186,24 +191,31 @@ def _parse_blocked(raw: Any) -> dict[str, str]:
     return blocked
 
 
-def load_local_blocklist(path: Path | None = None) -> dict[str, str]:
-    """Read the blocklist shipped with this repository.
+def load_local_blocklist_checked(path: Path | None = None) -> tuple[dict[str, str], str]:
+    """Read the shipped blocklist, returning the blocks *and* why none were loaded.
 
-    A missing or unreadable file yields an empty dict **and a warning**, not an exception:
-    the blocklist is a safety net, and a deployment whose wheel lost the file should still
-    start. It is logged because a silently absent blocklist is the failure mode that
-    matters — it looks exactly like "nothing is blocked".
+    A missing or unreadable file yields an empty dict, not an exception: the blocklist
+    is a safety net, and a deployment whose wheel lost the file should still start.
+    But returning only ``{}`` made that failure invisible at every layer above a log
+    line — the panel and the install endpoint both saw "nothing is blocked", which is
+    indistinguishable from a clean install. The caller now gets a reason to surface.
     """
     target = path or LOCAL_BLOCKLIST
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.warning("plugin blocklist missing at %s; no local blocks active", target)
-        return {}
+        return {}, "本地封禁表缺失，随包封禁未生效"
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("plugin blocklist unreadable (%s); no local blocks active", type(exc).__name__)
-        return {}
-    return _parse_blocked(data.get("blocked") if isinstance(data, dict) else None)
+        return {}, f"本地封禁表无法读取（{type(exc).__name__}），随包封禁未生效"
+    return _parse_blocked(data.get("blocked") if isinstance(data, dict) else None), ""
+
+
+def load_local_blocklist(path: Path | None = None) -> dict[str, str]:
+    """Convenience wrapper for callers that only need the blocks."""
+    blocked, _ = load_local_blocklist_checked(path)
+    return blocked
 
 
 class IndexClient:
@@ -230,6 +242,7 @@ class IndexClient:
         self._transport = transport
         self._cached: IndexSnapshot | None = None
         self._local_blocked: dict[str, str] | None = None
+        self._local_blocklist_error = ""
 
     @property
     def local_blocked(self) -> dict[str, str]:
@@ -240,7 +253,9 @@ class IndexClient:
         value that is constant.
         """
         if self._local_blocked is None:
-            self._local_blocked = load_local_blocklist(self._blocklist_path)
+            self._local_blocked, self._local_blocklist_error = load_local_blocklist_checked(
+                self._blocklist_path
+            )
         return self._local_blocked
 
     def _stale(self) -> bool:
@@ -266,11 +281,31 @@ class IndexClient:
                 error="",
                 source="",
             )
-            self._cached = snapshot
-            return snapshot
+            self._cached = self._with_warnings(snapshot)
+            return self._cached
 
         snapshot = await self._fetch()
-        self._cached = snapshot
+        previous = self._cached
+        if previous is not None and not snapshot.available:
+            # A failed refresh must not lift a block learned from the last good fetch.
+            # `_fetch` starts from the local list only, so caching this snapshot as-is
+            # used to make every remote block disappear on the first timeout or 503 —
+            # exactly what the caller in api/plugins.py says must not happen. Merging
+            # is safe because both maps only ever ADD blocks; a remote index can never
+            # remove one.
+            merged = dict(previous.blocked)
+            merged.update(snapshot.blocked)
+            snapshot.blocked = merged
+        self._cached = self._with_warnings(snapshot)
+        return self._cached
+
+    def _with_warnings(self, snapshot: IndexSnapshot) -> IndexSnapshot:
+        """Attach degraded-state notes that the panel can render without lying."""
+        _ = self.local_blocked  # force the one-time read that sets the error
+        warnings = list(snapshot.warnings)
+        if self._local_blocklist_error:
+            warnings.append(self._local_blocklist_error)
+        snapshot.warnings = tuple(warnings)
         return snapshot
 
     async def _fetch(self) -> IndexSnapshot:

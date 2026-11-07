@@ -21,6 +21,8 @@ assumption that the process is listening somewhere private.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -31,6 +33,33 @@ from soapbot.config import settings
 from soapbot.security.principal import Role
 
 logger = logging.getLogger(__name__)
+
+#: Plugins reviewed and shipped *inside this package*. A plugin discovered under the
+#: user's data directory can never be official, no matter what its manifest says —
+#: `channel` in plugin.yaml is a claim by the package author, and adding one line to a
+#: zip costs nothing. Provenance is decided here, in code that ships with the release.
+#:
+#: Empty today because the bundled samples in ``soapbot/examples/plugins`` are examples,
+#: not loaded plugins. When one is promoted to a shipped plugin, add its name here and
+#: make sure it is loaded from the package path (see ``_channel_of``).
+BUNDLED_OFFICIAL_PLUGINS: frozenset[str] = frozenset()
+
+
+def _channel_of(manifest: Any, loader: Any) -> str:
+    """Whether this *installed* plugin is official, decided by provenance not by claim."""
+    name = str(getattr(manifest, "name", ""))
+    if name not in BUNDLED_OFFICIAL_PLUGINS:
+        return "community"
+    try:
+        # ``api/plugins.py`` -> ``soapbot/`` is one parent up from this file's parent.
+        package_root = Path(__file__).resolve().parent.parent
+        plugin_dir = (Path(loader.plugins_dir) / name).resolve()
+        # A same-named upload in data/plugins must not inherit the label.
+        return "official" if plugin_dir.is_relative_to(package_root) else "community"
+    except (AttributeError, OSError, TypeError):
+        return "community"
+
+
 # Installing, approving and loading a plugin executes third-party code in a worker
 # process. A MEMBER who can do that but cannot edit one config line is a permission
 # inversion, so the whole router starts at ADMIN.
@@ -171,6 +200,9 @@ async def list_plugins(request: Request) -> dict:
         installed.append(
             {
                 **manifest.to_dict(),
+                # Overrides the manifest's own `channel`: see BUNDLED_OFFICIAL_PLUGINS.
+                # Without this, any uploaded zip could label itself official.
+                "channel": _channel_of(manifest, loader),
                 "approved": loader.is_approved(manifest.name),
                 "loaded": loaded is not None,
                 "granted": sorted(c.value for c in grant.effective),
