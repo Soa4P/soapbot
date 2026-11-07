@@ -357,6 +357,19 @@ export const api = {
       `/api/memory/timeline?session_key=${encodeURIComponent(sessionKey)}&limit=${limit}`,
     ),
   memoryStats: () => request<any>('/api/memory/stats'),
+  // The rows themselves, not the archived messages. `memoryTimeline` answers "what was
+  // said"; this answers "what was distilled", and only these rows carry the id that the
+  // delete endpoint takes.
+  memoryItems: (params: { scope?: string; layer?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.scope) query.set('scope', params.scope)
+    if (params.layer) query.set('layer', params.layer)
+    query.set('limit', String(params.limit ?? 50))
+    query.set('offset', String(params.offset ?? 0))
+    return request<any>(`/api/memory/items?${query.toString()}`)
+  },
+  deleteMemory: (memoryId: number) =>
+    request<{ ok: boolean; id: number }>(`/api/memory/${memoryId}`, { method: 'DELETE' }),
   // The scene layer: a per-conversation index card, a portrait, and skills distilled
   // from that conversation's memories. These existed in the backend and were injected
   // into every prompt, but had no interface — the panel could not show or trigger any

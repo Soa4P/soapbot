@@ -33,6 +33,10 @@ export const useAuthStore = defineStore('auth', () => {
   const canEditAuthority = computed(
     () => role.value === 'admin' || role.value === 'owner',
   )
+  /** Admin and above may delete a single memory row; the server enforces the same floor. */
+  const canManageMemory = computed(
+    () => role.value === 'admin' || role.value === 'owner',
+  )
 
   async function refresh(): Promise<void> {
     try {
@@ -102,6 +106,7 @@ export const useAuthStore = defineStore('auth', () => {
     canLogin,
     role,
     canEditAuthority,
+    canManageMemory,
     refresh,
     login,
     logout,
