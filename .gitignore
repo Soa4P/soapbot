@@ -2,6 +2,18 @@
 # during panel verification; they are session artifacts, not sources.
 .playwright-cli/
 
+# Scratch files used while preparing a commit (message drafts, CI log dumps, one-off
+# probes). `git add -A` swept a message draft into a commit once; these are never sources.
+.msg.tmp
+.ci-*.txt
+.ci-*.log
+.ci-*.json
+.ci-*.py
+.pt-out*.txt
+.oracle-*.txt
+.oracle-*.ps1
+.verify-*.py
+
 # Python
 __pycache__/
 *.py[cod]
