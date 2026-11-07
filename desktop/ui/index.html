@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>soapbot 控制台</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!--
+      This page is the shell's own document, not the panel. It exists so that a stopped
+      backend produces an explanation instead of a blank webview: `WebviewUrl::External`
+      pointing at a dead port renders the browser's connection error, which reads as
+      "the app is broken" rather than "the service is not running".
+    -->
+    <main class="shell" id="shell" data-state="probing">
+      <header class="head">
+        <h1>soapbot 控制台</h1>
+        <p class="sub" id="status-line">正在检查本机服务…</p>
+      </header>
+
+      <section class="card" id="card-offline" hidden>
+        <h2>后端没有在运行</h2>
+        <p>
+          桌面壳只负责打开面板，不负责启动它。本机服务由计划任务（Windows）或 systemd
+          （Linux）托管，端口 <code id="port">6185</code> 现在没有响应。
+        </p>
+        <p class="label">启动命令</p>
+        <pre><code id="command">schtasks /Run /TN SoapbotBot</code></pre>
+        <div class="actions">
+          <button type="button" id="retry">重新检测</button>
+          <button type="button" id="copy" class="ghost">复制命令</button>
+        </div>
+        <p class="hint" id="hint-line"></p>
+      </section>
+
+      <section class="card" id="card-online" hidden>
+        <h2>服务已就绪</h2>
+        <p>正在打开面板…</p>
+        <div class="actions">
+          <button type="button" id="open">打开面板</button>
+        </div>
+      </section>
+    </main>
+    <script src="main.js"></script>
+  </body>
+</html>

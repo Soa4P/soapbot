@@ -27,6 +27,11 @@ secrets/
 node_modules/
 webui/.vite/
 *.local
+
+# Tauri desktop shell. `Cargo.lock` is *not* ignored: this is an application, and a
+# floating dependency set is how a shell that compiled last month stops compiling.
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
 # The built panel ships inside the Python package, so it must not be gitignored:
 # the Docker image builds a wheel from src/ alone and would otherwise have no UI.
 !src/soapbot/webui/dist/
