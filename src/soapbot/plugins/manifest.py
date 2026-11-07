@@ -54,17 +54,22 @@ MANIFEST_ALT_FILENAME = "plugin.yml"
 #: Plugin ids become directory names, storage namespaces and audit labels, so the
 #: charset is deliberately narrow. A leading digit is rejected because the id is
 #: also used to build Python-safe identifiers ("plugin_" + name).
-_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,40}$")
+#: ``\Z`` (not ``$``) on every anchored pattern below. Python's ``$`` also matches
+#: *just before a trailing newline*, so ``"1.2.3\n"`` passed the version check and
+#: then ``version_key`` silently turned it into ``1.2.0`` — a blocked release could
+#: be installed by writing its version as a YAML block scalar. Anchoring with ``\Z``
+#: makes the match end at the true end of the string.
+_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,40}\Z")
 
 #: ``module:attribute`` where module is a dotted path *inside the plugin package*.
 #: ``$`` is excluded, as is anything that is not an identifier segment, so a
 #: manifest cannot smuggle an expression such as ``os:system`` or ``a.b;c``.
 _ENTRY_RE = re.compile(
-    r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*:[a-z_][a-z0-9_]*$",
+    r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*:[a-z_][a-z0-9_]*\Z",
     re.IGNORECASE,
 )
 
-_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?([abrc][0-9]+)?$")
+_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?([abrc][0-9]+)?\Z")
 
 #: Names that must never appear where a plugin-supplied identifier is expected.
 _FORBIDDEN_TOKENS = (
@@ -354,18 +359,32 @@ def version_key(text: str) -> str:
     full PEP 440 implementation: versions here are already restricted by
     ``_VERSION_RE`` to ``N.N[.N][abrcN]``, so there is nothing else to normalise, and
     a partial reimplementation of packaging's rules would be a new source of bugs.
+
+    Values that are not versions at all come from the *remote* blocklist, which is
+    untrusted input and may contain junk. They are kept verbatim under a distinct
+    prefix so they can never collide with a canonical release key, and so a malformed
+    entry cannot raise out of a panel render. A manifest that supplied such a value
+    is refused upstream by ``parse_manifest``.
     """
-    core = re.split(r"[abrc]", text, maxsplit=1)[0]
-    parts = [int(p) for p in core.split(".") if p.isdigit()]
+    value = str(text).strip()
+    if not _VERSION_RE.fullmatch(value):
+        return f"?{value}"
+    core = re.split(r"[abrc]", value, maxsplit=1)[0]
+    parts = [int(p) for p in core.split(".")]
     while len(parts) < 3:
         parts.append(0)
-    suffix = text[len(core) :]
+    suffix = value[len(core) :]
     return ".".join(str(p) for p in parts) + suffix
 
 
 def block_key(name: str, version: str) -> str:
-    """The key a blocklist is indexed by. One spelling per release, by construction."""
-    return f"{name}@{version_key(version)}"
+    """The key a blocklist is indexed by. One spelling per release, by construction.
+
+    ``name`` is normalised too: manifest names are forced to lower case by
+    ``_NAME_RE``, but a blocklist entry is authored by a human and ``"Demo"`` would
+    otherwise never match ``demo``.
+    """
+    return f"{str(name).strip().lower()}@{version_key(version)}"
 
 
 def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
@@ -378,18 +397,18 @@ def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
         raise ManifestError("manifest must be a mapping")
 
     name = raw.get("name")
-    if not isinstance(name, str) or not _NAME_RE.match(name):
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
         raise ManifestError(
             "name must match ^[a-z][a-z0-9_-]{1,40}$ "
             "(it becomes a directory name and storage namespace)"
         )
 
     version = raw.get("version")
-    if not isinstance(version, str) or not _VERSION_RE.match(version):
+    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
         raise ManifestError(f"version {version!r} is not a valid semantic version")
 
     entry = raw.get("entry")
-    if not isinstance(entry, str) or not _ENTRY_RE.match(entry):
+    if not isinstance(entry, str) or not _ENTRY_RE.fullmatch(entry):
         raise ManifestError(
             "entry must be 'module:attribute' with an in-package dotted module name"
         )

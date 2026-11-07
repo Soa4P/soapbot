@@ -44,6 +44,25 @@ def client(tmp_path, monkeypatch) -> TestClient:
         yield c
 
 
+def test_listing_does_not_trust_a_manifest_that_calls_itself_official(
+    client: TestClient,
+) -> None:
+    """`channel` is provenance, not a claim the package gets to make about itself.
+
+    The bundled samples all say ``channel: official`` in plugin.yaml (they ship with
+    the source tree), but this fixture copies them into a temp ``data/plugins`` and
+    discovers them there — exactly what an uploaded zip looks like. If the API echoed
+    the manifest field, any third-party package could add one line and be rendered in
+    the "official, reviewed with the release" tab.
+    """
+    data = client.get("/api/plugins").json()
+    assert data["installed"], "fixture should have discovered the copied samples"
+    for plugin in data["installed"]:
+        assert plugin["channel"] == "community", (
+            f"{plugin['name']} was labelled official from its own manifest"
+        )
+
+
 def test_listing_does_not_load_anything(client: TestClient) -> None:
     """Discovery must be observation only.
 

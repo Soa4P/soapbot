@@ -1,4 +1,4 @@
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { ApiError } from '@/api/client'
 import { refreshTick } from '@/lib/refresh'
@@ -43,26 +43,38 @@ export function useAsync<T>(loader: () => Promise<T>, cacheKey?: string) {
    * one line with no cleanup to forget.
    */
   let seq = 0
+  let disposed = false
+
+  onUnmounted(() => {
+    // Invalidates any request still in flight. Without this, navigating away while a
+    // slow read is pending writes into refs of a destroyed component and into the
+    // module cache, where a later view can pick up data from a page it never opened.
+    disposed = true
+    seq += 1
+  })
 
   async function reload(): Promise<void> {
+    if (disposed) return
     const mine = ++seq
     loading.value = true
+    // A previous failure must not stay on screen while its replacement is loading;
+    // the result of the new request is the only thing that can clear it otherwise.
+    error.value = ''
     try {
       const result = await loader()
-      if (mine !== seq) return
+      if (disposed || mine !== seq) return
       data.value = result
-      error.value = ''
       if (cacheKey) cache.set(cacheKey, { at: Date.now(), data: result })
     } catch (err) {
       // The failure path needs the same guard as the success path. A stale rejection
       // overwriting a fresh success is the worse of the two bugs: the page shows correct
       // data with a red banner, and the operator reports the data as wrong.
-      if (mine !== seq) return
+      if (disposed || mine !== seq) return
       error.value = err instanceof ApiError ? err.message : String(err)
     } finally {
       // Only the newest request may clear the spinner; an older one finishing first
       // would hide the fact that a request is still outstanding.
-      if (mine === seq) loading.value = false
+      if (!disposed && mine === seq) loading.value = false
     }
   }
 

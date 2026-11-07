@@ -6,8 +6,9 @@ effect. Three paths, all decided here rather than in the panel:
 
 * Windows: the task registered by ``install.ps1`` uses ``-AtStartup`` with
   ``RestartCount``. A process that exits 0 counts as a successful run, so the task
-  manager does not bring it back. A detached ``cmd.exe`` therefore runs
-  ``schtasks /End`` and then ``/Run``; the child outlives the parent.
+  manager does not bring it back. Two detached ``schtasks`` children therefore run
+  ``/End`` and then ``/Run``; they outlive the parent. No shell is involved: the task
+  name is passed as argv, so it cannot become a second command.
 * Linux: send SIGTERM and let systemd's ``Restart=always`` do the work.
 * Container: exit non-zero and let compose's ``restart: unless-stopped`` do it.
 
@@ -95,13 +96,38 @@ def _perform_now() -> None:
 
 
 async def schedule_restart(*, delay: float = RESTART_DELAY_SECONDS) -> None:
-    await asyncio.sleep(delay)
-    _perform_now()
+    try:
+        await asyncio.sleep(delay)
+        # `_spawn_windows_restart` sleeps synchronously between /End and /Run, and
+        # `subprocess.Popen` is a blocking call. Running the whole exit path in a worker
+        # thread keeps that second from freezing every other in-flight request; it also
+        # means a failed spawn is caught here instead of being swallowed by an
+        # un-retrieved Task exception.
+        await asyncio.to_thread(_perform_now)
+    except Exception:
+        # Without this the endpoint has already answered `scheduled: True`, the process
+        # never leaves, and the only trace is asyncio's "Task exception was never
+        # retrieved" — which nobody is watching during a restart.
+        logger.exception("restart failed; the process is still running")
 
 
 @router.post("/restart")
 async def restart() -> dict:
-    """Ask for a restart. Returns before the process actually goes away."""
+    """Ask for a restart. Returns before the process actually goes away.
+
+    Idempotent while a restart is pending: two admins saving at once (or an impatient
+    second click) used to create two exit tasks. On Linux, where SIGTERM leads to a
+    graceful shutdown rather than an immediate exit, that window is long enough for
+    the second task to fire again and for new requests to be accepted against a
+    process that is already going down.
+    """
+    if _pending_restarts:
+        return {
+            "ok": True,
+            "scheduled": False,
+            "already_scheduled": True,
+            "hint": restart_hint(),
+        }
     task = asyncio.create_task(schedule_restart())
     _pending_restarts.add(task)
     task.add_done_callback(_pending_restarts.discard)
