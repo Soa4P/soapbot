@@ -26,6 +26,7 @@ import logging
 import shutil
 import uuid
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -97,8 +98,21 @@ class InstallResult:
         }
 
 
-def install_from_zip(data: bytes, plugins_dir: Path, *, host_version: str = "0.1.0") -> InstallResult:
-    """Validate and install a plugin archive. Raises :class:`InstallError`."""
+def install_from_zip(
+    data: bytes,
+    plugins_dir: Path,
+    *,
+    host_version: str = "0.1.0",
+    blocked: Mapping[str, str] | None = None,
+) -> InstallResult:
+    """Validate and install a plugin archive. Raises :class:`InstallError`.
+
+    ``blocked`` maps ``"name@version"`` to a reason. It is passed in rather than read here
+    so the caller decides which lists apply — the local file always, the community index
+    only when it was reachable — and so this function stays free of network state. The
+    check runs *after* the manifest is parsed (that is where name and version come from)
+    and *before* the commit, so a blocked version never replaces a working install.
+    """
     if not data:
         raise InstallError("empty upload")
     if len(data) > MAX_ARCHIVE_BYTES:
@@ -118,6 +132,11 @@ def install_from_zip(data: bytes, plugins_dir: Path, *, host_version: str = "0.1
             root_prefix = _root_prefix(archive)
             _extract(archive, staging, root_prefix)
         manifest = _read_and_check_manifest(staging, host_version)
+        reason = (blocked or {}).get(f"{manifest.name}@{manifest.version}")
+        if reason:
+            raise InstallError(
+                f"{manifest.name} {manifest.version} 已被封禁，拒绝安装：{reason}"
+            )
         target = plugins_dir / manifest.name
         replaced = target.exists()
         _commit(staging, target)

@@ -51,6 +51,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,7 +74,7 @@ DEFAULT_PLUGIN_MEMORY_BYTES = 512 * 1024 * 1024
 
 #: Windows process-creation flag for a new process group. Read defensively because
 #: the constant only exists on Windows.
-_CREATE_NEW_PROCESS_GROUP = getattr(__import__("subprocess"), "CREATE_NEW_PROCESS_GROUP", 0)
+_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
@@ -88,10 +89,25 @@ def _kill_tree(proc: asyncio.subprocess.Process) -> None:
         return
     if sys.platform == "win32":
         # taskkill /T is the only portable way to take a tree down on Windows.
+        #
+        # ``stdout``/``stderr`` go to DEVNULL rather than ``capture_output=True``, and
+        # that is a correctness fix, not tidiness. With pipes, ``subprocess.run`` has
+        # to wait for the pipe to reach EOF — and a grandchild that inherited the
+        # write end keeps it open after taskkill has already exited. On timeout,
+        # ``run`` kills taskkill and then calls ``communicate()`` *again* with no
+        # timeout at all, so the wait becomes unbounded. This function is called
+        # synchronously from inside the event loop (the stdout reader must not await
+        # here — see ``_drain_stdout``), so an unbounded wait there freezes every
+        # task in the process, including the ``asyncio.wait_for`` deadlines that were
+        # supposed to bound it. A killed worker then hangs the whole host instead of
+        # failing one call. With no pipes there is nothing to wait for but the direct
+        # child, which taskkill reaps immediately.
         with contextlib.suppress(Exception):
-            __import__("subprocess").run(
+            subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 timeout=5,
                 check=False,
             )

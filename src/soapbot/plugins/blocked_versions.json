@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "note": "Versions that must not be installed. Reviewed in this repository so the list works offline and cannot be emptied by whoever controls the community index. A remote index may add entries at runtime; it can never remove one.",
+  "blocked": []
+}

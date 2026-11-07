@@ -4,6 +4,7 @@ entry: main:EchoPlugin
 description: 复述消息内容，并演示命令与工具的注册方式
 author: soapbot
 trust: trusted
+channel: official
 min_host_version: 0.1.0
 capabilities:
   - command
