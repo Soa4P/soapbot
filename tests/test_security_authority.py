@@ -52,15 +52,19 @@ def _post(client: TestClient, payload: dict[str, Any], role: str = "owner"):
         client.app.dependency_overrides.update(original)  # type: ignore[attr-defined]
 
 
-def test_non_owner_is_refused(client: TestClient) -> None:
-    response = _post(client, {"owners": ["123"], "admins": [], "members": []}, role="admin")
-    assert response.status_code == 403
+def test_member_is_refused_but_admin_is_allowed(client: TestClient) -> None:
+    """The write floor is ADMIN: whoever can change config can change who holds a role."""
+    refused = _post(client, {"owners": ["123"], "admins": [], "members": []}, role="member")
+    assert refused.status_code == 403
     deny = [
         e
         for e in get_audit_log().recent(limit=50)
         if e["action"] == "authority_write" and e["outcome"] == "deny"
     ]
     assert deny, "a refused escalation must land in the audit trail"
+
+    allowed = _post(client, {"owners": ["123"], "admins": [], "members": []}, role="admin")
+    assert allowed.status_code == 200
 
 
 def test_writes_env_and_normalises(client: TestClient, env_file: Path) -> None:
@@ -98,14 +102,30 @@ def test_the_last_owner_cannot_be_removed(
     assert "owner" in text.lower()
 
 
-def test_first_run_owner_survives_the_first_save(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_deleting_the_first_run_owner_actually_deletes_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, env_file: Path
 ) -> None:
-    """build_authority consults first_run_owner only while owner_ids is empty — so a save
-    that drops it would silently demote the one person who can undo the mistake."""
+    """It is a bootstrap fallback, not a permanent member.
+
+    Re-inserting it on every save is what made the panel look like it ignored a
+    delete: the number came back at the head of the list.
+    """
     from soapbot.config import settings
 
     monkeypatch.setattr(settings, "first_run_owner", "123456789")
     response = _post(client, {"owners": ["555"], "admins": [], "members": []})
     assert response.status_code == 200
-    assert response.json()["owners"] == ["123456789", "555"]
+    assert response.json()["owners"] == ["555"]
+    assert "SOAPBOT_OWNER_IDS=555" in env_file.read_text(encoding="utf-8")
+
+
+def test_first_run_owner_is_the_fallback_for_an_empty_list(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It still prevents a lockout: an empty owner list falls back instead of 400."""
+    from soapbot.config import settings
+
+    monkeypatch.setattr(settings, "first_run_owner", "123456789")
+    response = _post(client, {"owners": [], "admins": [], "members": []})
+    assert response.status_code == 200
+    assert response.json()["owners"] == ["123456789"]

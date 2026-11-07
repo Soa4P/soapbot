@@ -1,0 +1,79 @@
+"""The restart endpoint: admin-only, answers before exiting, and names the real task."""
+
+from __future__ import annotations
+
+import subprocess
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from soapbot.api import system as system_api
+from soapbot.api.auth import require_api_auth
+from soapbot.api.system import router
+
+
+@pytest.fixture()
+def client() -> TestClient:
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+def _post(client: TestClient, role: str) -> Any:
+    client.app.dependency_overrides[require_api_auth] = lambda: {"role": role}
+    try:
+        return client.post("/api/system/restart")
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+def test_member_cannot_restart(client: TestClient) -> None:
+    assert _post(client, "member").status_code == 403
+
+
+def test_admin_gets_an_answer_before_the_process_leaves(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restart that kills the connection before responding is indistinguishable from
+    a failed save, so the endpoint must return first."""
+    scheduled: list[float] = []
+
+    async def _fake_schedule(*, delay: float = 0) -> None:
+        scheduled.append(delay)
+
+    monkeypatch.setattr(system_api, "schedule_restart", _fake_schedule)
+
+    response = _post(client, "admin")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scheduled"] is True
+    assert body["hint"]
+
+
+def test_windows_restart_command_names_the_installed_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[list[str]] = []
+
+    def _fake_popen(argv, **kwargs):
+        captured.append(argv)
+        return None
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(system_api, "service_name", lambda: "SoapbotBot")
+    monkeypatch.setattr(system_api.sys, "platform", "win32")
+
+    system_api._spawn_windows_restart()
+
+    assert captured, "the restart must be handed to a detached process"
+    command = captured[0][-1]
+    assert 'schtasks /End /TN "SoapbotBot"' in command
+    assert 'schtasks /Run /TN "SoapbotBot"' in command
+
+
+def test_restart_delay_is_short_but_not_zero() -> None:
+    """Zero would race the response; long enough to be safe, short enough to feel instant."""
+    assert 0.1 <= system_api.RESTART_DELAY_SECONDS <= 3.0

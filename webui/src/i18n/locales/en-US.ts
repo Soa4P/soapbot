@@ -378,6 +378,11 @@ export default {
   'security.authoritySaved':
     'Written to .env. It takes effect after a restart; the command is shown below.',
   'security.nothingToSave': 'No changes to save.',
+  'security.authorityReadOnly':
+    'Signed in as {role}: the lists are readable but only admin or owner can change them.',
+  'security.restarting': 'Restarting the service, about 5 seconds…',
+  'security.restartDone': 'Applied.',
+  'security.restartFailed': 'It did not come back within 60s. Run the command above manually.',
   'security.authorityHint':
     "Changes are written to the server's .env (SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS) and need a panel restart. An owner from first_run_owner is kept automatically so you cannot lock yourself out.",
   'security.removeAria': 'Remove {id} from {role}',

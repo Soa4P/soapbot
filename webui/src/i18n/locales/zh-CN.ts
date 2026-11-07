@@ -413,6 +413,10 @@ export default {
     '这些账号同时出现在多个角色里：{detail}。按最高角色生效，但名单会自相矛盾，请只保留一个。',
   'security.authoritySaved': '已写入 .env。重启后生效，命令见下方。',
   'security.nothingToSave': '名单没有改动。',
+  'security.authorityReadOnly': '当前身份是 {role}，可以查看名单但不能修改；需要 admin 或 owner 才能编辑。',
+  'security.restarting': '正在重启服务，约 5 秒…',
+  'security.restartDone': '已生效。',
+  'security.restartFailed': '60 秒内没有恢复，请手动执行上面的命令。',
   'security.authorityHint':
     '改动会写进服务端的 .env（SOAPBOT_OWNER_IDS / SOAPBOT_ADMIN_IDS / SOAPBOT_MEMBER_IDS），保存后需重启面板生效；first_run_owner 里的 owner 会被自动保留，防止把自己锁在门外。',
   'security.removeAria': '把 {id} 从 {role} 中移除',

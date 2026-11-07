@@ -692,6 +692,7 @@ def create_app() -> FastAPI:
         return JSONResponse(payload, status_code=200 if not problems else 503)
 
     from soapbot.api.personas import router as personas_growth_router
+    from soapbot.api.system import router as system_router
 
     app.include_router(auth_router)
     app.include_router(security_router)
@@ -699,6 +700,7 @@ def create_app() -> FastAPI:
     # After the admin router: both serve /api/personas, and the growth routes add a
     # sub-path rather than replacing anything.
     app.include_router(personas_growth_router)
+    app.include_router(system_router)
     app.include_router(plugins_router)
     app.include_router(bilibili_router)
     app.include_router(config_write_router)

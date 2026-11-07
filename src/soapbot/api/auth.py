@@ -477,20 +477,27 @@ async def auth_status(request: Request) -> dict:
     mode = "none"
     subject = ""
     expires_at = 0
+    role = "anonymous"
     if token and _token_service is not None:
         try:
             claims = _token_service.verify(token)
             mode, subject, expires_at = "token", claims.subject, claims.expires_at
+            role = claims.role
         except TokenError:
             mode = "invalid"
     elif is_loopback(request):
         mode = "loopback"
+        role = _loopback_role()
 
     bootstrap = _bootstrap
     return {
         "mode": mode,
         "subject": subject,
         "expires_at": expires_at,
+        # The panel needs this to decide whether to offer an edit affordance at all.
+        # Without it a member sees a working form that the server rejects with 403,
+        # which reads as a broken page rather than as a permission boundary.
+        "role": role,
         "loopback": is_loopback(request),
         "login_available": bool(bootstrap is not None and bootstrap.available),
         "init_token_generated": bool(bootstrap is not None and bootstrap.generated),

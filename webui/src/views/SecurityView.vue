@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
@@ -62,6 +62,37 @@ const authorityError = ref('')
 //: The command the server says restarts *this* deployment. Rendered verbatim: a
 //: hard-coded one named the wrong Windows task and made a successful save look broken.
 const restartHint = ref('')
+
+//: Saved lists only reach the running process after it restarts, and the panel reads
+//: its own copy at startup. So the panel asks for a restart and then watches the
+//: health endpoint; without this the operator sees the old list and concludes that
+//: nothing was saved.
+type RestartState = 'idle' | 'restarting' | 'done' | 'failed'
+const restartState = ref<RestartState>('idle')
+let restartAborted = false
+
+onUnmounted(() => {
+  restartAborted = true
+})
+
+async function waitForRestart(): Promise<void> {
+  const deadline = Date.now() + 60_000
+  while (!restartAborted && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    if (restartAborted) return
+    try {
+      const response = await fetch('/api/health', { cache: 'no-store' })
+      if (response.ok) {
+        restartState.value = 'done'
+        await access.reload()
+        return
+      }
+    } catch {
+      // degraded: the server is still down, keep polling until the deadline
+    }
+  }
+  if (!restartAborted) restartState.value = 'failed'
+}
 
 function seedDraft(): void {
   draft.value = {
@@ -169,7 +200,14 @@ async function saveAuthority(): Promise<void> {
     dirty.value = false
     authorityNote.value = t('security.authoritySaved')
     restartHint.value = String(body.restart_hint || '')
-    await access.reload()
+    restartState.value = 'restarting'
+    try {
+      await api.restartService()
+    } catch {
+      // ignored: the process may exit before the response lands, and the health poll
+      // decides whether it came back. Surfacing it would report an error on success.
+    }
+    void waitForRestart()
   } catch (error) {
     authorityError.value = (error as Error).message
   } finally {
@@ -386,6 +424,7 @@ async function revokeEveryToken(): Promise<void> {
             >
               {{ id }}
               <button
+                v-if="auth.canEditAuthority"
                 class="tag__remove"
                 type="button"
                 :aria-label="t('security.removeAria', { id, role })"
@@ -401,8 +440,10 @@ async function revokeEveryToken(): Promise<void> {
         </div>
 
         <!-- The edit affordance lives next to the list it edits: a separate "权限管理"
-             page would separate the decision from the state it changes. -->
-        <div class="row" style="flex-wrap: wrap; gap: 8px">
+             page would separate the decision from the state it changes. Everyone can
+             read the lists; only admin and above get the controls, because a form that
+             always answers 403 looks broken rather than forbidden. -->
+        <div v-if="auth.canEditAuthority" class="row" style="flex-wrap: wrap; gap: 8px">
           <select v-model="addRole" class="field" style="width: 110px" :aria-label="t('security.roleAria')">
             <option value="owner">owner</option>
             <option value="admin">admin</option>
@@ -430,11 +471,27 @@ async function revokeEveryToken(): Promise<void> {
             {{ authorityBusy ? t('security.saving') : t('security.save') }}
           </button>
         </div>
+        <p v-else class="hint" style="margin: 0">
+          {{ t('security.authorityReadOnly', { role: auth.role }) }}
+        </p>
         <p v-if="authorityNote" class="hint" style="margin: 0; color: var(--ok)">
           {{ authorityNote }}
           <span v-if="restartHint" class="mono" style="display: block; margin-top: 4px">
             {{ restartHint }}
           </span>
+        </p>
+        <p
+          v-if="restartState !== 'idle'"
+          class="hint"
+          role="status"
+          :style="{
+            margin: 0,
+            color: restartState === 'failed' ? 'var(--danger)' : 'var(--ink-2)',
+          }"
+        >
+          <span v-if="restartState === 'restarting'">{{ t('security.restarting') }}</span>
+          <span v-else-if="restartState === 'done'">{{ t('security.restartDone') }}</span>
+          <span v-else>{{ t('security.restartFailed') }}</span>
         </p>
         <p v-if="authorityError" class="hint" style="margin: 0; color: var(--danger)">
           {{ authorityError }}
