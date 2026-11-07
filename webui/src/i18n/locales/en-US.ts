@@ -78,6 +78,7 @@ export default {
   'common.loading': 'Loading…',
   'common.content': 'Content',
   'common.delete': 'Delete',
+  'common.loadMore': 'Load more',
   'common.cancel': 'Cancel',
   'common.session': 'Session',
   'common.plugin': 'Plugin',
@@ -419,6 +420,15 @@ export default {
   'memory.layers': 'Memory layers',
   'memory.unreadable': 'unreadable',
   'memory.disabled': 'Memory storage is disabled.',
+  'memory.rows': 'Memory rows',
+  'memory.layer': 'Layer',
+  'memory.scope': 'Scope',
+  'memory.scopeFilter': 'Filter by scope (blank for all)',
+  'memory.noRows': 'No memory rows yet. They appear once the bot extracts something.',
+  'memory.deleteMemoryConfirm':
+    'Delete memory #{id}? This cannot be undone, and it is also removed from the search index and the scene card.',
+  'memory.deleteMemoryAria': 'Delete memory #{id}',
+  'memory.memoryDeleted': 'Deleted memory #{id}.',
   'memory.timeline': 'Timeline',
   'memory.pickSession': 'Pick a session on the left.',
   'memory.pickSessionHint': 'Click any row on the left to see the messages archived for that period.',
@@ -671,6 +681,10 @@ export default {
   'config.wakeWords': 'Wake words',
   'config.maxChars': 'Max chars',
   'config.temperature': 'Temperature',
+  'config.temperatureHint':
+    '0.0–2.0; higher is more random. Leave blank to use the provider default (usually 0.8).',
+  'config.temperatureRange': 'Temperature must be between 0.0 and 2.0.',
+  'config.temperatureInvalid': 'Temperature must be a number, or blank for the default.',
   'config.default': 'default',
   'config.systemPrompt': 'System prompt',
   'config.systemPromptTruncated': 'System prompt (truncated)',
@@ -973,6 +987,22 @@ export default {
   'config.hint.key':
     'API Key: paste the string, or write env:VAR_NAME to keep it in .env. The Test button never sends the key.',
 
+  'quickstart.aiTitle': 'Connect a model',
+  'quickstart.qqTitle': 'Sign in to QQ',
+  'quickstart.done': 'Configured',
+  'quickstart.todo': 'Not yet',
+  'quickstart.online': '{n} online',
+  'quickstart.offline': 'Signed out',
+  'quickstart.aiMissing':
+    'With no provider, every reply fails. Add at least one model service before the bot can speak.',
+  'quickstart.aiDone': '{n} provider(s) configured.',
+  'quickstart.aiGo': 'Configure',
+  'quickstart.aiManage': 'View providers',
+  'quickstart.qqMissing':
+    'No QQ account is signed in yet. Scan the code and the bot can start receiving messages.',
+  'quickstart.qqDone': '{n} protocol end(s) online — messages can arrive.',
+  'quickstart.qqGo': 'Scan to sign in',
+  'quickstart.qqManage': 'View protocol ends',
   'setup.title': 'First-run checks',
   'setup.stepsTitle': 'Three steps (works even if you have never deployed anything)',
   'setup.step1':
