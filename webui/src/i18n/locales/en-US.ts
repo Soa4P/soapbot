@@ -284,7 +284,7 @@ export default {
   'plugins.blockedVersion': 'Blocked',
   'plugins.blockedReason': 'Blocked because: {reason}',
   'plugins.blockedInstall': 'This version is blocked; installing it will be refused.',
-  'plugins.installedBlocked': 'Installed {version} is blocked',
+  'plugins.installedBlocked': 'Installed {version} is blocked; reload and restart will refuse to load it',
   'plugins.officialEmpty': 'No plugins ship with this build.',
   'plugins.communityHint': 'The index lists names and versions only; download a package and upload it above to install.',
 

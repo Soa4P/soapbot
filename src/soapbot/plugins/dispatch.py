@@ -705,6 +705,23 @@ class PluginManager:
             timeout=settings.plugin_index_timeout_seconds,
             ttl=settings.plugin_index_ttl_seconds,
         )
+        # The loader owns *execution*, so it must own the decision not to execute a
+        # blocked release. Hand it a live view of the merged blocklist rather than a
+        # snapshot taken at construction: a block added to the index after startup has
+        # to take effect on the next load/reload without a process restart.
+        self.loader.blocked_provider = self._blocked_map
+
+    async def _blocked_map(self) -> dict[str, str]:
+        """Shipped blocks plus whatever the index learned, for the loader to enforce."""
+        try:
+            snapshot = await self.index.snapshot()
+            return snapshot.blocked
+        except Exception:
+            # `snapshot()` is written to degrade rather than raise, but a broken
+            # transport or a bug in a future index format must not stop every plugin
+            # from loading. The shipped list is still enforced by the loader itself.
+            logger.exception("community index unavailable for the plugin blocklist")
+            return dict(self.index.local_blocked)
 
     def install_sender(self, sender) -> None:
         self.sender = sender

@@ -353,10 +353,18 @@ async def revoke(name: str, request: Request) -> dict:
 
 @router.post("/{name}/load")
 async def load_plugin(name: str, request: Request) -> dict:
+    from soapbot.plugins.loader import PluginBlockedError
+
     _authorize(request)
     manager = _manager()
     try:
         loaded = await manager.load(name)
+    except PluginBlockedError as exc:
+        # A host decision, not plugin-authored text, so it is safe to name. The reason
+        # itself is intentionally omitted: it comes from a third-party index and the
+        # full text is already available in the plugin listing's `blocked` field.
+        logger.warning("blocked plugin load refused name=%s", name)
+        raise HTTPException(status_code=403, detail="plugin version is blocked") from exc
     except Exception as exc:
         # Type only. A plugin's exception text is attacker-influenced and lands in
         # a browser; echoing it would be a leak and possibly an XSS vector.
@@ -369,10 +377,15 @@ async def load_plugin(name: str, request: Request) -> dict:
 
 @router.post("/{name}/reload")
 async def reload_plugin(name: str, request: Request) -> dict:
+    from soapbot.plugins.loader import PluginBlockedError
+
     _authorize(request)
     manager = _manager()
     try:
         loaded = await manager.reload(name)
+    except PluginBlockedError as exc:
+        logger.warning("blocked plugin reload refused name=%s", name)
+        raise HTTPException(status_code=403, detail="plugin version is blocked") from exc
     except Exception as exc:
         logger.warning("plugin reload failed name=%s err=%s", name, type(exc).__name__)
         raise HTTPException(

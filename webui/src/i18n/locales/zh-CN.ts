@@ -298,7 +298,7 @@ export default {
   'plugins.blockedVersion': '已封禁',
   'plugins.blockedReason': '封禁原因：{reason}',
   'plugins.blockedInstall': '该版本已被封禁，安装会被拒绝。',
-  'plugins.installedBlocked': '当前安装的 {version} 已被封禁',
+  'plugins.installedBlocked': '当前安装的 {version} 已被封禁；重载或重启后将拒绝加载',
   'plugins.officialEmpty': '没有随包发布的插件。',
   'plugins.communityHint': '索引只列出名称与版本；安装请下载包后从上方上传。',
 

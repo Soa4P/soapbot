@@ -210,37 +210,10 @@ def _format_value(value: Any) -> str:
     return text_value
 
 
-def _rewrite_env(existing: str, updates: dict[str, str]) -> str:
-    """Return ``existing`` with ``KEY=value`` lines updated or appended.
-
-    Rewrites in place rather than regenerating the file from ``Settings``: ``.env`` is
-    the operator's file. It may contain comments explaining why a value is what it is,
-    variables this build does not read, and ordering that means something to whoever
-    wrote it. Regenerating would silently delete all of that — and the operator would
-    find out when they next opened the file, long after the panel "saved" it.
-    """
-    lines = existing.splitlines()
-    remaining = dict(updates)
-
-    out: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            out.append(line)
-            continue
-        key = stripped.split("=", 1)[0].strip()
-        if key in remaining:
-            out.append(f"{key}={remaining.pop(key)}")
-        else:
-            out.append(line)
-
-    if remaining:
-        if out and out[-1].strip():
-            out.append("")
-        for key, value in remaining.items():
-            out.append(f"{key}={value}")
-
-    return "\n".join(out) + "\n"
+# The rewrite lives in core now, alongside the transaction lock that must wrap it.
+# Kept as a module attribute because handlers (and their tests) import it from here;
+# pointing at the same function means there is still exactly one implementation.
+_rewrite_env = config_write.rewrite_env
 
 
 @router.post("")
@@ -306,11 +279,8 @@ async def write_settings(
         raise HTTPException(status_code=400, detail=safe_detail(400, exc, "settings")) from exc
 
     path = _env_path()
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-    updated = _rewrite_env(existing, updates)
-
     try:
-        config_write.write_atomic(path, updated)
+        config_write.write_env_updates(path, updates)
     except OSError as exc:
         get_audit_log().record(
             kind="config",

@@ -183,9 +183,9 @@ async def write_authority(
     would otherwise be empty, exactly like ``build_authority``. Inserting it on every
     save was the bug that made a deleted account come back.
     """
-    from soapbot.api.settings import _env_path, _rewrite_env
+    from soapbot.api.settings import _env_path
     from soapbot.config import settings
-    from soapbot.core.config_write import write_atomic
+    from soapbot.core import config_write
 
     role = _role_of(auth)
     locale = request_locale(request)
@@ -259,7 +259,7 @@ async def write_authority(
     }
     path = _env_path()
     try:
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        config_write.write_env_updates(path, updates)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
 
@@ -273,8 +273,6 @@ async def write_authority(
             f"from={request.client.host if request.client else '-'}"
         ),
     )
-    write_atomic(path, _rewrite_env(existing, updates))
-
     return {
         "ok": True,
         "restart_required": True,
@@ -322,8 +320,8 @@ async def write_group_scope(
     Admin rather than owner: this narrows where the bot is *seen*, it cannot grant
     anyone a role or open a private channel.
     """
-    from soapbot.api.settings import _env_path, _rewrite_env
-    from soapbot.core.config_write import write_atomic
+    from soapbot.api.settings import _env_path
+    from soapbot.core import config_write
 
     role = _role_of(auth)
     locale = request_locale(request)
@@ -351,7 +349,7 @@ async def write_group_scope(
     }
     path = _env_path()
     try:
-        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        config_write.write_env_updates(path, updates)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=t("api.write_failed", locale)) from exc
 
@@ -365,7 +363,6 @@ async def write_group_scope(
             f"from={request.client.host if request.client else '-'}"
         ),
     )
-    write_atomic(path, _rewrite_env(existing, updates))
 
     # Same shape as the GET, computed the same way. Reporting `collect or reply` here
     # while the GET reports only `collect` made the panel show "all groups" right after
