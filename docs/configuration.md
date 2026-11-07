@@ -159,6 +159,10 @@ pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 | `SOAPBOT_STRICT_STARTUP` | `true` | 已启用的适配器构造失败就在启动阶段中止，而不是几小时后表现为「连不上」。面板专用、允许可选适配器坏掉也要起服务的部署才设 `false` |
 | `SOAPBOT_SLOW_CALL_MS` | `3000` | Provider 调用超过这个毫秒数才记 WARNING；低于阈值记 DEBUG。每次成功调用都记 INFO 会让真正慢的那一次淹没在数字里 |
 | `SOAPBOT_MAX_REGEX_INPUT_CHARS` | `20000` | 任何跑在用户或运维输入上的正则，匹配前先按这个长度截断。标准库 `re` 没有超时参数，这是不加依赖时唯一可验证的上界 |
+| `SOAPBOT_MAX_INCOMING_CHARS` | `8000` | 单条入站消息渲染后的总字符上限，超出部分截断而不是丢弃。下游每一段（注入筛查、召回、拼 prompt）的耗时都与这个长度成正比，没有上限时一条 5 MB 的粘贴会让整组消息排队 |
+| `SOAPBOT_MAX_SEGMENTS` | `64` | 单条消息的段数上限。OneBot 允许客户端发任意长的数组，每段都会被渲染、筛查、落库各走一遍 |
+| `SOAPBOT_MAX_SEGMENT_CHARS` | `4000` | 单个文本段的长度上限，防止一段巨长文本藏在很小的段数里 |
+| `SOAPBOT_MAX_JSON_DEPTH` | `32` | 解析不可信 JSON 前的嵌套深度上限。`json` 本身是递归的，几千层 `[[[[` 会抛 `RecursionError`——它不是 `ValueError`，绕过所有 `except JSONDecodeError`，把解码所在的协程直接打死 |
 
 `SOAPBOT_STRICT_LOOPBACK_AUTH` 与 `SOAPBOT_COOKIE_SECURE` 是安全边界，不是性能旋钮：
 前者不能靠环境变量随手关掉来获得「方便」，后者设错会直接导致无法登录。两项的当前值都

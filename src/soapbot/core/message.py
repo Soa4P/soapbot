@@ -19,6 +19,31 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from soapbot.config import settings
+
+
+def scrub_surrogates(text: str) -> str:
+    """Replace lone surrogates so the string can be encoded and logged.
+
+    A JSON payload can carry ``\\ud800`` on its own — the escape is legal, the resulting
+    code point is not. Python happily holds it in a ``str``, and then three separate
+    things break later, in three unrelated places: ``.encode('utf-8')`` raises
+    ``UnicodeEncodeError`` when the message is persisted, ``json.dumps`` produces a
+    document no other parser accepts, and the log formatter raises *inside* the error
+    handler while reporting the first failure.
+
+    ``errors="replace"`` through UTF-8 is the cheapest correct normalisation: it turns the
+    unpaired half of a pair into U+FFFD and leaves every valid character — including
+    astral-plane emoji, which are a legitimate surrogate *pair* in UTF-16 terms — intact.
+    """
+    if not text:
+        return text
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "replace").decode("utf-8", "replace")
+    return text
+
 
 class SegmentType(StrEnum):
     TEXT = "text"
@@ -167,6 +192,82 @@ class IncomingMessage:
     explicitly.** When ``False``, the guard stage denies every permission, so an
     unauthenticated peer cannot benefit from a fabricated ``user_id`` or ``role``.
     """
+
+    truncated: bool = False
+    """Whether normalisation dropped or shortened anything.
+
+    Kept on the event rather than only logged, because the *reply* may need to say so:
+    a bot that silently answers the first 8000 characters of a 40 000-character paste
+    looks like it ignored the rest of the question.
+    """
+
+    def __post_init__(self) -> None:
+        """Bound and sanitise the message at construction, once.
+
+        Deliberately here and not in a pipeline stage. Every adapter builds one of these,
+        and the stages that follow — injection screening, recall, prompt assembly — all
+        cost time proportional to the text. A limit enforced in one stage would still let
+        the earlier stages pay for the oversized input, and a limit enforced in each
+        adapter would be four copies that drift.
+
+        The three limits answer three different attacks, so they are separate knobs:
+        many segments (array flood), one huge segment (single-string flood), and a large
+        total (death by a thousand segments).
+        """
+        self.adapter = scrub_surrogates(self.adapter)
+        self.group_name = scrub_surrogates(self.group_name)
+        self.sender.nickname = scrub_surrogates(self.sender.nickname)
+        self.sender.card = scrub_surrogates(self.sender.card)
+
+        max_segments = settings.max_segments
+        if len(self.segments) > max_segments:
+            # Keep the head: an @mention and the first line of text are at the front, and
+            # those decide whether this message is even addressed to the bot. Dropping the
+            # tail loses content; dropping the head would lose the addressing.
+            self.segments = self.segments[:max_segments]
+            self.truncated = True
+
+        budget = settings.max_incoming_chars
+        per_segment = settings.max_segment_chars
+        remaining = budget
+        kept: list[MessageSegment] = []
+        for segment in self.segments:
+            if segment.type is SegmentType.TEXT:
+                text = scrub_surrogates(str(segment.data.get("text", "")))
+                allowed = min(per_segment, remaining)
+                if len(text) > allowed:
+                    text = text[:allowed]
+                    self.truncated = True
+                remaining -= len(text)
+                if remaining <= 0:
+                    # Budget exhausted. Stop rather than keep appending empty text
+                    # segments, which would inflate the segment count for nothing.
+                    if text:
+                        kept.append(MessageSegment(SegmentType.TEXT, {"text": text}))
+                    self.truncated = True
+                    break
+                segment.data["text"] = text
+            kept.append(segment)
+        self.segments = kept
+
+    @property
+    def is_blank(self) -> bool:
+        """Nothing worth running through the pipeline.
+
+        Three shapes arrive looking like a message and are not one: ``content: null``
+        (an empty segment list), ``content: "   "`` (whitespace), and a bare ``@bot``
+        with no text. All three would otherwise reach the model, cost a provider call,
+        and produce a reply to nothing — which reads as the bot talking to itself.
+
+        An image is *not* blank: the model can describe it, so it is a real message even
+        with no text. A face or a file is blank, because nothing downstream can use it.
+        """
+        if any(segment.type is SegmentType.IMAGE for segment in self.segments):
+            return False
+        return not any(
+            segment.type is SegmentType.TEXT and str(segment.data.get("text", "")).strip()
+            for segment in self.segments
+        )
 
     @property
     def session_key(self) -> str:
