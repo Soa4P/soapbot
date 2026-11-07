@@ -90,6 +90,7 @@ export default {
   'common.cancel': '取消',
   'common.session': '会话',
   'common.plugin': '插件',
+  'common.plugins': '插件',
   'common.failed': '失败',
   'common.processed': '已处理',
   'common.intercepted': '被拦截',
@@ -246,7 +247,6 @@ export default {
 
   // ---------------------------------------------------------------- 03 plugins
   'plugins.warning': '加载插件等于在本进程内执行第三方代码。列表只做发现，不会自动加载任何插件。',
-  'plugins.perCapability': '批准是按能力逐项授予的',
   'plugins.trust': '信任',
   'plugins.trusted': '可信',
   'plugins.untrusted': '未声明',
@@ -278,6 +278,29 @@ export default {
   'plugins.revokeNoteRunning': '将保留当前运行实例，但下次启动不会再加载。',
   'plugins.revokeNoteStopped': '该插件当前未运行，撤销后也不会再自动加载。',
   'plugins.deleteConfirm': '永久删除插件「{name}」的目录？此操作会同时撤销批准，无法通过界面恢复。',
+
+  // 插件生态分区：官方 / 社区 / 已安装
+  'plugins.tabOfficial': '官方',
+  'plugins.tabCommunity': '社区',
+  'plugins.tabInstalled': '已安装',
+  'plugins.officialNote': '随 soapbot 一起发布，与主程序同一次审核。仍然需要逐项授权能力。',
+  'plugins.communityNote':
+    '来自社区索引，只做发现。安装仍需下载后上传，并在本地逐项授权；索引不能代替这一步。',
+  'plugins.channelOfficial': '官方',
+  'plugins.channelCommunity': '社区',
+  'plugins.discoverUnavailable': '无法获取社区索引：{reason}',
+  'plugins.discoverNoIndex': '未配置社区索引。设置 SOAPBOT_PLUGIN_INDEX_URL 后可在此发现插件。',
+  'plugins.discoverEmpty': '社区索引里还没有插件。',
+  'plugins.refreshIndex': '重新获取',
+  'plugins.latest': '最新',
+  'plugins.versions': '版本',
+  'plugins.source': '索引来源',
+  'plugins.blockedVersion': '已封禁',
+  'plugins.blockedReason': '封禁原因：{reason}',
+  'plugins.blockedInstall': '该版本已被封禁，安装会被拒绝。',
+  'plugins.installedBlocked': '当前安装的 {version} 已被封禁',
+  'plugins.officialEmpty': '没有随包发布的插件。',
+  'plugins.communityHint': '索引只列出名称与版本；安装请下载包后从上方上传。',
 
   // ---------------------------------------------------------------- 04 security
   'security.eventsInWindow': '事件（窗口内）',

@@ -4,6 +4,7 @@ entry: main:AdminPlugin
 description: 运维演示插件：需要管理员权限，演示加密存储与出站限制
 author: soapbot
 trust: trusted
+channel: official
 min_host_version: 0.1.0
 capabilities:
   - command

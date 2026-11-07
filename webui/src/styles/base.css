@@ -672,6 +672,62 @@ table.data td.key {
     background 120ms ease;
 }
 
+/* Segmented control (plugin tabs). A row of buttons rather than a real tab widget: the
+   panels are already in the DOM and swapping them is a `v-if`, so the ARIA tab pattern
+   would add roving-tabindex bookkeeping for no behavioural gain. `aria-selected` on a
+   `role="tab"` inside `role="tablist"` is still correct for screen readers. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.segmented__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.segmented__item:hover {
+  color: var(--ink-2);
+}
+
+.segmented__item:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.segmented__item--on {
+  color: var(--brand);
+  background: var(--surface);
+  border-color: var(--border-strong);
+  font-weight: 600;
+}
+
+.segmented__count {
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.segmented__item--on .segmented__count {
+  color: var(--brand);
+}
+
 .btn:hover:not(:disabled) {
   border-color: var(--brand);
   color: var(--brand);

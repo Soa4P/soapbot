@@ -281,6 +281,28 @@ export const api = {
     request<any>(`/api/plugins/${encodeURIComponent(name)}/revoke`, { method: 'POST' }),
   deletePlugin: (name: string) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  /**
+   * The community catalogue. Read-only discovery: nothing here is installable in one
+   * click, and the response is advisory — `available: false` means "cannot discover",
+   * which the page renders as a note, not an error.
+   */
+  discoverPlugins: (refresh = false) =>
+    request<{
+      available: boolean
+      entries: {
+        name: string
+        versions: string[]
+        summary: string
+        author: string
+        homepage: string
+        repository: string
+        latest: string
+      }[]
+      blocked: Record<string, string>
+      source: string
+      fetched_at: number
+      error: string
+    }>(`/api/plugins/discover${refresh ? '?refresh=true' : ''}`),
 
   // External tool sources. `refreshMcp` is a write, not a read: it spawns the
   // configured server processes again and re-decides which tools the model may see.

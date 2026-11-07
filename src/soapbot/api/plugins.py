@@ -129,11 +129,19 @@ async def install_plugin(request: Request) -> dict:
     payload = await request.body()
     manager = _manager()
     loader = manager.loader
+    # The blocklist is consulted here, not inside the installer: the local file always
+    # applies, the community index only when it happened to be reachable. A stale cache
+    # is used on purpose — a version blocked fifteen minutes ago must still be refused
+    # when the network is down, and the local list is the part that cannot be emptied.
+    blocked = dict(manager.index.local_blocked)
+    snapshot = await manager.index.snapshot()
+    blocked.update(snapshot.blocked)
     try:
         result = install_from_zip(
             payload,
             loader.plugins_dir,
             host_version=loader.host_version,
+            blocked=blocked,
         )
     except InstallError as exc:
         logger.warning("plugin install rejected: %s", exc)
@@ -200,11 +208,46 @@ async def list_plugins(request: Request) -> dict:
             }
         )
 
+    # An installed plugin can be on a version that was blocked *after* it was installed.
+    # That is not something to auto-uninstall — removing working code because a list
+    # changed is its own outage — but it must be visible, because "this is known bad and
+    # still running" is the state an operator needs to see.
+    snapshot = await manager.index.snapshot()
+    for item in installed:
+        reason = snapshot.blocked_reason(item["name"], item["version"])
+        if reason:
+            item["blocked"] = {"version": item["version"], "reason": reason}
+
     return {
         "installed": installed,
         "rejected": [{"path": p, "reason": r} for p, r in report.rejected],
         "loaded": sorted(loader.loaded),
+        "index": {
+            "available": snapshot.available,
+            "source": snapshot.source,
+            "error": snapshot.error,
+            "entries": [e.to_dict() for e in snapshot.entries],
+        },
     }
+
+
+@router.get("/discover")
+async def discover(request: Request, refresh: bool = Query(False)) -> dict:
+    """The community catalogue, read-only.
+
+    Deliberately separate from the installed listing: this is the only endpoint that
+    touches the network, so a slow or hostile index cannot delay the page that shows what
+    is actually on disk. ``refresh=true`` bypasses the cache, which is what the panel's
+    "重新获取" button sends.
+
+    Nothing here is installable in one click. The response carries names, versions and
+    digests; the operator still downloads a package and uploads it through
+    ``POST /install``, which is where approval lives.
+    """
+    _authorize(request)
+    manager = _manager()
+    snapshot = await manager.index.snapshot(force=refresh)
+    return snapshot.to_dict()
 
 
 @router.post("/{name}/approve")

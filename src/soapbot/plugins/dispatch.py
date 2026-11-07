@@ -693,6 +693,19 @@ class PluginManager:
         self.sender = None
         """Optional ``async (session_key, text) -> None`` installed by the runtime."""
 
+        from soapbot.config import settings
+        from soapbot.plugins.index_client import IndexClient
+
+        # Discovery only. The index never approves, installs or loads anything; it is
+        # here so the panel can say "a newer version exists" and so blocked versions
+        # reach the installer. Constructed unconditionally (with an empty URL when the
+        # operator configured none) so callers never branch on "is discovery wired".
+        self.index = IndexClient(
+            settings.plugin_index_url,
+            timeout=settings.plugin_index_timeout_seconds,
+            ttl=settings.plugin_index_ttl_seconds,
+        )
+
     def install_sender(self, sender) -> None:
         self.sender = sender
         for loaded in self.loader.loaded.values():

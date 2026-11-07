@@ -118,6 +118,13 @@ _FRAME_QUEUE_PUT_TIMEOUT = 0.5
 #: Sentinel pushed when the channel closes, so a waiter never blocks forever.
 _CHANNEL_CLOSED = object()
 
+#: How long a cancelled reader/watcher/stderr task may take to actually stop.
+#:
+#: Cancellation is cooperative, and these tasks call ``_kill_tree`` synchronously, so
+#: the request is not observed until that call returns. Bounded so a wedged kill
+#: cannot hold shutdown (and the lifecycle lock) hostage; see ``_cancel_tasks``.
+_TASK_CANCEL_GRACE = 2.0
+
 
 class FrameTooLargeError(IsolationError):
     """A frame exceeded the byte budget; carries the actual size and the limit."""
@@ -1044,13 +1051,23 @@ class PluginWorker:
         # All three tasks are cancellable. Cancelling a proc.wait() waiter only
         # cancels that one future in the transport's exit-waiter list; it does not
         # disturb the transport or any other waiter.
+        #
+        # The await is bounded, and that is the whole point of the timeout. ``cancel()``
+        # is a *request*: a task sitting in a synchronous call — ``_drain_stdout`` calls
+        # ``_kill_tree`` inline, which shells out to ``taskkill`` on Windows — does not
+        # observe it until it next reaches an await point. An unbounded ``await task``
+        # then waits for that call to return, so a kill that never returns makes
+        # shutdown hang forever with no deadline anywhere above it. One stuck reader
+        # would hold the supervisor's lifecycle lock and every later stop with it.
+        # Abandoning the task after the grace period is safe: it is already cancelled,
+        # and the process it was reading is being killed by the same shutdown path.
         for name in ("_reader_task", "_exit_task", "_stderr_task"):
             task = getattr(self, name)
             if task is None:
                 continue
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+                await asyncio.wait_for(task, timeout=_TASK_CANCEL_GRACE)
             setattr(self, name, None)
 
     def _reject_frame(self, reason: str) -> None:

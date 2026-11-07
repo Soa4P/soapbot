@@ -122,6 +122,21 @@ class TrustLevel(StrEnum):
     """First-party. Capabilities still enforced (defence in depth)."""
 
 
+class Channel(StrEnum):
+    """Where a plugin came from, for the panel's three-way split.
+
+    This is a *label*, not a trust decision. ``official`` means the package lives in
+    this repository and was reviewed with it; it does not grant capabilities, and a
+    plugin that lies about its channel gains nothing — the approval flow and the
+    capability gate never read this field. The panel uses it to keep "shipped with
+    soapbot" and "found on the community index" from looking like the same thing,
+    because an operator who cannot tell them apart will assume both were reviewed.
+    """
+
+    OFFICIAL = "official"
+    COMMUNITY = "community"
+
+
 class Capability(StrEnum):
     """Everything a plugin may do. Any API surface is gated by one of these."""
 
@@ -196,6 +211,7 @@ class PluginManifest:
 
     min_host_version: str = "0.1.0"
     trust: TrustLevel = TrustLevel.UNTRUSTED
+    channel: Channel = Channel.COMMUNITY
     homepage: str = ""
     manifest_digest: str = ""
     """SHA-256 of the raw manifest bytes, for tamper detection."""
@@ -223,6 +239,7 @@ class PluginManifest:
             "requires": list(self.requires),
             "min_host_version": self.min_host_version,
             "trust": self.trust.value,
+            "channel": self.channel.value,
             "homepage": self.homepage,
             "manifest_digest": self.manifest_digest,
         }
@@ -377,6 +394,18 @@ def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
     if not _VERSION_RE.match(min_host):
         raise ManifestError("min_host_version is not a valid version")
 
+    # Unknown channels are rejected rather than defaulted: a typo like `offical` would
+    # otherwise silently land in the community bucket, which is the *weaker* claim. Fail
+    # closed on the label the panel uses to describe provenance.
+    channel_raw = str(raw.get("channel", Channel.COMMUNITY.value)).strip().lower()
+    try:
+        channel = Channel(channel_raw)
+    except ValueError as exc:
+        raise ManifestError(
+            f"unknown channel {channel_raw!r}; expected one of "
+            f"{', '.join(c.value for c in Channel)}"
+        ) from exc
+
     return PluginManifest(
         name=name,
         version=version,
@@ -387,6 +416,7 @@ def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
         requires=_parse_requires(raw.get("requires")),
         min_host_version=min_host,
         trust=trust,
+        channel=channel,
         homepage=_check_text(raw.get("homepage", ""), label="homepage", max_len=300),
         manifest_digest=digest,
     )
