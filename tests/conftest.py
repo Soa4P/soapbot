@@ -6,7 +6,10 @@ can assert token budgets and image payloads instead of trusting logs.
 
 from __future__ import annotations
 
+import contextlib
+import faulthandler
 import json
+import os
 from typing import Any
 
 import pytest
@@ -17,6 +20,59 @@ from soapbot.config import settings
 from soapbot.providers.base import ProviderConfig
 from soapbot.providers.openai_compat import OpenAICompatProvider
 from soapbot.providers.router import ProviderRouter
+
+#: Per-test wall-clock ceiling before the suite dumps every thread's stack and exits.
+#:
+#: This exists because of a measured failure mode, not as general hygiene. A Windows
+#: CI job sat on one test for ~69 minutes and was cancelled by the runner, which
+#: reported `##[error]The operation was canceled.` and nothing else — no test name, no
+#: traceback, no clue. Six consecutive pushes produced six identical red badges and
+#: zero information, because a hang is invisible to pytest: it has no deadline, so it
+#: waits forever and the *runner* decides when to stop, long after the useful moment.
+#:
+#: ``faulthandler.dump_traceback_later(..., exit=True)`` is the stdlib answer: it needs
+#: no plugin, prints the stack of every thread to stderr, then hard-exits. A hang
+#: therefore becomes a fast, self-explaining failure instead of a silent timeout.
+#: Overridable so a slow machine can raise it, and disabled with 0.
+#:
+#: Deliberately *not* prefixed ``SOAPBOT_``: ``Settings`` rejects unknown ``SOAPBOT_``
+#: variables outright, so a ``SOAPBOT_TEST_*`` knob would abort collection with a
+#: validation error instead of configuring anything.
+_HANG_LIMIT_SECONDS = float(os.environ.get("PYTEST_HANG_SECONDS", "180"))
+
+
+#: Where the watchdog writes its dump.
+#:
+#: A file, not stderr, and that detail was measured rather than assumed. pytest
+#: replaces fd 2 with a capture file for the whole session, so a dump written to stderr
+#: — or to ``os.dup(2)`` taken after that swap — lands in a capture buffer that is
+#: discarded when the process hard-exits. The first attempt at this watchdog fired
+#: exactly on schedule and printed *nothing*, which is worse than no watchdog: it looks
+#: like the hang was fixed. A dedicated file is outside pytest's capture machinery, so
+#: the stack survives, and CI prints the file when the step fails.
+_HANG_DUMP_PATH = os.environ.get("PYTEST_HANG_DUMP", "pytest-hang-dump.log")
+_DUMP_STREAM = None
+if _HANG_LIMIT_SECONDS > 0:
+    with contextlib.suppress(OSError, ValueError):
+        _DUMP_STREAM = open(_HANG_DUMP_PATH, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+
+
+@pytest.fixture(autouse=True)
+def _no_test_may_hang():
+    """Arm a hard deadline around every test, so a hang reports itself.
+
+    Deliberately ``exit=True``: the point is to stop the run at the hang, not to let
+    it continue for another hour and hide which test did it.
+    """
+    if _HANG_LIMIT_SECONDS > 0:
+        faulthandler.dump_traceback_later(
+            _HANG_LIMIT_SECONDS, exit=True, file=_DUMP_STREAM
+        )
+    try:
+        yield
+    finally:
+        if _HANG_LIMIT_SECONDS > 0:
+            faulthandler.cancel_dump_traceback_later()
 
 
 @pytest.fixture(autouse=True)

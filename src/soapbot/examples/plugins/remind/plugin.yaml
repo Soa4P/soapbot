@@ -4,6 +4,7 @@ entry: main:RemindPlugin
 description: 查询本群记忆与知识库（只读）
 author: soapbot
 trust: trusted
+channel: official
 min_host_version: 0.1.0
 
 # Three capabilities, three different risks — declared separately so the operator

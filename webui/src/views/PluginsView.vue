@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import { ApiError, api } from '@/api/client'
+import CommunityPlugins from '@/components/CommunityPlugins.vue'
 import { t } from '@/i18n'
 import { useAsync } from '@/lib/useAsync'
 
@@ -12,11 +13,49 @@ const busy = ref('')
 const approving = ref('')
 const selected = ref<string[]>([])
 
+/**
+ * Three tabs rather than one list, because the three groups carry different promises.
+ * "Official" means reviewed with the release; "community" means a JSON file somewhere
+ * says it exists; "installed" means it is on this disk right now. Flattening them into
+ * one table lets an operator read the middle one as if it were the first.
+ */
+type Tab = 'official' | 'community' | 'installed'
+const tab = ref<Tab>('installed')
+
 /** Sensitive capabilities get an explicit warning, not just a checkbox. */
 const RISKY = new Set(['http', 'memory_read', 'kb_read', 'send', 'storage', 'cron'])
 
 const installed = computed<any[]>(() => listing.data.value?.installed ?? [])
 const exported = computed<any[]>(() => installed.value.filter((p) => p.api))
+
+/**
+ * `channel` is a label from the manifest, not a trust decision — the server never reads
+ * it when deciding what to load. A plugin that omits it lands in community, which is the
+ * weaker claim, so a forgotten field cannot make something look reviewed.
+ */
+const official = computed<any[]>(() => installed.value.filter((p) => p.channel === 'official'))
+const communityInstalled = computed<any[]>(() =>
+  installed.value.filter((p) => p.channel !== 'official'),
+)
+
+/** The rows the table shows. The table markup is shared; only the source changes. */
+const visible = computed<any[]>(() => {
+  if (tab.value === 'official') return official.value
+  if (tab.value === 'community') return communityInstalled.value
+  return installed.value
+})
+
+/**
+ * Counts are shown on the two installed tabs only. The community tab's count lives in
+ * the catalogue, which is fetched lazily by its own component — putting a number here
+ * would mean fetching the index just to render a tab label, and a slow index would then
+ * delay a page that has nothing to do with it.
+ */
+const tabs = computed(() => [
+  { id: 'official' as Tab, label: 'plugins.tabOfficial', count: official.value.length },
+  { id: 'community' as Tab, label: 'plugins.tabCommunity', count: communityInstalled.value.length },
+  { id: 'installed' as Tab, label: 'plugins.tabInstalled', count: installed.value.length },
+])
 
 /** `trust` is free text from the manifest; only the declared value is meaningful. */
 function trustLabel(value: string): string {
@@ -111,13 +150,35 @@ async function remove(plugin: any): Promise<void> {
 
   <section class="panel">
     <div class="panel__head">
-      <h2>{{ t('common.installed') }}</h2>
+      <h2>{{ t('common.plugins') }}</h2>
       <span class="tag">{{ installed.length }}</span>
       <span class="strip__spacer" />
-      <span class="hint">{{ t('plugins.perCapability') }}</span>
+      <div class="segmented" role="tablist" :aria-label="t('common.plugins')">
+        <button
+          v-for="item in tabs"
+          :key="item.id"
+          class="segmented__item"
+          :class="{ 'segmented__item--on': tab === item.id }"
+          type="button"
+          role="tab"
+          :aria-selected="tab === item.id"
+          @click="tab = item.id"
+        >
+          {{ t(item.label) }}
+          <span v-if="item.count !== null" class="segmented__count">{{ item.count }}</span>
+        </button>
+      </div>
     </div>
-    <div class="panel__body flush">
-      <table v-if="installed.length" class="data"><caption class="visually-hidden">{{ t('common.installed') }}</caption>
+
+    <div v-if="tab === 'community'" class="panel__body">
+      <CommunityPlugins />
+    </div>
+
+    <div v-else class="panel__body flush">
+      <p v-if="tab === 'official'" class="hint" style="padding: 10px 16px 0">
+        {{ t('plugins.officialNote') }}
+      </p>
+      <table v-if="visible.length" class="data"><caption class="visually-hidden">{{ t('common.plugins') }}</caption>
         <thead>
           <tr>
             <th scope="col">{{ t('common.plugin') }}</th>
@@ -130,9 +191,14 @@ async function remove(plugin: any): Promise<void> {
           </tr>
         </thead>
         <tbody>
-          <template v-for="plugin in installed" :key="plugin.name">
+          <template v-for="plugin in visible" :key="plugin.name">
             <tr>
-              <td class="key">{{ plugin.name }}</td>
+              <td class="key">
+                {{ plugin.name }}
+                <span class="tag" style="margin-left: 6px">
+                  {{ plugin.channel === 'official' ? t('plugins.channelOfficial') : t('plugins.channelCommunity') }}
+                </span>
+              </td>
               <td>{{ plugin.version || '—' }}</td>
               <td>
                 <span class="tag" :class="plugin.trust === 'trusted' ? '' : 'bad'">
@@ -164,6 +230,16 @@ async function remove(plugin: any): Promise<void> {
                   :title="t('plugins.codeChangedHint', { mode: plugin.approval.integrity_mode })"
                 >
                   {{ t('plugins.codeChanged') }}
+                </span>
+                <!-- A version blocked *after* it was installed. Not auto-uninstalled:
+                     deleting running code because a list changed is its own outage. But
+                     "known bad and still running" is exactly what an operator must see. -->
+                <span
+                  v-if="plugin.blocked"
+                  class="tag bad"
+                  :title="t('plugins.blockedReason', { reason: plugin.blocked.reason })"
+                >
+                  {{ t('plugins.installedBlocked', { version: plugin.blocked.version }) }}
                 </span>
               </td>
               <td>
@@ -278,9 +354,16 @@ async function remove(plugin: any): Promise<void> {
           </template>
         </tbody>
       </table>
+      <!-- The empty state names the tab that is empty. "No plugins installed" on the
+           official tab is misleading when three community plugins are installed. The
+           community tab has no table at all — it renders `CommunityPlugins` — so only
+           these two branches are reachable. -->
       <div v-else class="empty">
-        {{ t('plugins.empty') }}
-        <div class="mono" style="margin-top: 6px">data/plugins/&lt;name&gt;/plugin.yaml</div>
+        <template v-if="tab === 'official'">{{ t('plugins.officialEmpty') }}</template>
+        <template v-else>
+          {{ t('plugins.empty') }}
+          <div class="mono" style="margin-top: 6px">data/plugins/&lt;name&gt;/plugin.yaml</div>
+        </template>
       </div>
     </div>
   </section>

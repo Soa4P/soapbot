@@ -82,6 +82,7 @@ export default {
   'common.cancel': 'Cancel',
   'common.session': 'Session',
   'common.plugin': 'Plugin',
+  'common.plugins': 'Plugins',
   'common.failed': 'Failed',
   'common.processed': 'Processed',
   'common.intercepted': 'Blocked',
@@ -232,7 +233,6 @@ export default {
 
   // ---------------------------------------------------------------- 03 plugins
   'plugins.warning': 'Loading a plugin means executing third-party code inside this process. This list only discovers plugins; nothing is loaded automatically.',
-  'plugins.perCapability': 'Approval is granted capability by capability',
   'plugins.trust': 'Trust',
   'plugins.trusted': 'Trusted',
   'plugins.untrusted': 'Not declared',
@@ -264,6 +264,29 @@ export default {
   'plugins.revokeNoteRunning': 'The running instance is kept, but it will not load again after a restart.',
   'plugins.revokeNoteStopped': 'This plugin is not running now, and it will not auto-load after being revoked.',
   'plugins.deleteConfirm': 'Permanently delete the directory of "{name}"? This also revokes approval and cannot be undone from this panel.',
+
+  // Plugin ecosystem tabs: official / community / installed
+  'plugins.tabOfficial': 'Official',
+  'plugins.tabCommunity': 'Community',
+  'plugins.tabInstalled': 'Installed',
+  'plugins.officialNote': 'Shipped with soapbot and reviewed alongside it. Capabilities still have to be granted one by one.',
+  'plugins.communityNote':
+    'Listed by the community index, for discovery only. Installing still means downloading the package, uploading it, and granting capabilities locally — the index cannot replace that step.',
+  'plugins.channelOfficial': 'Official',
+  'plugins.channelCommunity': 'Community',
+  'plugins.discoverUnavailable': 'Cannot reach the community index: {reason}',
+  'plugins.discoverNoIndex': 'No community index configured. Set SOAPBOT_PLUGIN_INDEX_URL to discover plugins here.',
+  'plugins.discoverEmpty': 'The community index lists no plugins yet.',
+  'plugins.refreshIndex': 'Refresh',
+  'plugins.latest': 'Latest',
+  'plugins.versions': 'Versions',
+  'plugins.source': 'Index source',
+  'plugins.blockedVersion': 'Blocked',
+  'plugins.blockedReason': 'Blocked because: {reason}',
+  'plugins.blockedInstall': 'This version is blocked; installing it will be refused.',
+  'plugins.installedBlocked': 'Installed {version} is blocked',
+  'plugins.officialEmpty': 'No plugins ship with this build.',
+  'plugins.communityHint': 'The index lists names and versions only; download a package and upload it above to install.',
 
   // ---------------------------------------------------------------- 04 security
   'security.eventsInWindow': 'Events (in window)',

@@ -117,7 +117,28 @@ jobs:
       - name: Test
         # No `data/` directory exists in a fresh checkout. That is the point: the
         # suite must pass without it, which is exactly what used to fail.
+        #
+        # `--timeout-method` is not used: the deadline lives in tests/conftest.py and
+        # is armed per test, so it needs no plugin and cannot be forgotten in a
+        # one-off `pytest path::test` invocation.
         run: python -m pytest -q
+
+      - name: Hang dump
+        # The conftest watchdog hard-exits the run when a single test exceeds its
+        # deadline, and writes the stack to a file rather than stderr — pytest owns
+        # fd 2, so a stderr dump is captured and thrown away on exit. Without this
+        # step the file would be invisible and the red badge would again say only
+        # "The operation was canceled."
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f pytest-hang-dump.log ]; then
+            echo "::group::test hang dump"
+            cat pytest-hang-dump.log
+            echo "::endgroup::"
+          else
+            echo "no hang dump: the failure was an assertion, not a stall"
+          fi
 
   types:
     # Advisory: reports the current type-error count so it cannot grow silently,

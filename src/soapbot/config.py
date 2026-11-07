@@ -568,6 +568,28 @@ class Settings(BaseSettings):
     that is reported as ``unknown`` and never blocked, in either mode.
     """
 
+    plugin_index_url: str = ""
+    """Community plugin index, fetched read-only for *discovery* only.
+
+    Empty means "no index": the panel shows installed plugins and nothing else. Setting
+    it does **not** make anything installable — the index lists versions and digests, and
+    installation still goes through the local upload → approve → load path. Treating a
+    remote list as a trust source would move the approval decision to whoever controls
+    the JSON file, which is exactly the decision this project keeps local.
+    """
+
+    plugin_index_timeout_seconds: Annotated[float, Field(ge=0.5, le=15.0)] = 5.0
+    """Hard ceiling on one index fetch.
+
+    Short because this runs while an operator is waiting for the plugin page. A slow
+    index is a broken index; the page renders "cannot discover" and stays usable.
+    """
+
+    plugin_index_ttl_seconds: Annotated[int, Field(ge=60, le=86400)] = 900
+    """How long a fetched index is reused. Fifteen minutes: long enough that opening the
+    page repeatedly does not hammer someone else's server, short enough that a revoked
+    version shows up in the same session."""
+
     allow_unknown_private: bool = False
     """Allow private messages from users not on ``private_allowlist``.
 

@@ -71,3 +71,7 @@ Thumbs.db
 
 # Throwaway drivers written while testing a host (never part of the project).
 .tmp-*
+
+# Watchdog output from tests/conftest.py. Written only when a test exceeds its
+# deadline, and printed by CI at that point; it is a diagnostic, not a source file.
+pytest-hang-dump.log
