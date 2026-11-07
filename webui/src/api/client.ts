@@ -313,6 +313,13 @@ export const api = {
       inherited_owner: string
     }>('/api/security/authority', { method: 'POST', body: JSON.stringify(payload) }),
 
+  /** Ask the server to restart. It answers *before* exiting, so a resolved promise
+   * means "scheduled", not "restarted": the caller has to watch /api/health. */
+  restartService: () =>
+    request<{ ok: boolean; scheduled: boolean; hint: string }>('/api/system/restart', {
+      method: 'POST',
+    }),
+
   /** Which persona card speaks in which group; written to .env, applied on restart. */
   writePersonaBinding: (payload: { group_personas: string }) =>
     request<{ ok: boolean; restart_required: boolean; group_personas: string }>(
@@ -447,6 +454,8 @@ export const api = {
 export interface AuthStatus {
   mode: 'none' | 'token' | 'loopback' | 'invalid'
   subject: string
+  /** Effective role of this session; the panel gates edit affordances on it. */
+  role: string
   expires_at: number
   loopback: boolean
   login_available: boolean

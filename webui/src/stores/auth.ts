@@ -22,6 +22,17 @@ export const useAuthStore = defineStore('auth', () => {
   const mode = computed(() => status.value?.mode ?? 'none')
   const authenticated = computed(() => mode.value === 'token' || mode.value === 'loopback')
   const canLogin = computed(() => Boolean(status.value?.login_available))
+  const role = computed(() => status.value?.role ?? 'anonymous')
+  /**
+   * Whether this session may change who holds which role.
+   *
+   * The server enforces it; this only decides whether to show an editable form. A
+   * member who sees a working form that answers 403 reads the page as broken rather
+   * than as a permission boundary.
+   */
+  const canEditAuthority = computed(
+    () => role.value === 'admin' || role.value === 'owner',
+  )
 
   async function refresh(): Promise<void> {
     try {
@@ -89,6 +100,8 @@ export const useAuthStore = defineStore('auth', () => {
     mode,
     authenticated,
     canLogin,
+    role,
+    canEditAuthority,
     refresh,
     login,
     logout,

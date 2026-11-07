@@ -22,11 +22,23 @@ def in_container() -> bool:
         return False
 
 
-def restart_hint() -> str:
+def service_name() -> str:
+    """The task or unit name this deployment actually registered.
+
+    Shared by the hint and the restart endpoint: two places deriving the name
+    separately is how the panel ended up telling operators to restart a task that
+    does not exist.
+    """
     name = os.environ.get("SOAPBOT_SERVICE_NAME", "").strip()
+    if name:
+        return name
+    return "SoapbotBot" if os.name == "nt" else "soapbot"
+
+
+def restart_hint() -> str:
     if in_container():
         return "docker compose restart soapbot"
+    name = service_name()
     if os.name == "nt":
-        task = name or "SoapbotBot"
-        return f"schtasks /End /TN {task} && schtasks /Run /TN {task}"
-    return f"systemctl restart {name or 'soapbot'}"
+        return f"schtasks /End /TN {name} && schtasks /Run /TN {name}"
+    return f"systemctl restart {name}"
