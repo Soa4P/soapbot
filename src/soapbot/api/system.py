@@ -24,6 +24,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 from fastapi import APIRouter, Depends
 
@@ -47,19 +48,39 @@ _pending_restarts: set[asyncio.Task] = set()
 
 
 def _spawn_windows_restart() -> None:
-    """Hand the restart to a process that survives this one."""
+    """Hand the restart to a process that survives this one.
+
+    The task name is passed as ``argv`` to ``schtasks``, never interpolated into a
+    command line. It comes from ``SOAPBOT_SERVICE_NAME``, which an operator sets in
+    ``.env`` — and ``cmd.exe /c`` treats ``&``, ``|`` and ``>`` as operators even
+    inside double quotes in some positions. A name like ``Soapbot & calc`` would have
+    run ``calc`` as this process was exiting, with the service account's rights. Two
+    separate ``Popen`` calls with a literal argv list remove the shell entirely, so
+    the name can only ever be a task name.
+    """
     task = service_name()
-    command = (
-        f'timeout /t 1 /nobreak >nul & schtasks /End /TN "{task}" & '
-        f'timeout /t 2 /nobreak >nul & schtasks /Run /TN "{task}"'
-    )
     flags = 0
     if sys.platform == "win32":
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
             subprocess, "DETACHED_PROCESS", 0
         )
-    # Fixed argv; the task name comes from configuration, not from a request.
-    subprocess.Popen(["cmd.exe", "/c", command], creationflags=flags, close_fds=True)
+
+    def _detached(*args: str) -> None:
+        subprocess.Popen(
+            ["schtasks", *args],
+            creationflags=flags,
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    # End, then Run, as two children rather than one shell pipeline. The task manager
+    # needs the old process gone before /Run starts a new one; the small sleeps give
+    # it that gap without a shell to sequence them.
+    _detached("/End", "/TN", task)
+    time.sleep(1.0)
+    _detached("/Run", "/TN", task)
 
 
 def _perform_now() -> None:
