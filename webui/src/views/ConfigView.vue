@@ -118,8 +118,32 @@ function closeCard(): void {
   cardNote.value = ''
 }
 
+/**
+ * Temperature is the one persona field the bot will not let the model rewrite: it is an
+ * operational knob, not a personality trait, and a self-editing loop that can raise its own
+ * sampling temperature is a loop that drifts. So it is edited here, by a human, and the
+ * bounds are enforced twice — once here so the operator sees the problem next to the field,
+ * and once in ``PersonaWrite`` because a browser is not an authority.
+ *
+ * ``null`` is meaningful: it means "use the provider default", which is why an empty input
+ * is valid and zero is not the same thing as blank.
+ */
+const temperatureError = computed(() => {
+  const value = card.value?.temperature
+  if (value === null || value === undefined) return ''
+  if (typeof value !== 'number' || Number.isNaN(value)) return t('config.temperatureInvalid')
+  if (value < 0 || value > 2) return t('config.temperatureRange')
+  return ''
+})
+
 async function saveCard(): Promise<void> {
   if (!card.value) return
+  // Checked before the request, not after the 422: the server's message names the field by
+  // its wire name, and the operator is looking at a label.
+  if (temperatureError.value) {
+    cardError.value = temperatureError.value
+    return
+  }
   cardBusy.value = true
   cardError.value = ''
   cardNote.value = ''
@@ -843,7 +867,21 @@ async function applyChanges(): Promise<void> {
         </label>
         <label class="field-label">
           <span class="eyebrow">{{ t('config.temperature') }}</span>
-          <input v-model.number="card.temperature" class="field" type="number" step="0.1" min="0" max="2" />
+          <input
+            v-model.number="card.temperature"
+            class="field"
+            type="number"
+            step="0.1"
+            min="0"
+            max="2"
+            :aria-invalid="Boolean(temperatureError)"
+            :aria-describedby="temperatureError ? 'persona-temperature-error' : 'persona-temperature-hint'"
+            :style="temperatureError ? { borderColor: 'var(--danger)' } : undefined"
+          />
+          <span v-if="temperatureError" id="persona-temperature-error" class="hint" style="color: var(--danger)">
+            {{ temperatureError }}
+          </span>
+          <span v-else id="persona-temperature-hint" class="hint">{{ t('config.temperatureHint') }}</span>
         </label>
         <label class="field-label">
           <span class="eyebrow">{{ t('config.locale') }}</span>

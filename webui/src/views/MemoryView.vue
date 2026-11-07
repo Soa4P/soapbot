@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
@@ -7,6 +7,9 @@ import GroupScopeCard from '@/components/GroupScopeCard.vue'
 import { t } from '@/i18n'
 import { datetime, fromNow, num, truncate } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 const sessions = useAsync(() => api.memorySessions(100))
 const stats = useAsync(() => api.memoryStats())
@@ -65,6 +68,77 @@ const documents = computed<any[]>(() => knowledge.data.value?.documents ?? [])
 function roleLabel(role: string): string {
   return role === 'assistant' ? t('memory.roleAssistant') : t('memory.roleUser')
 }
+
+// ------------------------------------------------------------- memory rows
+//
+// The page could show counts per layer and the archived messages of a session, but never
+// the memory rows themselves. That made the one destructive action the bot supports —
+// `/forget <id>` — reachable only from the group chat, by someone who is usually not the
+// operator reading this page. The list below is the missing half: the rows, their ids,
+// and a delete button that calls the same ownership-checked path.
+//
+// The list is paged rather than unbounded. A busy group accumulates tens of thousands of
+// rows, and rendering them all would freeze the tab long before it helped anyone.
+const MEMORY_PAGE = 50
+
+const memoryRows = ref<any[]>([])
+const memoryLoading = ref(false)
+const memoryError = ref('')
+const memoryNotice = ref('')
+const memoryFilter = ref('')
+const memoryHasMore = ref(false)
+const deletingId = ref<number | null>(null)
+
+async function loadMemories(reset = true): Promise<void> {
+  memoryLoading.value = true
+  memoryError.value = ''
+  if (reset) memoryNotice.value = ''
+  try {
+    const offset = reset ? 0 : memoryRows.value.length
+    const result = await api.memoryItems({
+      scope: memoryFilter.value.trim(),
+      limit: MEMORY_PAGE,
+      offset,
+    })
+    const batch = result.memories ?? []
+    memoryRows.value = reset ? batch : [...memoryRows.value, ...batch]
+    // A full page means there may be more; a short page is the end. Asking for a total
+    // would be a second query for a number the button does not need.
+    memoryHasMore.value = batch.length === MEMORY_PAGE
+  } catch (err) {
+    memoryError.value = (err as Error).message
+    if (reset) memoryRows.value = []
+    memoryHasMore.value = false
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function removeMemory(row: any): Promise<void> {
+  if (!window.confirm(t('memory.deleteMemoryConfirm', { id: row.id }))) return
+  deletingId.value = row.id
+  memoryError.value = ''
+  memoryNotice.value = ''
+  try {
+    await api.deleteMemory(row.id)
+    memoryRows.value = memoryRows.value.filter((item: any) => item.id !== row.id)
+    memoryNotice.value = t('memory.memoryDeleted', { id: row.id })
+    // The layer counts and the scene cards were derived from this row, so both are now
+    // stale. Reloading them is cheaper than reasoning about which one changed.
+    await Promise.all([stats.reload(), scenes.reload()])
+  } catch (err) {
+    memoryError.value = (err as Error).message
+  } finally {
+    deletingId.value = null
+  }
+}
+
+// Deferred to mount rather than run at setup: the auth store may not have answered
+// /api/auth/status yet, and the endpoint is gated on the role it reports. Firing early
+// would show a 403 banner on a page the operator is allowed to read.
+onMounted(() => {
+  void loadMemories()
+})
 
 // ---------------------------------------------------------------- knowledge write
 //
@@ -424,6 +498,78 @@ function confidencePct(value: number): string {
       </div>
     </section>
   </div>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('memory.rows') }}</h2>
+      <span class="tag">{{ memoryRows.length }}</span>
+      <span class="strip__spacer" />
+      <input
+        v-model="memoryFilter"
+        class="field"
+        style="width: 200px"
+        :placeholder="t('memory.scopeFilter')"
+        maxlength="200"
+        @keydown.enter.prevent="loadMemories()"
+      />
+      <button class="btn ghost" :disabled="memoryLoading" @click="loadMemories()">
+        {{ memoryLoading ? t('common.loading') : t('common.refresh') }}
+      </button>
+    </div>
+    <div class="panel__body flush">
+      <div v-if="memoryError" class="panel__body">
+        <div class="error-banner">{{ memoryError }}</div>
+      </div>
+      <div v-else-if="memoryLoading && !memoryRows.length" class="empty">
+        {{ t('common.loading') }}
+      </div>
+      <div v-else-if="!memoryRows.length" class="empty">{{ t('memory.noRows') }}</div>
+      <div v-else class="scroll">
+        <table class="data"><caption class="visually-hidden">{{ t('memory.rows') }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">{{ t('memory.layer') }}</th>
+              <th scope="col">{{ t('memory.scope') }}</th>
+              <th scope="col">{{ t('common.content') }}</th>
+              <th scope="col">{{ t('memory.recent') }}</th>
+              <th scope="col" />
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in memoryRows" :key="row.id">
+              <td class="num">{{ row.id }}</td>
+              <td><span class="tag">{{ row.layer }}</span></td>
+              <td class="key">{{ row.scope || '—' }}</td>
+              <td style="max-width: 520px">{{ truncate(row.content, 160) }}</td>
+              <td style="white-space: nowrap">
+                {{ row.created_at ? fromNow(row.created_at) : '—' }}
+              </td>
+              <td>
+                <!-- Only admin and above see the control: the endpoint answers 403 for
+                     anyone else, and a button that always fails reads as a broken page. -->
+                <button
+                  v-if="auth.canManageMemory"
+                  class="btn ghost"
+                  :disabled="deletingId === row.id"
+                  :aria-label="t('memory.deleteMemoryAria', { id: row.id })"
+                  @click="removeMemory(row)"
+                >
+                  {{ t('common.delete') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="memoryHasMore" class="panel__body">
+        <button class="btn ghost" :disabled="memoryLoading" @click="loadMemories(false)">
+          {{ t('common.loadMore') }}
+        </button>
+      </div>
+      <div v-if="memoryNotice" class="panel__body hint">{{ memoryNotice }}</div>
+    </div>
+  </section>
 
   <section class="panel">
     <div class="panel__head">

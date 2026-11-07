@@ -663,6 +663,152 @@ async def memory_stats(_: dict = Depends(require_api_auth)) -> dict:
     return {"layers": layers, "total": total}
 
 
+@router.get("/memory/items")
+async def memory_items(
+    request: Request,
+    scope: str = Query("", max_length=200),
+    layer: str = Query("", max_length=16),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    auth: dict = Depends(require_api_auth),
+) -> dict:
+    """The memory rows themselves, newest first.
+
+    Separate from ``/memory/timeline``, which returns archived *messages*. The two were
+    conflated in the panel's mental model — "the memory page shows what the bot
+    remembers" — but a message is what was said and a memory is what was distilled from
+    it, and only the latter can be deleted by id.
+
+    Gated on ``MANAGE_CONFIG`` like the scene endpoints: memory content is verbatim
+    conversation, which is the most private data in the system. A read-only member
+    listing every scope would be a worse leak than the one the scene gate closed.
+    """
+    _require_scene_access(auth, request, action="memory_list")
+    runtime = _runtime()
+    store = runtime.memory
+    if store is None:
+        return {"memories": [], "count": 0}
+
+    from soapbot.memory.store import MemoryLayer
+
+    wanted: MemoryLayer | None = None
+    if layer:
+        try:
+            wanted = MemoryLayer(layer)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=t("api.layer_invalid", request_locale(request), layer=layer),
+            ) from exc
+
+    items = await store.list_memories(
+        scope=scope.strip(), layer=wanted, limit=limit, offset=offset
+    )
+    return {
+        "memories": [
+            {
+                "id": item.id,
+                "layer": item.layer,
+                "scope": item.scope,
+                "subject": item.subject,
+                "content": item.content,
+                "importance": item.importance,
+                "created_at": item.created_at,
+            }
+            for item in items
+        ],
+        "count": len(items),
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@router.delete("/memory/{memory_id}")
+async def delete_memory(
+    memory_id: int,
+    request: Request,
+    auth: dict[str, Any] = Depends(require_api_auth),
+) -> dict:
+    """Delete one memory row by id.
+
+    The panel could list memories but never remove one, so a wrong or stale memory had
+    exactly one removal path: typing ``/forget <id>`` into the group chat. That is the
+    wrong audience — the operator reading the memory page is the person who noticed the
+    problem, and the chat command is also scoped to the *caller's* conversation, which
+    an operator is usually not in.
+
+    Two rules carried over from ``/forget``, because they are the reason that command is
+    safe:
+
+    * **Ownership is checked before the delete.** An integer id is trivially enumerable,
+      so the endpoint must not delete by primary key alone.
+    * **"Missing" and "not yours" answer identically** — same status, same text. A
+      distinct 403 for the second case would turn this into an existence oracle, which
+      is precisely the probe ``/forget`` was fixed to close.
+
+    Unlike ``/forget`` the operator token reaches every scope: the panel is already
+    showing those rows, and hiding the delete behind a scope the caller cannot name
+    would make the button a decoration. The audit entry records the scope, never the
+    content.
+    """
+    role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_MEMORY, Role.ADMIN)
+    locale = request_locale(request)
+    if role.rank < minimum.rank:
+        get_audit_log().record(
+            kind="authz",
+            action="memory_delete",
+            outcome="deny",
+            role=role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(
+            status_code=403, detail=t("api.role_required", locale, role=minimum.value)
+        )
+
+    runtime = _runtime()
+    store = runtime.memory
+    if store is None:
+        raise HTTPException(status_code=503, detail=t("api.memory_disabled", locale))
+
+    item = await store.get_memory(memory_id)
+    if item is None:
+        get_audit_log().record(
+            kind="memory",
+            action="memory_delete",
+            outcome="deny",
+            role=role.value,
+            detail=f"id={memory_id} missing",
+        )
+        raise HTTPException(status_code=404, detail=t("api.memory_not_found", locale))
+
+    removed = await store.delete_memory(memory_id)
+    if not removed:
+        # Lost a race with another deleter. Same answer as "never existed": the caller's
+        # intent is satisfied, and a different message would describe our concurrency.
+        raise HTTPException(status_code=404, detail=t("api.memory_not_found", locale))
+
+    # The card and portrait were derived from this row, so they now describe evidence
+    # that no longer exists. Best-effort: the delete already happened, and reporting a
+    # failure here would make the operator retry a delete that succeeded.
+    scene = getattr(runtime, "scene", None)
+    if scene is not None and item.scope:
+        try:
+            await scene.unlink_all(memory_id)
+            await scene.refresh(item.scope)
+        except Exception as exc:  # pragma: no cover - derived view must not fail the call
+            logger.warning("scene refresh failed after memory delete: %s", exc)
+
+    get_audit_log().record(
+        kind="memory",
+        action="memory_delete",
+        outcome="allow",
+        role=role.value,
+        detail=f"id={memory_id} scope={item.scope or '-'}",
+    )
+    return {"ok": True, "id": memory_id}
+
+
 @router.get("/knowledge")
 async def list_knowledge(_: dict = Depends(require_api_auth)) -> dict:
     """Uploaded documents and their chunk counts (titles only, no bodies)."""

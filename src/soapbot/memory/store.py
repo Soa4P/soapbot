@@ -655,6 +655,47 @@ class MemoryStore:
                 stmt = stmt.where(MemoryRow.layer == str(layer))
             return int((await session.execute(stmt)).scalar_one())
 
+    async def list_memories(
+        self,
+        *,
+        scope: str = "",
+        layer: MemoryLayer | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MemoryItem]:
+        """Recent memories, optionally narrowed to one scope or layer.
+
+        Exists because the panel could show *counts* per layer and the archived
+        *messages* of a session, but never the memory rows themselves — the only way to
+        see one was to read the database, and the only way to remove one was
+        ``/forget`` in the group chat. A management page that cannot show the thing it
+        manages is a dashboard, not a tool.
+
+        Ordered by ``id`` descending rather than ``created_at``: the id is the primary
+        key and the value the delete endpoint takes, so the list order matches the
+        handles the operator is about to use. ``created_at`` can tie across a batch
+        insert, which would make paging skip or repeat rows.
+        """
+        async with self.db.session_factory()() as session:
+            stmt = select(MemoryRow).order_by(MemoryRow.id.desc()).limit(limit).offset(offset)
+            if scope:
+                stmt = stmt.where(MemoryRow.scope == scope)
+            if layer is not None:
+                stmt = stmt.where(MemoryRow.layer == str(layer))
+            rows = (await session.execute(stmt)).scalars().all()
+        return [
+            MemoryItem(
+                id=row.id,
+                layer=row.layer,
+                content=row.content,
+                scope=row.scope,
+                subject=row.subject,
+                importance=row.importance,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
     async def get_memory(self, memory_id: int) -> MemoryItem | None:
         """Fetch one memory regardless of scope.
 
