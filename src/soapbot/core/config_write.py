@@ -35,6 +35,7 @@ results, so the same code is used by the endpoint and by the tests without an ap
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import difflib
 import hashlib
@@ -42,7 +43,8 @@ import logging
 import os
 import stat
 import tempfile
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -495,6 +497,105 @@ def write_atomic(path: Path, text: str) -> None:
         if was_readonly and path.exists():
             os.chmod(path, mode if mode is not None else 0o444)
     logger.info("configuration written: %s (%d bytes)", path, len(text))
+
+
+#: Serialises the *whole* read-modify-write transaction, not just the final replace.
+#: ``write_atomic`` makes one replace atomic, but two saves that both start from the
+#: same file contents still lose whichever one finishes first. A `threading.Lock` is
+#: required (rather than `asyncio.Lock`) because FastAPI may run a handler in a worker
+#: thread, and an asyncio lock is bound to one event loop.
+_ENV_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def env_transaction(path: Path) -> Iterator[None]:
+    """Hold a process-wide *and* cross-process lock around a ``.env`` update.
+
+    The cross-process half matters with more than one uvicorn worker: a thread lock
+    cannot see into another process, and both workers would still read the same old
+    file. A sidecar ``<name>.lock`` file is used with the OS's advisory lock, which the
+    kernel releases even if the process dies holding it — so there is no stale lock to
+    clean up, unlike an ``O_EXCL`` sentinel.
+
+    Failing to acquire the lock raises rather than silently degrading to "no lock":
+    a save that reports success while another writer may be in flight is exactly the
+    lost-update bug this exists to prevent.
+    """
+    with _ENV_LOCK:
+        lock_path = path.with_name(path.name + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                # msvcrt.locking() needs at least one lockable byte in the file.
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    with contextlib.suppress(OSError):
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    with contextlib.suppress(OSError):
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def write_env_updates(path: Path, updates: Mapping[str, str]) -> str:
+    """Update ``KEY=value`` lines in a ``.env`` under one transaction.
+
+    The single entry point every runtime writer must use. Four endpoints used to hand-
+    roll ``read_text -> _rewrite_env -> write_atomic``; with no shared lock, a save of
+    the authority list and a simultaneous save of group scope each rebuilt the file
+    from the same pre-save text, and the last writer silently erased the other's keys.
+
+    Rewrites in place rather than regenerating from ``Settings``: the operator's
+    comments, unknown variables and line order all survive.
+    """
+    with env_transaction(path):
+        existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+        updated = rewrite_env(existing, dict(updates))
+        write_atomic(path, updated)
+        return updated
+
+
+def rewrite_env(existing: str, updates: Mapping[str, str]) -> str:
+    """Return ``existing`` with ``KEY=value`` lines updated or appended.
+
+    This is the pure string half of :func:`write_env_updates`, kept separate so it can
+    be tested without touching the filesystem or a lock.
+    """
+    lines = existing.splitlines()
+    remaining = dict(updates)
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            out.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in remaining:
+            out.append(f"{key}={remaining.pop(key)}")
+        else:
+            out.append(line)
+    if remaining:
+        if out and out[-1].strip():
+            out.append("")
+        for key, value in remaining.items():
+            out.append(f"{key}={value}")
+    return "\n".join(out) + "\n"
 
 
 def check_secret_resolvable(value: Any, *, field_name: str) -> str:
