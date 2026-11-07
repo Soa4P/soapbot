@@ -174,11 +174,14 @@ async def write_authority(
 ) -> dict:
     """Replace the owner/admin/member lists, then say ``restart_required``.
 
-    Owner-only, and guarded against the classic self-lockout: the effective owner set
-    after the write must not be empty, and a ``first_run_owner`` configured in the
-    environment is carried into the written list (it stops being consulted the moment
-    ``owner_ids`` is non-empty, so dropping it here would silently demote the one person
-    who can undo the mistake).
+    Admin-level: anyone who can already change configuration can change who holds
+    which role. Reading stays open to every signed-in operator, because "why can I
+    not see the list" was a recurring question.
+
+    Guarded against the classic self-lockout: the effective owner set after the write
+    must not be empty. ``first_run_owner`` is a *fallback* only — used when the list
+    would otherwise be empty, exactly like ``build_authority``. Inserting it on every
+    save was the bug that made a deleted account come back.
     """
     from soapbot.api.settings import _env_path, _rewrite_env
     from soapbot.config import settings
@@ -186,7 +189,7 @@ async def write_authority(
 
     role = _role_of(auth)
     locale = request_locale(request)
-    if role.rank < Role.OWNER.rank:
+    if role.rank < Role.ADMIN.rank:
         _get_audit_log().record(
             kind="authz",
             action="authority_write",
@@ -194,21 +197,20 @@ async def write_authority(
             role=role.value,
             detail=f"from={request.client.host if request.client else '-'}",
         )
-        raise HTTPException(status_code=403, detail=t("api.role_required", locale, role="owner"))
+        raise HTTPException(status_code=403, detail=t("api.role_required", locale, role="admin"))
 
     owners = _clean_ids(payload.owners)
     admins = _clean_ids(payload.admins)
     members = _clean_ids(payload.members)
 
-    # The first-run owner is re-inserted on every write so the panel can never lock
-    # itself out. It has to happen *before* the conflict check: inserting it afterwards
-    # could put the same account in ``owners`` and ``admins`` — the exact state this
-    # check exists to prevent — and the operator would have no way to fix it, because
-    # that account is not in their payload.
+    # ``first_run_owner`` fills an empty list so the panel cannot lock itself out, and
+    # only then. It must happen *before* the conflict check: inserting it afterwards
+    # could put the same account in ``owners`` and ``admins`` — the exact state that
+    # check exists to prevent — and the operator could not fix it, because that account
+    # is not in their payload.
     inherited = normalize_id(settings.first_run_owner)
-    if inherited:
-        if inherited not in owners:
-            owners.insert(0, inherited)
+    if inherited and not owners:
+        owners = [inherited]
         # Owner outranks both, so a stale entry in a lower list is dropped rather than
         # reported as a conflict the operator cannot resolve.
         admins = [qq for qq in admins if qq != inherited]

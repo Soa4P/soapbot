@@ -69,13 +69,14 @@ async def test_three_way_conflict_names_every_role(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_inherited_owner_is_not_reported_as_a_conflict(monkeypatch, tmp_path) -> None:
-    """The first-run owner is re-inserted, so it must be reconciled *before* the check.
+async def test_the_inherited_owner_is_not_forced_into_a_non_empty_owner_list(
+    monkeypatch, tmp_path
+) -> None:
+    """It is a bootstrap fallback, not a permanent member.
 
-    It used to be inserted after the conflict check, which meant an operator who listed
-    that same account as an admin got a 400 naming a conflict they could not fix — the
-    account is not in their payload, so removing it from the form is impossible. Owner
-    outranks admin, so the stale lower entry is dropped silently instead.
+    It used to be inserted on every save. An operator who deleted that account saw it
+    come back at the head of the list, which reads as "the panel ignored my delete".
+    With a non-empty owner list the payload is taken as written.
     """
     env = tmp_path / ".env"
     env.write_text("", encoding="utf-8")
@@ -93,7 +94,36 @@ async def test_the_inherited_owner_is_not_reported_as_a_conflict(monkeypatch, tm
         _auth(),
     )
 
-    assert "999" in body["owners"]
+    assert body["owners"] == ["111"], "the operator's list wins; 999 is not re-inserted"
+    assert body["admins"] == ["999"], "and it is not silently promoted either"
+
+
+@pytest.mark.asyncio
+async def test_the_inherited_owner_fills_an_empty_list_without_a_conflict(
+    monkeypatch, tmp_path
+) -> None:
+    """The fallback path must reconcile before the conflict check.
+
+    When the payload leaves owners empty, the inherited account is inserted *and* has
+    to be dropped from any lower list. Doing it after the check would 400 on a conflict
+    the operator cannot fix — the account is not in their payload, so there is nothing
+    in the form to remove.
+    """
+    env = tmp_path / ".env"
+    env.write_text("", encoding="utf-8")
+    monkeypatch.setattr("soapbot.api.settings._env_path", lambda: env)
+    monkeypatch.setattr("soapbot.core.config_write.write_atomic", lambda *_a, **_k: None)
+    from soapbot.config import settings as live_settings
+
+    monkeypatch.setattr(live_settings, "first_run_owner", "999")
+
+    body = await security_api.write_authority(
+        _patch(owners=[], admins=["999"], members=[]),
+        _Request(),  # type: ignore[arg-type]
+        _auth(),
+    )
+
+    assert body["owners"] == ["999"]
     assert "999" not in body["admins"], "owner outranks admin; the lower entry is dropped"
 
 
