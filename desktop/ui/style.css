@@ -1,0 +1,143 @@
+/*
+ * Same palette and radii as the panel (`webui/src/styles/base.css`), copied rather than
+ * imported: the shell must render its explanation while the panel is unreachable, so it
+ * cannot depend on a stylesheet served by the thing that is down.
+ */
+:root {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #64748b;
+  --brand: #1d4ed8;
+  --danger: #b42318;
+  --border: #e2e8f0;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg);
+  color: var(--ink-2);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.shell {
+  width: 100%;
+  max-width: 560px;
+}
+
+.head h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sub {
+  margin: 0 0 20px;
+  color: var(--ink-3);
+}
+
+.sub::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  vertical-align: middle;
+}
+
+.shell[data-state="online"] .sub::before {
+  background: #047857;
+}
+
+.shell[data-state="offline"] .sub::before {
+  background: var(--danger);
+}
+
+.card {
+  padding: 20px 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.card p {
+  margin: 0 0 12px;
+}
+
+.label {
+  margin-bottom: 6px;
+  color: var(--ink-3);
+}
+
+pre {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 7px 14px;
+  font: inherit;
+  color: #ffffff;
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.94);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+button.ghost {
+  color: var(--ink-2);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.hint {
+  margin: 12px 0 0;
+  color: var(--ink-3);
+}

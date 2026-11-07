@@ -1,10 +1,11 @@
 name: ci
 
-# Three jobs, because they fail for different reasons and an operator reading a red
+# Five jobs, because they fail for different reasons and an operator reading a red
 # badge should not have to guess which one:
 #   backend  — does the code work
 #   frontend — does the panel build (a broken panel means `soapbot start` serves a
 #              "not built" page on a deployment that has no npm)
+#   desktop  — does the Tauri shell still compile against Tauri 2
 #   package  — does the *wheel* contain what the tests tested
 #
 # The package job exists because of a measured defect: the built panel was inside a
@@ -90,6 +91,13 @@ jobs:
       - name: Accessibility (static rules)
         run: python scripts/check_a11y.py
 
+      - name: Desktop shell (static rules)
+        # The Tauri shell is a build-time artifact and `cargo` is not on this job's
+        # image, but the mistakes that matter here are policy, not compilation: a
+        # wildcard CSP, a remote script, a shell that spawns a second backend on the
+        # same port. Those are readable from the config alone.
+        run: python scripts/check_desktop.py
+
       - name: Doc links
         # Splitting README into docs/ broke four links in one commit; a dead link is
         # invisible until somebody clicks it.
@@ -170,6 +178,33 @@ jobs:
 
       - name: Build panel
         run: cd webui && npm run build
+
+  desktop:
+    # `cargo check`, not `cargo build --release` and not a signed installer: compiling
+    # the shell proves the Rust side still matches the Tauri 2 API, while bundling needs
+    # WebView2, NSIS and a signing key that CI does not have. Shipping an unsigned
+    # artifact from CI would be worse than shipping none.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: System libraries for Tauri
+        # Tauri 2 links against WebKitGTK on Linux even for `cargo check`.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Static shell gate
+        run: python scripts/check_desktop.py
+
+      - name: cargo check
+        run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --all-targets
 
   package:
     needs: [backend, frontend]
