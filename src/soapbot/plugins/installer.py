@@ -36,6 +36,7 @@ from soapbot.plugins.manifest import (
     MANIFEST_FILENAME,
     ManifestError,
     PluginManifest,
+    block_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,7 +133,10 @@ def install_from_zip(
             root_prefix = _root_prefix(archive)
             _extract(archive, staging, root_prefix)
         manifest = _read_and_check_manifest(staging, host_version)
-        reason = (blocked or {}).get(f"{manifest.name}@{manifest.version}")
+        # Looked up by canonical key, not by the literal manifest string. The version
+        # grammar accepts both `1.0` and `1.0.0`, so a literal lookup lets a package
+        # spell its version the other way and walk past a block on the same release.
+        reason = (blocked or {}).get(block_key(manifest.name, manifest.version))
         if reason:
             raise InstallError(
                 f"{manifest.name} {manifest.version} 已被封禁，拒绝安装：{reason}"

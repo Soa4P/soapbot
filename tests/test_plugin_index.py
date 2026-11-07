@@ -17,6 +17,7 @@ import pytest
 from soapbot.plugins.index_client import (
     MAX_INDEX_BYTES,
     IndexClient,
+    IndexSnapshot,
     load_local_blocklist,
 )
 from soapbot.plugins.installer import InstallError, install_from_zip
@@ -291,9 +292,13 @@ def _zip(files: dict[str, str]) -> bytes:
 
 
 def _package(version: str) -> bytes:
+    # Quoted on purpose: YAML reads an unquoted `1.0` as a float, which the manifest
+    # parser rejects as "not a string" before any blocklist is consulted. That would
+    # make the short-spelling test pass for the wrong reason, so the version is always
+    # written as a string here — the same thing a JSON manifest would produce.
     manifest = (
         "name: demo\n"
-        f"version: {version}\n"
+        f'version: "{version}"\n'
         "entry: main:Demo\n"
         "capabilities:\n"
         "  - command\n"
@@ -319,3 +324,30 @@ def test_unblocked_version_installs(tmp_path: Path) -> None:
 
     assert result.name == "demo"
     assert (tmp_path / "demo" / "plugin.yaml").is_file()
+
+
+def test_blocked_version_cannot_be_bypassed_with_short_spelling(tmp_path: Path) -> None:
+    """`1.0` and `1.0.0` are the same release, so a block must cover both.
+
+    The manifest grammar accepts either spelling, and the blocklist is keyed by string.
+    A literal lookup therefore made the block advisory: publish `evil@1.0.0`, get it
+    blocked, then ship a manifest that says `1.0` and install the identical bytes while
+    the check appears to have run. Normalising both sides closes that.
+    """
+    with pytest.raises(InstallError, match="封禁"):
+        install_from_zip(_package("1.0"), tmp_path, blocked={"demo@1.0.0": "凭据泄露"})
+
+    assert not (tmp_path / "demo").exists()
+
+
+def test_blocked_reason_matches_the_key_the_installer_uses() -> None:
+    """The panel's answer and the installer's refusal must agree.
+
+    If they disagree the UI says a version is fine and the upload then fails with no
+    visible cause, which reads as a broken button rather than a policy.
+    """
+    snapshot = IndexSnapshot(available=True, blocked={"demo@1.0.0": "凭据泄露"})
+
+    assert snapshot.blocked_reason("demo", "1.0") == "凭据泄露"
+    assert snapshot.blocked_reason("demo", "1.0.0") == "凭据泄露"
+    assert snapshot.blocked_reason("demo", "1.0.1") == ""
