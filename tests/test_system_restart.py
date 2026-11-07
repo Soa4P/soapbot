@@ -65,13 +65,42 @@ def test_windows_restart_command_names_the_installed_task(
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
     monkeypatch.setattr(system_api, "service_name", lambda: "SoapbotBot")
     monkeypatch.setattr(system_api.sys, "platform", "win32")
+    monkeypatch.setattr(system_api.time, "sleep", lambda _s: None)
 
     system_api._spawn_windows_restart()
 
-    assert captured, "the restart must be handed to a detached process"
-    command = captured[0][-1]
-    assert 'schtasks /End /TN "SoapbotBot"' in command
-    assert 'schtasks /Run /TN "SoapbotBot"' in command
+    assert len(captured) == 2, "End and Run are separate children, not one shell line"
+    assert captured[0] == ["schtasks", "/End", "/TN", "SoapbotBot"]
+    assert captured[1] == ["schtasks", "/Run", "/TN", "SoapbotBot"]
+
+
+def test_task_name_is_never_interpreted_by_a_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A task name with shell metacharacters must stay a task name.
+
+    The name comes from ``SOAPBOT_SERVICE_NAME`` in ``.env``, and the old code pasted
+    it into ``cmd.exe /c``. A value like ``Soapbot & calc`` would have run ``calc``
+    with the service account's rights at the exact moment the process was exiting —
+    no shell means the name can only ever be an argument.
+    """
+    captured: list[list[str]] = []
+
+    def _fake_popen(argv, **kwargs):
+        captured.append(argv)
+        return None
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(system_api, "service_name", lambda: 'Soapbot & calc "x"')
+    monkeypatch.setattr(system_api.sys, "platform", "win32")
+    monkeypatch.setattr(system_api.time, "sleep", lambda _s: None)
+
+    system_api._spawn_windows_restart()
+
+    for argv in captured:
+        assert argv[0] == "schtasks", "no cmd.exe, so nothing parses the name"
+        assert "cmd.exe" not in argv
+        assert 'Soapbot & calc "x"' in argv
 
 
 def test_restart_delay_is_short_but_not_zero() -> None:
