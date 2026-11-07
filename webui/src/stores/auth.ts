@@ -48,6 +48,38 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Re-entrancy guard for the 401 handler.
+   *
+   * The handler's job is to call `refresh()`, and `refresh()` calls `/api/auth/status` —
+   * which, when the session is genuinely gone, answers 401 and dispatches the very event
+   * that started this. Without a guard that is an unbounded loop: every iteration is a
+   * request, so an expired cookie turns one page load into a request storm against a
+   * server that is already telling us to stop.
+   *
+   * A plain flag is enough because the loop is synchronous in its trigger: the nested
+   * dispatch happens while the outer call is still awaiting, so the flag is still set.
+   */
+  const recovering = ref(false)
+
+  /**
+   * The single place that reacts to a 401.
+   *
+   * One refresh attempt, then either the session is back (transient expiry, clock skew)
+   * or the login dialog opens. It never retries: a second automatic attempt would be
+   * indistinguishable from the loop above, and the operator can always press the button.
+   */
+  async function handleUnauthorized(): Promise<void> {
+    if (recovering.value) return
+    recovering.value = true
+    try {
+      await refresh()
+      if (!authenticated.value) openDialog()
+    } finally {
+      recovering.value = false
+    }
+  }
+
   async function login(initToken: string): Promise<boolean> {
     busy.value = true
     error.value = ''
@@ -108,6 +140,7 @@ export const useAuthStore = defineStore('auth', () => {
     canEditAuthority,
     canManageMemory,
     refresh,
+    handleUnauthorized,
     login,
     logout,
     openDialog,

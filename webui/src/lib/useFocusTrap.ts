@@ -66,6 +66,10 @@ export function useFocusTrap(
 
     const first = items[0]
     const last = items[items.length - 1]
+    // The length check above makes these defined, but the compiler cannot see that
+    // through the index access. Guarding explicitly keeps the invariant in the code
+    // rather than in a comment, and costs one comparison.
+    if (!first || !last) return
     const current = document.activeElement as HTMLElement | null
 
     if (!event.shiftKey && current === last) {

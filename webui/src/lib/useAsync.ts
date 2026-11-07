@@ -28,16 +28,41 @@ export function useAsync<T>(loader: () => Promise<T>, cacheKey?: string) {
   const error = ref('')
   const loading = ref(false)
 
+  /**
+   * Which request this hook is currently waiting for.
+   *
+   * Without it, two overlapping reloads settle in whatever order the network returns
+   * them, and the slower one wins — so pressing the global refresh while a slow page load
+   * is in flight can leave the panel showing the *older* snapshot with no error to
+   * explain it. The same race makes a failed request overwrite a successful one, which
+   * is how a page ends up displaying data and an error banner at the same time.
+   *
+   * A counter rather than ``AbortController``: the request has already been sent and the
+   * server has already done the work, so cancelling saves nothing here. What has to be
+   * prevented is the late result being *applied*, and comparing an integer does that in
+   * one line with no cleanup to forget.
+   */
+  let seq = 0
+
   async function reload(): Promise<void> {
+    const mine = ++seq
     loading.value = true
     try {
-      data.value = await loader()
+      const result = await loader()
+      if (mine !== seq) return
+      data.value = result
       error.value = ''
-      if (cacheKey) cache.set(cacheKey, { at: Date.now(), data: data.value })
+      if (cacheKey) cache.set(cacheKey, { at: Date.now(), data: result })
     } catch (err) {
+      // The failure path needs the same guard as the success path. A stale rejection
+      // overwriting a fresh success is the worse of the two bugs: the page shows correct
+      // data with a red banner, and the operator reports the data as wrong.
+      if (mine !== seq) return
       error.value = err instanceof ApiError ? err.message : String(err)
     } finally {
-      loading.value = false
+      // Only the newest request may clear the spinner; an older one finishing first
+      // would hide the fact that a request is still outstanding.
+      if (mine === seq) loading.value = false
     }
   }
 

@@ -44,16 +44,42 @@ function readInitialLocale(): Locale {
 export const locale = ref<Locale>(readInitialLocale())
 
 /**
+ * Keys already reported, so a missing string warns once per session.
+ *
+ * `t()` runs inside render functions, which run on every reactive change. Warning on
+ * every call would turn one missing key into hundreds of identical console lines and
+ * bury the one message that matters.
+ */
+const reportedMissing = new Set<string>()
+
+/**
  * Translate `key`, with optional `{placeholder}` substitution.
  *
  * Not a template plugin: the panel has a few hundred strings, and a compiler
  * integration (`vue-i18n`) would add ~20 KB plus a build step for looked-up strings
- * that already work this way. A missing key returns the key itself so a gap is
- * visible in a screenshot rather than rendering as an empty gap.
+ * that already work this way.
+ *
+ * A missing key never renders as an empty gap. In development it warns once and returns
+ * the key, so the gap is visible in a screenshot *and* traceable to a line of code. In
+ * production the key is still returned — inventing friendly text would hide the fact
+ * that a translation is missing, and the key is at least searchable.
  */
 export function t(key: string, params?: Record<string, string | number>): string {
   const catalogue = CATALOGUES[locale.value] ?? CATALOGUES[DEFAULT_LOCALE]
-  const template = catalogue[key] ?? CATALOGUES[DEFAULT_LOCALE][key] ?? key
+  let template = catalogue[key]
+  if (template === undefined) {
+    // Fall back to the default catalogue before giving up: a key that exists in zh-CN
+    // but not en-US should read as Chinese, not as `memory.rows` in the middle of an
+    // English page.
+    template = CATALOGUES[DEFAULT_LOCALE][key]
+    if (template === undefined) {
+      if (import.meta.env.DEV && !reportedMissing.has(key)) {
+        reportedMissing.add(key)
+        console.warn(`[i18n] missing key: ${key} (locale ${locale.value})`)
+      }
+      return key
+    }
+  }
   if (!params) return template
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in params ? String(params[name]) : match,

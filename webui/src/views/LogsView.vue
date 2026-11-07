@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
@@ -20,6 +20,17 @@ const level = ref('')
 const contains = ref('')
 const limit = ref(200)
 
+/**
+ * Hard ceiling on how much of the ring this page will ask for.
+ *
+ * "Load more" is a convenience, not a way to page through the whole file — the endpoint
+ * serves a bounded ring precisely so that no caller can walk arbitrary amounts of it. The
+ * cap makes that boundary visible in the UI instead of letting the button fail at 2000
+ * with a 422 the operator cannot interpret.
+ */
+const LIMIT_STEP = 200
+const LIMIT_MAX = 1000
+
 const logs = useAsync(() =>
   api.logs({ limit: limit.value, level: level.value, contains: contains.value }),
 )
@@ -31,6 +42,18 @@ watch([level, contains, limit], () => {
   clearTimeout(timer)
   timer = setTimeout(() => void logs.reload(), 250)
 })
+
+// The debounce timer outlives the component if it is not cleared. Navigating away within
+// 250 ms of typing leaves a pending callback that fires against a disposed hook — a
+// reload nobody asked for, on a page that no longer exists, in the middle of the next
+// page's first paint.
+onBeforeUnmount(() => clearTimeout(timer))
+
+const canLoadMore = computed(() => limit.value < LIMIT_MAX)
+
+function loadMore(): void {
+  limit.value = Math.min(limit.value + LIMIT_STEP, LIMIT_MAX)
+}
 
 const entries = computed<any[]>(() => logs.data.value?.entries ?? [])
 const total = computed<number>(() => logs.data.value?.total ?? 0)
@@ -97,6 +120,15 @@ function detail(entry: any): string {
       </button>
       <button class="btn ghost" :disabled="logs.loading.value" @click="logs.reload()">
         {{ t('common.refresh') }}
+      </button>
+      <button
+        v-if="canLoadMore && entries.length"
+        class="btn ghost"
+        type="button"
+        :disabled="logs.loading.value"
+        @click="loadMore"
+      >
+        {{ t('common.loadMore') }}
       </button>
     </div>
     <div class="panel__body flush">
