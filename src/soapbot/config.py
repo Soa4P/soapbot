@@ -665,6 +665,32 @@ class Settings(BaseSettings):
     The stdlib ``re`` has no timeout argument; bounding the input is the enforceable
     substitute without adding a dependency (``check_deps.py`` pins the runtime list)."""
 
+    max_incoming_chars: int = Field(default=8_000, ge=200, le=100_000)
+    """Total plain-text ceiling for one inbound message, measured after rendering.
+
+    Every stage downstream — injection screening, recall, the prompt builder — costs
+    time proportional to this. Without a ceiling, one member pasting a 5 MB log file
+    makes every later stage in the pipeline pay for it, and the group's other messages
+    queue behind that turn. Truncation is deliberate rather than rejection: a long
+    message is usually a real message with a long tail, and dropping it entirely would
+    look like the bot ignoring people.
+    """
+    max_segments: int = Field(default=64, ge=1, le=512)
+    """Segment-count ceiling. OneBot lets a client send an unbounded array, and each
+    segment is a dict that gets walked several times (render, screen, persist)."""
+    max_segment_chars: int = Field(default=4_000, ge=100, le=50_000)
+    """Per-segment ceiling, so one giant text segment cannot hide behind a small
+    segment count."""
+    max_json_depth: int = Field(default=32, ge=4, le=256)
+    """Nesting ceiling checked before ``json.loads`` on untrusted frames.
+
+    ``json`` itself recurses, and a payload like ``[[[[...]]]]`` a few thousand deep
+    raises ``RecursionError`` from inside the C parser — which is not catchable as a
+    ``JSONDecodeError`` and takes down whatever coroutine was decoding. Counting
+    brackets first is a single linear pass and turns that into an ordinary rejection
+    with a message naming the limit and the actual depth.
+    """
+
     persona_growth_enabled: bool = True
     """Let the model rewrite a persona card without a review step.
 
