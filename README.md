@@ -68,14 +68,19 @@ YAML：`config/` 是模板，首次启动播种到 `data/config`，`git pull` �
 ## 门禁
 
 ```bash
-make check          # lint / contrast / a11y / gaps / doclinks / ipc-audit / boundary-audit / pytest
+make check          # lint / contrast / a11y / gaps / doclinks / ipc-audit / boundary-audit / desktop-check / pytest
 cd webui && npm run verify
 python -m soapbot.cli doctor --strict      # 部署前
 ```
 
-`make check` 与 CI 的 backend 双矩阵跑的是同一组命令。两个静态门禁值得单独说：
+`make check` 与 CI 的 backend 双矩阵跑的是同一组命令。三个静态门禁值得单独说：
 `scripts/check_plugin_ipc.py` 守插件进程边界，`scripts/check_security_boundaries.py`
-守 18 项安全与错误日志契约。它们只读源码、打印证据行，失败就退出非零。
+守 18 项安全与错误日志契约，`scripts/check_desktop.py` 守桌面壳的 CSP、单实例与
+「不自己拉起后端」。它们只读源码、打印证据行，失败就退出非零。
+
+桌面壳在 [desktop/](desktop/)，构建需要 Rust 与 WebView2，`make desktop` 出安装包。
+它只负责打开面板，不启动后端：进程生命周期归计划任务或 systemd，两个监管者抢
+6185 端口是没人想调的故障。
 
 部署、备份、巡检、故障排查和升级在 [docs/operations.md](docs/operations.md)。
 
