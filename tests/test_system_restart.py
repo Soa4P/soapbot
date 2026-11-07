@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import signal
 import subprocess
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -133,6 +135,50 @@ def test_concurrent_restart_requests_schedule_only_one_exit(
     assert response.json()["scheduled"] is False
     assert response.json()["already_scheduled"] is True
     assert calls == []
+
+
+def test_linux_restart_signals_the_current_process_for_systemd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Linux the supervisor is systemd's ``Restart=always``.
+
+    The process must ask for SIGTERM rather than exit 0: a clean exit is a successful
+    run and the unit is not brought back. This is the branch the Windows live check
+    cannot exercise, so it needs its own assertion.
+    """
+    calls: list[tuple[int, signal.Signals]] = []
+    fake_os = SimpleNamespace(
+        name="posix",
+        getpid=lambda: 4242,
+        kill=lambda pid, sig: calls.append((pid, sig)),
+        _exit=lambda code: pytest.fail(f"unexpected _exit({code})"),
+    )
+    monkeypatch.setattr(system_api, "os", fake_os)
+    monkeypatch.setattr(system_api, "in_container", lambda: False)
+
+    system_api._perform_now()
+
+    assert calls == [(4242, signal.SIGTERM)]
+
+
+def test_container_restart_exits_non_zero_for_compose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """compose's ``restart: unless-stopped`` needs a non-zero exit to bring it back."""
+    codes: list[int] = []
+    fake_os = SimpleNamespace(
+        name="posix",
+        getpid=lambda: 4242,
+        kill=lambda *_args: pytest.fail("must not signal inside a container"),
+        _exit=lambda code: codes.append(code),
+    )
+    monkeypatch.setattr(system_api, "os", fake_os)
+    monkeypatch.setattr(system_api, "in_container", lambda: True)
+
+    system_api._perform_now()
+
+    assert codes == [75]
+    assert codes[0] != 0
 
 
 @pytest.mark.asyncio

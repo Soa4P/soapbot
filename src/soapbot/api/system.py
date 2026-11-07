@@ -88,9 +88,11 @@ def _perform_now() -> None:
     if in_container():
         logger.warning("restart requested; exiting for the container runtime")
         os._exit(75)
+        return  # `os._exit` never returns; keep the control flow explicit for replacements
     if os.name == "nt":
         _spawn_windows_restart()
         os._exit(75)
+        return
     logger.warning("restart requested; sending SIGTERM")
     os.kill(os.getpid(), signal.SIGTERM)
 
