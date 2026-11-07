@@ -8,6 +8,7 @@ installed host would not have yet.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify_restart.py"
 
 
-def _invoke(*args: str) -> subprocess.CompletedProcess[str]:
+def _invoke(*args: str, io_encoding: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    if io_encoding:
+        env["PYTHONIOENCODING"] = io_encoding
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
@@ -25,6 +29,7 @@ def _invoke(*args: str) -> subprocess.CompletedProcess[str]:
         errors="replace",
         timeout=30,
         cwd=ROOT,
+        env=env,
     )
 
 
@@ -35,6 +40,20 @@ def test_help_explains_the_two_modes() -> None:
     assert "systemd" in result.stdout
     assert "compose" in result.stdout
     assert "--yes" in result.stdout
+
+
+def test_help_works_on_a_non_utf8_console() -> None:
+    """The Windows CI runner defaults to cp1252; Chinese help text used to kill it.
+
+    `argparse.print_help()` writes straight to stdout, so fixing only our own print
+    helper was not enough. Force this encoding explicitly so the test fails on any
+    machine, including ones whose locale is already UTF-8.
+    """
+    result = _invoke("--help", io_encoding="cp1252")
+
+    assert result.returncode == 0, result.stderr[-400:]
+    assert "systemd" in result.stdout
+    assert "UnicodeEncodeError" not in result.stderr
 
 
 def test_a_missing_unit_fails_closed_without_signalling_anything() -> None:

@@ -39,9 +39,21 @@ DEFAULT_HEALTH = "http://127.0.0.1:6185/api/health"
 POLL_SECONDS = 1.0
 
 
+def _force_utf8_streams() -> None:
+    """Make Chinese output safe on a console whose locale is cp1252.
+
+    This must run before `argparse` builds the parser: `--help` is printed directly to
+    `sys.stdout` by `print_help()`, bypassing `_out()`, so reconfiguring there is too
+    late. Measured on the Windows CI runner: `python verify_restart.py --help` exited
+    1 with `UnicodeEncodeError: 'charmap' codec can't encode characters`, which is a
+    false failure for a script whose only job is to be run by a human on a host.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def _out(text: str = "") -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(text, flush=True)
 
 
@@ -228,6 +240,7 @@ def _detect(unit: str) -> str | None:
 
 
 def main() -> int:
+    _force_utf8_streams()
     parser = argparse.ArgumentParser(
         description="在真实部署主机上验收「自动重启后服务确实回来」",
         formatter_class=argparse.RawDescriptionHelpFormatter,
