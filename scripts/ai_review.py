@@ -143,7 +143,10 @@ def _extract_json(text: str) -> dict:
             return json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
-    raise ReviewError("模型没有返回可解析的 JSON")
+    # Include a short prefix: "not JSON" alone was unattributable from a CI log, and the
+    # difference between prose, a truncated object and a fenced block matters when
+    # deciding whether to change the prompt or the token budget.
+    raise ReviewError(f"模型没有返回可解析的 JSON（开头：{text[:80]!r}）")
 
 
 def normalise(payload: dict) -> dict:
@@ -182,7 +185,10 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
         ],
         # Deterministic: a review that changes with the temperature is not reviewable.
         "temperature": 0,
-        "max_tokens": 1200,
+        # `deepseek-v4-pro` is a reasoning model: `completion_tokens` includes the
+        # hidden reasoning, and at 1200 the budget can be consumed before any `content`
+        # is produced — which surfaced as "模型响应不是 JSON" with no explanation.
+        "max_tokens": 3000,
     }
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
@@ -204,12 +210,23 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
     except (ValueError, TypeError) as exc:
         raise ReviewError("模型响应不是 JSON") from exc
 
+    choice = (body.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    content = message.get("content")
     try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ReviewError("模型响应缺少 choices[0].message.content") from exc
+        finish = choice.get("finish_reason", "?")
+    except AttributeError:
+        finish = "?"
     if not content or not str(content).strip():
-        raise ReviewError("模型返回了空内容")
+        # Say why it was empty. A bare "empty content" made a real CI failure
+        # unattributable: it could mean the reasoning budget was exhausted, the request
+        # was filtered, or the provider changed its response shape.
+        usage = body.get("usage") or {}
+        reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        raise ReviewError(
+            f"模型返回空内容（finish_reason={finish}, reasoning_tokens={reasoning}, "
+            f"completion_tokens={usage.get('completion_tokens')}）"
+        )
     return str(content)
 
 
