@@ -146,12 +146,13 @@ def check_dockerignore(report: Report) -> None:
         )
         return
     text = _read(ignore)
-    needed = {"data", ".venv", ".git", "node_modules", "dist", "tests"}
-    present = {
-        line.strip().rstrip("/")
-        for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
+    # `dist` is deliberately NOT in this set. The image has no node and never builds the
+    # panel; `COPY src ./src` is the only way it gets in. Listing `dist` as "must be
+    # excluded" pushed the rules toward exactly the configuration that serves an empty
+    # "not built" page — and the check would have called that a pass.
+    needed = {"data", ".venv", ".git", "node_modules", "tests"}
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    present = {line.rstrip("/") for line in lines}
     missing = sorted(n for n in needed if n not in present)
     if missing:
         report.add(
@@ -161,6 +162,30 @@ def check_dockerignore(report: Report) -> None:
         )
     else:
         report.add("ok", "build.dockerignore-ok", ".dockerignore 覆盖关键目录")
+
+    # The opposite failure, and the one that is invisible until a browser looks at it:
+    # an exclusion (or a parent-directory exclusion) that swallows the committed panel.
+    lossy = sorted(
+        entry
+        for entry in present
+        if entry in {"src", "src/soapbot", "src/soapbot/webui", "src/soapbot/webui/dist"}
+    )
+    if lossy:
+        report.add(
+            "warn",
+            "build.dockerignore-hides-panel",
+            f".dockerignore 排除了前端产物所在目录（{', '.join(lossy)}）；"
+            "镜像里没有 node，产物被排除后容器只会渲染「未构建」页面",
+        )
+    elif "!src/soapbot/webui/dist/" not in lines:
+        report.add(
+            "warn",
+            "build.dockerignore-panel-not-pinned",
+            ".dockerignore 未显式保留 src/soapbot/webui/dist/；"
+            "缺少这条反向规则时，未来新增的排除项可能悄悄吞掉前端产物",
+        )
+    else:
+        report.add("ok", "build.dockerignore-panel-kept", "前端产物已显式保留在构建上下文中")
 
 
 def check_host_bind(report: Report) -> None:
