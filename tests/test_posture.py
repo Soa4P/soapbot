@@ -408,7 +408,7 @@ async def test_probe_against_a_real_listening_endpoint(tmp_path: Path):
     from threading import Thread
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+        def do_GET(self) -> None:
             self.send_response(401)
             self.end_headers()
 

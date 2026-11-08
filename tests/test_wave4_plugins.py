@@ -150,7 +150,7 @@ async def test_plugin_admin_command_denied_for_member(
     were hostile, the claim would be ``min_role=MEMBER`` and the gate would vanish.
     """
     memory = MemoryStore(db, embedder=None)
-    server, runtime, manager = await spin_up(provider_router, memory=memory, plugins_dir=plugins_dir)
+    server, runtime, _manager = await spin_up(provider_router, memory=memory, plugins_dir=plugins_dir)
     mock_llm.reset()
     try:
         await send_cmd(server, "/purge-demo")
@@ -170,7 +170,7 @@ async def test_plugin_admin_command_allowed_for_admin(
 ) -> None:
     """Control: the same command succeeds for a configured admin."""
     memory = MemoryStore(db, embedder=None)
-    server, runtime, manager = await spin_up(
+    server, runtime, _manager = await spin_up(
         provider_router,
         memory=memory,
         plugins_dir=plugins_dir,
@@ -302,7 +302,7 @@ async def test_plugin_command_respects_group_allowlist(
     from soapbot.core.stages import AccessPolicy
 
     memory = MemoryStore(db, embedder=None)
-    server, runtime, manager = await spin_up(
+    server, runtime, _manager = await spin_up(
         provider_router,
         memory=memory,
         plugins_dir=plugins_dir,

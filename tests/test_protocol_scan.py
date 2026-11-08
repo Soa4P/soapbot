@@ -53,7 +53,7 @@ async def test_a_logged_in_onebot_is_found_and_named() -> None:
 
 async def test_an_http_server_is_not_called_onebot() -> None:
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+        def do_GET(self) -> None:
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"napcat webui")
