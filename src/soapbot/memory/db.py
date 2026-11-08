@@ -535,6 +535,17 @@ async def get_database(url: str | None = None) -> Database:
     return _db
 
 
+def current_database() -> Database | None:
+    """The already-initialised database, or ``None``. Never creates one.
+
+    ``get_database()`` builds the schema on first use, which is the wrong side effect
+    for a readiness probe: a probe must observe whether the database works, not be the
+    thing that creates it. Returning ``None`` before startup has run also lets the
+    caller distinguish "not ready yet" from "broken".
+    """
+    return _db
+
+
 async def reset_database() -> None:
     """Test helper: drop the singleton so a fresh temp DB can be created."""
     global _db

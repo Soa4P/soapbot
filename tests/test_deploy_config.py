@@ -166,6 +166,19 @@ def test_dockerignore_excludes_runtime_state() -> None:
         assert required in entries, f".dockerignore 未排除 {required}"
 
 
+def test_compose_healthcheck_probes_readiness() -> None:
+    """A TCP-connect probe passes while the process cannot serve.
+
+    This deployment shipped exactly that: the socket answered while the data directory
+    was unwritable and the runtime had failed to build. The probe now has to reach
+    `/readyz`, which is the only place those two conditions are visible.
+    """
+    compose = (ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "/readyz" in compose, "healthcheck 未探测就绪端点"
+    assert "connect_ex" not in compose, "healthcheck 回退成只测端口，进程活着但不可用会被判健康"
+
+
 def test_panel_dist_stays_in_the_build_context() -> None:
     """The image has no node, so the committed panel is the only UI it can serve.
 

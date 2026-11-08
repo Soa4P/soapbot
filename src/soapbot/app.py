@@ -47,14 +47,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from soapbot import __version__
 from soapbot.api.admin import router as admin_router
-from soapbot.api.auth import configure_auth
+from soapbot.api.auth import configure_auth, require_api_auth
 from soapbot.api.auth import router as auth_router
 from soapbot.api.bilibili import router as bilibili_router
 from soapbot.api.config_adapters import router as config_adapters_router
@@ -99,6 +99,35 @@ _SCHEDULER: Any = None
 _STARTUP_ERRORS: list[str] = []
 
 _WEBUI_DIST = Path(__file__).resolve().parent / "webui" / "dist"
+
+# Metric families exposed on /metrics, as (name, type, help, key in ProviderStat.stats()).
+# Declared once so the disabled-runtime branch can still publish empty families: a
+# dashboard should show "no data" after the runtime is switched off, not keep drawing a
+# stale series from before.
+_PROVIDER_METRICS: tuple[tuple[str, str, str, str], ...] = (
+    ("soapbot_provider_calls_total", "counter", "Attempts per provider.", "calls"),
+    ("soapbot_provider_failures_total", "counter", "Failed attempts per provider.", "failures"),
+    (
+        "soapbot_provider_prompt_tokens_total",
+        "counter",
+        "Prompt tokens consumed per provider.",
+        "prompt_tokens",
+    ),
+    (
+        "soapbot_provider_completion_tokens_total",
+        "counter",
+        "Completion tokens produced per provider.",
+        "completion_tokens",
+    ),
+    ("soapbot_provider_latency_p50_ms", "gauge", "Median recent latency per provider.", "p50_latency_ms"),
+    ("soapbot_provider_latency_p95_ms", "gauge", "p95 recent latency per provider.", "p95_latency_ms"),
+    ("soapbot_provider_cooling_down", "gauge", "1 while the provider is in cooldown.", "cooling_down"),
+)
+
+
+def _prometheus_label(value: Any) -> str:
+    """Escape a label value per the Prometheus text exposition format."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 # --------------------------------------------------------------------- accessors
@@ -676,10 +705,34 @@ def create_app() -> FastAPI:
         if runtime is not None and not getattr(runtime, "_running", False):
             problems.append("runtime is built but not running")
 
+        # A writable directory is a proxy for "SQLite can write", which is not the same
+        # thing: a database file that exists but cannot be opened — corrupt, wrong owner
+        # after a volume restore, a half-applied migration — passes the directory probe
+        # and then fails on the first real query. One cheap SELECT catches that.
+        #
+        # `current_database()` never creates the connection, so a probe cannot become
+        # the thing that initialises the schema it is supposed to observe.
+        from soapbot.memory.db import current_database
+
+        database = current_database()
+        if database is not None:
+            try:
+                from sqlalchemy import text
+
+                async with database.session() as session:
+                    await session.execute(text("SELECT 1"))
+            except Exception as exc:  # a probe reports, it never raises
+                # Type only: /readyz is unauthenticated and the message can carry a
+                # filesystem path or SQL fragment.
+                problems.append(f"database not usable ({type(exc).__name__})")
+
         errors = get_startup_errors()
         if errors:
-            # Startup errors are warnings by policy (a missing adapter must not stop
-            # the process), so they are reported without failing readiness.
+            # Startup errors stay warnings by policy: an offline adapter or a plugin
+            # that failed to load must not mark the whole console unusable, or a broken
+            # plugin would pull it out of service exactly when someone needs to fix it.
+            # `degraded` is the machine-readable middle ground — monitoring can alert on
+            # it without readiness failing.
             logger.debug("readiness note: %d startup errors", len(errors))
 
         payload = {
@@ -688,8 +741,87 @@ def create_app() -> FastAPI:
             "data_dir": str(data_dir),
             "problems": problems,
             "startup_errors": errors,
+            "degraded": bool(errors),
         }
         return JSONResponse(payload, status_code=200 if not problems else 503)
+
+    @app.get("/metrics", tags=["system"], include_in_schema=False)
+    async def metrics(_: dict = Depends(require_api_auth)) -> Response:
+        """Prometheus text exposition of the counters this process already keeps.
+
+        Hand-written rather than via ``prometheus-client``. Every value here is a
+        snapshot read at scrape time from the provider router and the trace store —
+        they are not counter objects updated on a request hot path — so the library
+        would add a dependency and a registry lifecycle in order to restate numbers
+        that already exist.
+
+        Labels are configured provider ids only, so cardinality is bounded by the
+        operator's own configuration and never by request content. It requires the same
+        API token as the rest of the panel: provider names, model errors and traffic
+        counts are internal topology, not public build metadata.
+        """
+        lines: list[str] = []
+
+        def emit(
+            name: str, kind: str, help_text: str, samples: list[tuple[str, float]]
+        ) -> None:
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} {kind}")
+            for labels, value in samples:
+                suffix = f"{{{labels}}}" if labels else ""
+                lines.append(f"{name}{suffix} {value}")
+
+        started = _STARTED_AT.get("ts", time.time())
+        emit(
+            "soapbot_info",
+            "gauge",
+            "Build information; the value is always 1.",
+            [(f'version="{_prometheus_label(__version__)}"', 1)],
+        )
+        emit(
+            "soapbot_uptime_seconds",
+            "gauge",
+            "Seconds since this process started.",
+            [("", round(time.time() - started, 3))],
+        )
+
+        runtime = get_runtime()
+        providers = getattr(runtime, "providers", None) if runtime is not None else None
+        if providers is None:
+            for name, kind, help_text, _key in _PROVIDER_METRICS:
+                emit(name, kind, help_text, [])
+        else:
+            stats = providers.stats()
+            for name, kind, help_text, key in _PROVIDER_METRICS:
+                samples: list[tuple[str, float]] = []
+                for pid, values in stats.items():
+                    value = values.get(key, 0)
+                    samples.append(
+                        (
+                            f'provider="{_prometheus_label(pid)}"',
+                            int(value) if isinstance(value, bool) else value,
+                        )
+                    )
+                emit(name, kind, help_text, samples)
+
+            breaker = providers.breaker_status()
+            emit(
+                "soapbot_breaker_open",
+                "gauge",
+                "1 while the router refuses to try any provider.",
+                [("", 1 if breaker.get("open") else 0)],
+            )
+            emit(
+                "soapbot_breaker_retry_after_seconds",
+                "gauge",
+                "Seconds until the breaker allows another attempt.",
+                [("", breaker.get("retry_after", 0))],
+            )
+
+        return Response(
+            "\n".join(lines) + "\n",
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     from soapbot.api.personas import router as personas_growth_router
     from soapbot.api.system import router as system_router

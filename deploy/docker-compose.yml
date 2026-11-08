@@ -124,13 +124,29 @@ services:
       # SOAPBOT_MASTER_KEY_FILE: /run/secrets/master_key
 
     healthcheck:
-      # Only checks that the process answers, not that it is healthy in a business
-      # sense — a plugin crash loop should not restart the whole bot.
-      test: ["CMD", "python", "-c", "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',6185))==0 else 1)"]
+      # `/readyz`, not a bare TCP connect. The socket check passed while the data
+      # directory was unwritable and the runtime had failed to build — both leave the
+      # process running and useless, which is exactly what a healthcheck is for. It
+      # still does not fail on an offline adapter or a crashed plugin: those are
+      # reported as `degraded`, because restarting the whole bot would not fix them.
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - |
+          import sys, urllib.request
+          try:
+              code = urllib.request.urlopen("http://127.0.0.1:6185/readyz", timeout=4).status
+          except Exception:
+              sys.exit(1)
+          sys.exit(0 if code == 200 else 1)
       interval: 30s
-      timeout: 5s
+      # Longer than the probe's own 4s socket timeout, so the failure we report is the
+      # service refusing rather than Docker killing the client first.
+      timeout: 8s
       retries: 3
-      start_period: 20s
+      # First start runs migrations before the app answers.
+      start_period: 30s
 
     logging:
       # Unbounded logs on a read-only rootfs fill the host disk, which is a

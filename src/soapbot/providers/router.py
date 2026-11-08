@@ -13,9 +13,11 @@ Rules:
 from __future__ import annotations
 
 import logging
+import math
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from soapbot.config import settings
@@ -85,6 +87,23 @@ class ProviderStat:
     consecutive_failures: int = 0
     disabled_until: float = 0.0
     """Cooldown deadline after repeated failures, to stop hammering a dead endpoint."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latencies: deque[float] = field(default_factory=lambda: deque(maxlen=256))
+    """Recent latencies for p50/p95.
+
+    Bounded on purpose: an unbounded sample list is a slow memory leak in a process
+    that is meant to run for weeks, and the operator only ever looks at the recent
+    distribution. 256 samples covers a useful window without growing.
+    """
+
+    def percentile(self, fraction: float) -> float:
+        """Nearest-rank percentile; ``0.0`` when nothing has been recorded yet."""
+        if not self.latencies:
+            return 0.0
+        ordered = sorted(self.latencies)
+        index = min(len(ordered) - 1, max(0, math.ceil(fraction * len(ordered)) - 1))
+        return round(ordered[index], 2)
 
 
 class ProviderCooldownError(ProviderError):
@@ -135,17 +154,73 @@ class ProviderRouter:
         return [p.describe() for p in self._ordered()]
 
     def stats(self) -> dict[str, dict[str, Any]]:
+        now = time.time()
         return {
             pid: {
                 "calls": s.calls,
                 "failures": s.failures,
+                # Derived rather than stored: a stored rate and the two counters it comes
+                # from can disagree after a partial update.
+                "success_rate": round((s.calls - s.failures) / s.calls, 4) if s.calls else 0.0,
                 "last_error": s.last_error,
                 "last_latency_ms": s.last_latency_ms,
+                "p50_latency_ms": s.percentile(0.50),
+                "p95_latency_ms": s.percentile(0.95),
+                "prompt_tokens": s.prompt_tokens,
+                "completion_tokens": s.completion_tokens,
                 "consecutive_failures": s.consecutive_failures,
-                "cooling_down": s.disabled_until > time.time(),
+                "cooling_down": s.disabled_until > now,
             }
             for pid, s in self._stats.items()
         }
+
+    # ------------------------------------------------------------------ accounting
+    def _record_ok(
+        self,
+        provider_id: str,
+        latency_ms: float,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ) -> None:
+        stat = self._stats[provider_id]
+        stat.calls += 1
+        stat.consecutive_failures = 0
+        stat.last_error = ""
+        stat.last_latency_ms = round(latency_ms, 2)
+        stat.latencies.append(latency_ms)
+        stat.prompt_tokens += max(0, prompt_tokens)
+        stat.completion_tokens += max(0, completion_tokens)
+
+    def _record_failure(
+        self, provider_id: str, exc: BaseException, latency_ms: float, *, cooldown: bool
+    ) -> str:
+        """Record one failed attempt; return the scrubbed detail for the error message.
+
+        ``cooldown`` separates counting from punishing. Every slot must count its
+        attempts or the numbers misreport traffic — ``embed``/``transcribe`` used to
+        skip even that. But only the chat path may put a provider into cooldown: an
+        embedding endpoint being down says nothing about whether the model can still
+        answer a message, and sharing the cooldown would take chat offline for an
+        unrelated reason.
+        """
+        stat = self._stats[provider_id]
+        stat.calls += 1
+        stat.failures += 1
+        stat.consecutive_failures += 1
+        stat.last_latency_ms = round(latency_ms, 2)
+        stat.latencies.append(latency_ms)
+        detail = redact(scrub_prompt_echo(str(exc)))[:200]
+        stat.last_error = detail
+        if cooldown and stat.consecutive_failures >= 3:
+            stat.disabled_until = time.time() + self._cooldown
+            logger.error(
+                "provider=%s disabled for %.0fs after %d consecutive failures",
+                provider_id,
+                self._cooldown,
+                stat.consecutive_failures,
+            )
+        return detail
 
     def _ordered(self) -> list[BaseProvider]:
         return sorted(
@@ -182,7 +257,6 @@ class ProviderRouter:
 
         errors: list[str] = []
         for provider in available:
-            stat = self._stats[provider.id]
             t0 = time.perf_counter()
             try:
                 if slot is CapabilitySlot.VISION:
@@ -190,10 +264,12 @@ class ProviderRouter:
                 else:
                     resp = await provider.chat(request)
                 latency = (time.perf_counter() - t0) * 1000
-                stat.calls += 1
-                stat.last_latency_ms = round(latency, 2)
-                stat.consecutive_failures = 0
-                stat.last_error = ""
+                self._record_ok(
+                    provider.id,
+                    latency,
+                    prompt_tokens=resp.prompt_tokens,
+                    completion_tokens=resp.completion_tokens,
+                )
                 self._close_breaker()
                 # A line per successful call used to make the log ring a list of
                 # numbers. Only a call that crossed the threshold is worth a warning;
@@ -217,26 +293,12 @@ class ProviderRouter:
                 return resp
             except Exception as exc:
                 latency = (time.perf_counter() - t0) * 1000
-                stat.calls += 1
-                stat.failures += 1
-                stat.consecutive_failures += 1
-                # Provider errors are built from the *upstream response body*. A relay,
-                # content filter or debugging proxy that echoes the request back would
-                # otherwise put our own system prompt into ``stats.last_error`` (returned
-                # by /api/admin/providers) and into the log ring the WebUI streams. The
-                # scrub keeps the diagnostic part and cuts everything from the first
-                # prompt marker onward.
-                detail = redact(scrub_prompt_echo(str(exc)))[:200]
-                stat.last_error = detail
-                stat.last_latency_ms = round(latency, 2)
-                if stat.consecutive_failures >= 3:
-                    stat.disabled_until = time.time() + self._cooldown
-                    logger.error(
-                        "provider=%s disabled for %.0fs after %d consecutive failures",
-                        provider.id,
-                        self._cooldown,
-                        stat.consecutive_failures,
-                    )
+                # Scrubbing lives in _record_failure: provider errors are built from the
+                # *upstream response body*, and a relay or debugging proxy that echoes
+                # the request would otherwise put our own system prompt into
+                # ``stats.last_error`` (returned by /api/admin/providers) and into the
+                # log ring the WebUI streams.
+                detail = self._record_failure(provider.id, exc, latency, cooldown=True)
                 errors.append(f"{provider.id}: {detail}")
                 # Same scrubbed text, not ``exc``: this line lands in the ring buffer that
                 # the WebUI streams and in the log file an operator ships elsewhere.
@@ -389,15 +451,20 @@ class ProviderRouter:
             raise ProviderError("no provider available for embeddings")
         errors: list[str] = []
         for provider in available:
+            t0 = time.perf_counter()
             try:
                 vectors = await provider.embed(texts)
-                self._stats[provider.id].calls += 1
+                self._record_ok(provider.id, (time.perf_counter() - t0) * 1000)
                 return vectors
             except Exception as exc:
-                stat = self._stats[provider.id]
-                stat.failures += 1
-                stat.last_error = redact(scrub_prompt_echo(str(exc)))[:200]
-                errors.append(f"{provider.id}: {stat.last_error}")
+                # cooldown=False: an embedding outage says nothing about whether chat
+                # still works, so it must not share the cooldown. The attempt is still
+                # counted — this path used to increment `failures` without `calls`,
+                # which made the success rate below the true value forever.
+                detail = self._record_failure(
+                    provider.id, exc, (time.perf_counter() - t0) * 1000, cooldown=False
+                )
+                errors.append(f"{provider.id}: {detail}")
         raise ProviderError("all embed providers failed: " + " | ".join(errors))
 
     async def transcribe(
@@ -414,15 +481,17 @@ class ProviderRouter:
             raise ProviderError("no provider available for transcription")
         errors: list[str] = []
         for provider in available:
+            t0 = time.perf_counter()
             try:
                 text = await provider.transcribe(audio, mime=mime, language=language)
-                self._stats[provider.id].calls += 1
+                self._record_ok(provider.id, (time.perf_counter() - t0) * 1000)
                 return text
             except Exception as exc:
-                stat = self._stats[provider.id]
-                stat.failures += 1
-                stat.last_error = redact(scrub_prompt_echo(str(exc)))[:200]
-                errors.append(f"{provider.id}: {type(exc).__name__}")
+                # Same reasoning as embed: count the attempt, do not touch chat cooldown.
+                detail = self._record_failure(
+                    provider.id, exc, (time.perf_counter() - t0) * 1000, cooldown=False
+                )
+                errors.append(f"{provider.id}: {detail}")
         raise ProviderError("all transcribe providers failed: " + " | ".join(errors))
 
     def has_capability(self, slot: CapabilitySlot) -> bool:
