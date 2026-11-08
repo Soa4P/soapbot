@@ -105,7 +105,7 @@ async def test_chat_still_cools_down_after_repeated_failures() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_accumulates_tokens_and_reports_latency_percentiles() -> None:
-    router, provider = _router()
+    router, _provider = _router()
 
     for _ in range(2):
         await router.chat(ChatRequest(messages=[]))

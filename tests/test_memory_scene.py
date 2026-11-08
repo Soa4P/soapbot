@@ -696,9 +696,8 @@ async def test_a_nested_write_raises_instead_of_hanging(db: Database) -> None:
     stops. Raising turns it into a bug report.
     """
     with pytest.raises(RuntimeError, match="not reentrant"):
-        async with db.write():
-            async with db.write():
-                pass  # pragma: no cover - must not be reached
+        async with db.write(), db.write():
+            pass  # pragma: no cover - must not be reached
 
 
 @pytest.mark.asyncio

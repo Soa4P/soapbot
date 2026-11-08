@@ -176,7 +176,7 @@ class AIEngine:
 
     async def prepare_stream(self, req: AIRequest) -> StreamingCall:
         """Build the request once, so the streamed path reports the same metadata."""
-        persona, chat_req, slot, descs, compressed = await self._prepare(req)
+        persona, chat_req, _slot, descs, compressed = await self._prepare(req)
         return StreamingCall(
             request=chat_req,
             # Images are still in the messages; the *slot* must be STREAM because the

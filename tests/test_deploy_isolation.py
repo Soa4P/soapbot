@@ -499,7 +499,7 @@ async def test_exception_message_does_not_cross_the_boundary():
 
 async def test_circuit_opens_after_repeated_crashes():
     """A crash loop must stop being retried, or it costs more than serving traffic."""
-    sup, worker = await _boot(
+    sup, _worker = await _boot(
         """
         class Plugin:
             async def setup(self, ctx):
