@@ -76,20 +76,37 @@ class ReviewError(RuntimeError):
     """Raised when the model could not be consulted; callers degrade to needs_review."""
 
 
-def truncate(text: str) -> tuple[str, bool]:
-    """Bound the input by both lines and bytes. Returns (text, was_truncated)."""
+def truncate(text: str) -> tuple[str, bool, str]:
+    """Bound the input by lines and bytes.
+
+    Returns `(text, was_truncated, what_was_dropped)`. The third value is the point: a
+    comment that only says "the diff was truncated" leaves the reader unable to judge how
+    much was missed, and "not reviewed" is not the same as "reviewed and fine". Reporting
+    the volume lets a maintainer decide whether to look themselves.
+    """
     lines = text.splitlines()
-    truncated = len(lines) > MAX_DIFF_LINES
+    total_lines = len(lines)
     kept = lines[:MAX_DIFF_LINES]
     joined = "\n".join(kept)
+    dropped_lines = total_lines - len(kept)
+
+    dropped_bytes = 0
     encoded = joined.encode("utf-8", "replace")
     if len(encoded) > MAX_DIFF_BYTES:
+        dropped_bytes = len(encoded) - MAX_DIFF_BYTES
         joined = encoded[:MAX_DIFF_BYTES].decode("utf-8", "ignore")
-        truncated = True
-    return joined, truncated
+
+    parts = []
+    if dropped_lines:
+        parts.append(f"{dropped_lines} 行")
+    if dropped_bytes:
+        # Sub-kilobyte remainders would render as "0 KB", which reads like nothing was
+        # dropped when something was.
+        parts.append(f"{dropped_bytes} 字节" if dropped_bytes < 1024 else f"{dropped_bytes // 1024} KB")
+    return joined, bool(parts), " + ".join(parts)
 
 
-def build_prompt(diff: str, meta: dict, truncated: bool) -> str:
+def build_prompt(diff: str, meta: dict, truncated: bool, dropped: str = "") -> str:
     files = meta.get("files", "")
     head = [
         f"标题：{meta.get('title', '(空)')}",
@@ -101,7 +118,8 @@ def build_prompt(diff: str, meta: dict, truncated: bool) -> str:
         head.append(f"描述：\n{body}")
     if truncated:
         head.append(
-            "注意：diff 已被截断，你看到的不是全部改动。这种情况下不要给出 safe。"
+            f"注意：diff 已被截断（未提供 {dropped or '部分内容'}），你看到的不是全部改动。"
+            "这种情况下不要给出 safe。"
         )
     head.append("--- diff 开始 ---")
     head.append(diff or "(空 diff)")
@@ -197,8 +215,8 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
 
 def review(diff: str, meta: dict, *, api_key: str, model: str, base_url: str) -> dict:
     """Return the documented verdict shape. Never raises for model-side failures."""
-    clipped, truncated = truncate(diff)
-    prompt = build_prompt(clipped, meta, truncated)
+    clipped, truncated, dropped = truncate(diff)
+    prompt = build_prompt(clipped, meta, truncated, dropped)
     try:
         raw = call_model(prompt, api_key=api_key, model=model, base_url=base_url)
         result = normalise(_extract_json(raw))
@@ -209,6 +227,7 @@ def review(diff: str, meta: dict, *, api_key: str, model: str, base_url: str) ->
             "summary": f"自动审查未能完成：{exc}",
             "concerns": [],
             "truncated": truncated,
+            "dropped": dropped,
             "degraded": True,
         }
 
@@ -218,6 +237,7 @@ def review(diff: str, meta: dict, *, api_key: str, model: str, base_url: str) ->
         result["risk"] = "medium"
         result["summary"] = (result["summary"] + "（diff 已截断，无法确认全部改动）").strip()
     result["truncated"] = truncated
+    result["dropped"] = dropped
     result["degraded"] = False
     return result
 
@@ -232,7 +252,13 @@ def render_comment(result: dict, meta: dict) -> str:
         result["summary"] or "(无结论)",
     ]
     if result.get("truncated"):
-        lines += ["", "> diff 超过审查上限，只看了前一部分；结论已自动降级。"]
+        # Say how much was skipped. "Truncated" alone reads like a formatting note;
+        # "1200 行未审查" is a fact the maintainer can act on.
+        dropped = result.get("dropped") or "未知数量"
+        lines += [
+            "",
+            f"> diff 超过审查上限，只看了前面的部分：**{dropped} 未审查**。结论已自动降级为 needs_review。",
+        ]
     if result.get("degraded"):
         lines += ["", "> 模型调用失败，本条不是对代码的判断。请人工审查。"]
     if result["concerns"]:

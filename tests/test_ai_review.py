@@ -34,20 +34,22 @@ def _meta() -> dict:
 
 
 def test_truncate_keeps_short_text_intact() -> None:
-    text, truncated = _module().truncate("a\nb\nc")
+    text, truncated, dropped = _module().truncate("a\nb\nc")
 
     assert text == "a\nb\nc"
     assert truncated is False
+    assert dropped == ""
 
 
 def test_truncate_caps_by_lines() -> None:
     module = _module()
     module.MAX_DIFF_LINES = 3
 
-    text, truncated = module.truncate("\n".join(str(i) for i in range(10)))
+    text, truncated, dropped = module.truncate("\n".join(str(i) for i in range(10)))
 
     assert text.splitlines() == ["0", "1", "2"]
     assert truncated is True
+    assert dropped == "7 行", "必须说明丢了多少，而不只是说「被截断」"
 
 
 def test_truncate_caps_by_bytes() -> None:
@@ -55,10 +57,11 @@ def test_truncate_caps_by_bytes() -> None:
     module.MAX_DIFF_BYTES = 10
     module.MAX_DIFF_LINES = 100
 
-    text, truncated = module.truncate("x" * 100)
+    text, truncated, dropped = module.truncate("x" * 100)
 
     assert len(text.encode()) <= 10
     assert truncated is True
+    assert dropped == "90 字节", "不足 1 KB 时不能显示成 0 KB"
 
 
 # ---------------------------------------------------------------- parsing
