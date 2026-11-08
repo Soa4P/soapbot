@@ -69,8 +69,18 @@ async def spin_up(provider_router, *, memory=None, kb=None, access=None, authori
     return server, runtime
 
 
-async def wait_send(server, rounds: int = 150) -> None:
-    for _ in range(rounds):
+async def wait_send(server, timeout: float = 10.0) -> None:
+    """Wait until the runtime has sent something, or give up after `timeout` seconds.
+
+    This used to be `rounds = 150` iterations of a 20 ms sleep: a three-second budget
+    written as a loop count. That was enough when this file ran alone and not always
+    enough in a full-suite run on a loaded machine, where the timeout surfaced as
+    "the injection reached the model" — because `last_sent_text()` was simply still
+    empty. Seconds are the honest unit for a timeout; the loop count was not.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         if server.sent_messages():
             return
         await asyncio.sleep(0.02)

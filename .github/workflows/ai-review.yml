@@ -1,0 +1,83 @@
+name: ai-review
+
+# `pull_request_target` is the only trigger that gives a fork PR access to a secret.
+# It is also the trigger that can hand that secret to attacker-controlled code, so the
+# two rules below are not style preferences:
+#
+#   1. checkout is pinned to the *base* commit — the workflow and the script it runs are
+#      the reviewed ones, not whatever the PR added;
+#   2. the PR is only ever read as text through `gh pr diff`. No `pip install`, no
+#      `npm install`, no running anything from the PR.
+#
+# This job never approves and never merges. It posts a comment and a label; the merge
+# decision stays with the deterministic checks and the maintainer.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Drafts are skipped: the author is still working, and a comment per push teaches
+    # people to ignore the comments.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Read the diff as text
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/pr.diff"
+          wc -c "$RUNNER_TEMP/pr.diff"
+
+      - name: Ask the model
+        id: review
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'deepseek-chat' }}
+          PR_DIFF_PATH: ${{ runner.temp }}/pr.diff
+          AI_REVIEW_COMMENT_PATH: ${{ runner.temp }}/comment.md
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
+        run: python scripts/ai_review.py
+
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+
+      - name: Label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          VERDICT: ${{ steps.review.outputs.verdict }}
+        run: |
+          case "$VERDICT" in
+            safe) label="ai:safe" ;;
+            malicious) label="ai:malicious" ;;
+            *) label="ai:needs-review" ;;
+          esac
+          gh label create "$label" --repo "$GITHUB_REPOSITORY" \
+            --color BFD4F2 --description "AI review verdict" --force >/dev/null 2>&1 || true
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$label"
