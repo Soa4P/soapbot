@@ -57,6 +57,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Dependency vulnerability scan
+        # Replaces `tests/test_wave4_plugin_review.py::test_review_no_known_dependency_...`
+        # which called `pytest.importorskip("pip_audit")`. pip-audit was never installed
+        # in CI, so that "gate" skipped on every run — a check that cannot fail is not a
+        # gate, and the project shipped with no dependency scan at all. Measured before
+        # making this blocking: the pinned runtime set reports no known advisories.
+        run: |
+          python -m pip install --quiet pip-audit
+          python -m pip_audit --progress-spinner off
+
       - name: Dependency manifests agree
         run: python scripts/check_deps.py
 
@@ -177,7 +187,11 @@ jobs:
           cache-dependency-path: webui/package-lock.json
 
       - name: Install
-        run: cd webui && (test -f package-lock.json && npm ci || npm install)
+        # `npm ci`, not `npm ci || npm install`. The fallback silently re-resolved the
+        # tree whenever the lockfile was merely present-but-stale, so "the build works
+        # on my machine" and "the lockfile is honoured" were never the same claim. The
+        # lockfile is committed and verified consistent, so this fails loudly instead.
+        run: cd webui && npm ci --no-audit --no-fund
 
       - name: Type check
         run: cd webui && npm run typecheck
@@ -225,7 +239,10 @@ jobs:
         run: python scripts/check_desktop.py
 
       - name: cargo check
-        run: cargo check --manifest-path desktop/src-tauri/Cargo.toml --all-targets
+        # `--locked`: the shell is an application, so `Cargo.lock` is committed and must
+        # be what compiles. Without it cargo is free to silently rewrite the lock and
+        # the reproducibility the committed file promises disappears.
+        run: cargo check --locked --manifest-path desktop/src-tauri/Cargo.toml --all-targets
 
   package:
     needs: [backend, frontend]
@@ -280,7 +297,7 @@ jobs:
           PY
 
       - name: Build panel
-        run: cd webui && (test -f package-lock.json && npm ci || npm install) && npm run build
+        run: cd webui && npm ci --no-audit --no-fund && npm run build
 
       - name: Panel sources and the committed build moved together (advisory)
         # A source edit without a rebuilt panel ships an old UI to hosts that cannot

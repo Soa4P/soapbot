@@ -364,36 +364,13 @@ def test_review_normal_text_passes_through_unchanged() -> None:
 # ============================================ R8: dependency vulnerabilities
 
 
-def test_review_no_known_dependency_vulnerabilities() -> None:
-    """R8: 130 advisories across 6 packages were found by pip-audit.
-
-    Asserted in-process rather than by shelling out, so it runs in CI without the
-    tool installed. A skip is used when pip-audit is absent: a silent pass would
-    claim a guarantee we did not check.
-    """
-    audit_mod = pytest.importorskip(
-        "pip_audit", reason="pip-audit not installed; dependency scan not performed"
-    )
-    assert audit_mod is not None
-
-    import json
-    import subprocess
-    import sys
-
-    proc = subprocess.run(
-        [sys.executable, "-m", "pip_audit", "--format", "json", "--progress-spinner", "off"],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    payload = json.loads(proc.stdout or "{}")
-    deps = payload.get("dependencies", payload if isinstance(payload, list) else [])
-    vulnerable = [
-        (d.get("name"), d.get("version"), [v.get("id") for v in d.get("vulns", [])])
-        for d in deps
-        if d.get("vulns")
-    ]
-    assert vulnerable == [], f"known vulnerable dependencies: {vulnerable}"
+# R8 (dependency vulnerabilities) was promoted to a CI step in `.github/workflows/ci.yml`.
+#
+# It used to live here as `pytest.importorskip("pip_audit")`. pip-audit is not a dev
+# dependency and was never installed in CI, so the "gate" skipped on every run while
+# reading as coverage — a check that cannot fail is not a check. The CI step installs
+# the tool and runs it for real; leaving a skipped duplicate here would make the test
+# count look better without changing what is verified.
 
 
 # ================================================ R9: notice / cron dispatch
