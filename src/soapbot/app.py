@@ -51,6 +51,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from soapbot import __version__
 from soapbot.api.admin import router as admin_router
@@ -525,6 +526,10 @@ def create_app() -> FastAPI:
 
     install_error_handlers(app)
 
+    # 1 KB floor: below that the framing overhead outweighs the saving. Everything the
+    # panel serves is well above it.
+    app.add_middleware(_CompressExceptEvents, minimum_size=1024)
+
     app.add_middleware(
         CORSMiddleware,
         # The Vite dev server only. In production the UI is served from this same
@@ -852,6 +857,46 @@ def create_app() -> FastAPI:
     return app
 
 
+class _CompressExceptEvents(GZipMiddleware):
+    """Compress responses, except the one response that must never wait for a buffer.
+
+    Measured before adding this: the panel's entry chunk is 241 KB of text and the first
+    load pulls ~273 KB, none of it compressed. Event streams are excluded by their
+    ``Accept`` header because SSE frames are already small and the whole point of the
+    channel is that a frame reaches the client immediately; putting them through a
+    compressor trades latency for bytes on the one response that cannot afford it.
+    """
+
+    async def __call__(self, scope: dict, receive, send) -> None:
+        if scope.get("type") == "http":
+            accept = ""
+            for name, value in scope.get("headers") or []:
+                if name == b"accept":
+                    accept = value.decode("latin-1", "replace")
+                    break
+            if "text/event-stream" in accept:
+                await self.app(scope, receive, send)
+                return
+        await super().__call__(scope, receive, send)
+
+
+class _ImmutableAssets(StaticFiles):
+    """Serve hashed assets with a long-lived cache, which is what the hash is for.
+
+    ``StaticFiles`` sends only ``ETag``/``Last-Modified``, so every page view revalidated
+    all ~24 assets — cheap individually, but one round trip each. The filename contains
+    a content hash, which is exactly the condition under which ``immutable`` is safe.
+    ``index.html`` deliberately keeps ``no-store`` (see ``_mount_webui``): caching the
+    shell is how a rebuild keeps showing the previous bundle.
+    """
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def _mount_webui(app: FastAPI) -> None:
     """Serve the built management panel, or explain that it is not built.
 
@@ -864,7 +909,7 @@ def _mount_webui(app: FastAPI) -> None:
     if index.is_file():
         assets = _WEBUI_DIST / "assets"
         if assets.is_dir():
-            app.mount("/assets", StaticFiles(directory=assets), name="webui-assets")
+            app.mount("/assets", _ImmutableAssets(directory=assets), name="webui-assets")
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa(full_path: str) -> FileResponse:
