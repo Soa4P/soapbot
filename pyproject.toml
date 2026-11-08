@@ -25,7 +25,7 @@ dependencies = [
     "sqlalchemy[asyncio]==2.0.36",
     "aiosqlite==0.20.0",
     "httpx==0.28.1",
-    "websockets==14.1",
+    "websockets==17.4",
     "pyyaml==6.0.2",
     "pillow==13.0.0",
     "numpy==2.2.1",
