@@ -42,9 +42,8 @@ __pycache__/
 node_modules/
 webui/node_modules/
 webui/.vite/
-src/webui/dist/
 
-# --- build outputs of the host (the image builds its own)
+# --- build outputs of the host (the image builds its own wheel)
 dist/
 build/
 dist_check/
@@ -60,4 +59,14 @@ Makefile
 !README.md
 .codebuddy/
 .git/
+
+# --- the built panel MUST stay in the context
+#
+# The image has no node and never runs `npm run build`; `COPY src ./src` is the only
+# path the UI takes into the container. An earlier revision had `src/webui/dist/` here,
+# a path that matches nothing — so it looked like a correct exclusion while the real
+# output stayed in the context by accident. Naming the exception explicitly means a
+# future edit to the rules above cannot silently produce a container that serves
+# "not built" while every static check stays green.
+!src/soapbot/webui/dist/
 .gitignore

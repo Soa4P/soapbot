@@ -23,8 +23,12 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-# Build a wheel, install into a throwaway prefix. Keeps build tooling out of the
-# runtime image entirely — no pip, no setuptools, nothing to exploit post-compromise.
+# Build a wheel, install into a throwaway prefix so the runtime stage copies only the
+# installed package. `build` and the setuptools it needs stay in this stage. The runtime
+# stage still inherits pip from the Python base image — that pip belongs to the base
+# image, it is not something this file leaves behind, and the previous comment claiming
+# "no pip, no setuptools" was inaccurate. Removing it would break `pip check`-style
+# diagnostics without closing any attack this image does not already close elsewhere.
 RUN pip install --upgrade pip build \
  && python -m build --wheel --outdir /dist \
  && pip install --prefix=/install /dist/*.whl
@@ -60,10 +64,13 @@ RUN apt-get update \
 
 COPY --from=build /install /usr/local
 
-# Application code owned by root and read-only to the app user: a compromised plugin
-# cannot rewrite the host's own source to persist across restarts.
-COPY --chown=root:root src /app/src
-ENV PYTHONPATH=/app/src
+# Application code is the installed wheel above: root-owned under /usr/local, therefore
+# not writable by the app user — the same property the old `COPY src` gave, without a
+# second copy of the code. That copy was not merely redundant: with
+# `ENV PYTHONPATH=/app/src` the source tree came *ahead* of the wheel on `sys.path`, so
+# the container ran unpackaged source and the wheel only supplied dependencies. Two
+# copies of the same code is how "which one is actually running" stops being answerable,
+# and it made the wheel check in CI true for the wrong reason.
 
 # Configuration (providers / adapters / personas). Copied in so the image contains the
 # same defaults as the repository; compose mounts the operator's directory over it,
