@@ -105,7 +105,19 @@ def main() -> int:
             items = staged()
         findings = [(name, reason) for name, content in items if (reason := check(name, content))]
     except (subprocess.CalledProcessError, OSError, ValueError) as exc:
-        print(f"Secret scan failed closed: {type(exc).__name__}", file=sys.stderr)
+        # "Failed closed" without saying *what* failed is what made a pre-push hook
+        # block every push here with no way to diagnose it: the exception type alone
+        # does not identify the command or its stderr. A scan that refuses to push must
+        # be actionable, or the operator's only recourse is `--no-verify`.
+        detail = ""
+        if isinstance(exc, subprocess.CalledProcessError):
+            cmd = exc.cmd
+            rendered = " ".join(str(part) for part in cmd) if isinstance(cmd, list | tuple) else str(cmd)
+            detail = f" running `{rendered}`"
+            message = (exc.stderr or b"").decode("utf-8", "replace").strip()
+            if message:
+                detail += f": {message[:200]}"
+        print(f"Secret scan failed closed: {type(exc).__name__}{detail}", file=sys.stderr)
         return 1
     for name, reason in findings:
         print(f"Push blocked: {name}: {reason}", file=sys.stderr)
