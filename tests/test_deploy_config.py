@@ -166,6 +166,29 @@ def test_dockerignore_excludes_runtime_state() -> None:
         assert required in entries, f".dockerignore 未排除 {required}"
 
 
+def test_panel_dist_stays_in_the_build_context() -> None:
+    """The image has no node, so the committed panel is the only UI it can serve.
+
+    This asserts the *presence* of the build output, which is the opposite of the usual
+    .dockerignore test. An earlier rule said `src/webui/dist/` — a path that matches
+    nothing — so it read as a correct exclusion while the real output was kept by
+    accident. It also means an over-eager future exclusion fails here instead of in a
+    browser.
+    """
+    text = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    entries = {
+        line.strip().rstrip("/")
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    assert "!src/soapbot/webui/dist/" in text, (
+        "缺少显式保留规则：镜像不构建前端，产物必须留在构建上下文中"
+    )
+    for lossy in ("src", "src/soapbot", "src/soapbot/webui/dist", "webui/dist"):
+        assert lossy not in entries, f".dockerignore 排除了 {lossy}，容器会渲染「未构建」页面"
+
+
 def test_config_is_not_dockerignored() -> None:
     """The opposite mistake: excluding config/ makes the image start with no adapters."""
     ignore_text = (ROOT / ".dockerignore").read_text(encoding="utf-8")

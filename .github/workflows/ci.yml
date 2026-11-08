@@ -241,8 +241,60 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Committed panel is present and self-consistent
+        # Runs BEFORE the build on purpose. Deployment hosts frequently have no node, so
+        # the committed dist/ is what they actually serve; rebuilding first regenerates
+        # it and hides a missing or stale copy. This is the gate the old job never had:
+        # it built the panel and then checked the wheel, so "the wheel has a panel" was
+        # true by construction and said nothing about the repository.
+        run: |
+          python - <<'PY'
+          import re, sys
+          from pathlib import Path
+
+          dist = Path("src/soapbot/webui/dist")
+          index = dist / "index.html"
+          if not index.is_file():
+              sys.exit("committed panel missing: src/soapbot/webui/dist/index.html")
+          html = index.read_text(encoding="utf-8")
+          referenced = re.findall(r'(?:src|href)="(/assets/[^"]+)"', html)
+          missing = [a for a in referenced if not (dist / a.lstrip("/")).is_file()]
+          if missing:
+              sys.exit(f"index.html references missing assets: {missing}")
+          print(f"committed panel ok: {len(referenced)} referenced assets present")
+          PY
+
+      - name: Wheel contains the committed panel (no rebuild)
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir /tmp/wheel-committed
+          python - <<'PY'
+          import sys, zipfile
+          from pathlib import Path
+
+          wheel = next(Path("/tmp/wheel-committed").glob("*.whl"))
+          names = zipfile.ZipFile(wheel).namelist()
+          if not any(n.endswith("soapbot/webui/dist/index.html") for n in names):
+              sys.exit("wheel built from the committed tree has no panel")
+          print("committed-dist wheel ok")
+          PY
+
       - name: Build panel
         run: cd webui && (test -f package-lock.json && npm ci || npm install) && npm run build
+
+      - name: Rebuilt panel matches the committed one
+        # A source edit without a rebuilt panel is exactly the state that ships an old
+        # UI to a host that cannot build one. Locally a fresh `npm run build` leaves the
+        # working tree byte-identical, so a diff here means a stale commit rather than
+        # build non-determinism. `git status` (not `git diff`) also catches added and
+        # deleted asset files.
+        run: |
+          if [ -n "$(git status --porcelain -- src/soapbot/webui/dist)" ]; then
+            echo "::error::webui/src changed but src/soapbot/webui/dist was not rebuilt and committed"
+            git --no-pager status --porcelain -- src/soapbot/webui/dist | head -20
+            exit 1
+          fi
+          echo "committed panel matches a fresh build"
 
       - name: Build wheel
         run: |
