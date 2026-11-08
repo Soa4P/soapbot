@@ -60,6 +60,9 @@ fmt:
 typecheck:
 	$(BIN)/python -m mypy src
 
+version:
+	$(BIN)/python scripts/check_version_consistency.py
+
 contrast:
 	$(BIN)/python scripts/check_contrast.py
 
@@ -113,7 +116,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check test
+check: lint version contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:

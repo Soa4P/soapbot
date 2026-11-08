@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from soapbot import __version__
 from soapbot.plugins.loader import PluginLoader
 from soapbot.plugins.manifest import (
     MANIFEST_ALT_FILENAME,
@@ -103,7 +104,7 @@ def install_from_zip(
     data: bytes,
     plugins_dir: Path,
     *,
-    host_version: str = "0.1.0",
+    host_version: str = __version__,
     blocked: Mapping[str, str] | None = None,
 ) -> InstallResult:
     """Validate and install a plugin archive. Raises :class:`InstallError`.

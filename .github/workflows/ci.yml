@@ -70,6 +70,13 @@ jobs:
       - name: Dependency manifests agree
         run: python scripts/check_deps.py
 
+      - name: Version declarations agree
+        # Six files spell the product version and no build tool reconciles them; a
+        # release that bumps five ships a wheel, a panel and a desktop shell that
+        # disagree about which version is running. Also refuses runtime code that
+        # restates the number instead of importing `__version__`.
+        run: python scripts/check_version_consistency.py
+
       - name: Container config is consistent
         # Runs on the CI runner, not on the maintainer's machine: this is the only
         # place where the Linux-only assumptions (bind address reachability, read_only
