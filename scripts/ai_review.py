@@ -177,6 +177,18 @@ def normalise(payload: dict) -> dict:
 
 
 def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
+    # An invisible BOM in the secret surfaces as `UnicodeEncodeError: 'latin-1' codec
+    # can't encode characters` from deep inside urllib's header writer, which reads like
+    # a model or network failure and sends the investigation the wrong way. It is a
+    # secret-configuration problem, so say that here.
+    try:
+        api_key.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ReviewError(
+            f"DEEPSEEK_API_KEY 含非 ASCII 字符（位置 {exc.start}）；"
+            "通常是复制或管道传输时带入了 BOM/全角字符"
+        ) from exc
+
     payload = {
         "model": model,
         "messages": [
