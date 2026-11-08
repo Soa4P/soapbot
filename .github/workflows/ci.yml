@@ -81,6 +81,13 @@ jobs:
         # restates the number instead of importing `__version__`.
         run: python scripts/check_version_consistency.py
 
+      - name: Console encoding is safe on Windows
+        # This failure has now happened twice: a script prints Chinese, the Windows
+        # runner's console is cp1252, and the job dies with UnicodeEncodeError — on the
+        # one platform the maintainer cannot reproduce. Verified to fail on a probe
+        # script that prints CJK without reconfiguring its streams.
+        run: python scripts/check_console_encoding.py
+
       - name: Container config is consistent
         # Runs on the CI runner, not on the maintainer's machine: this is the only
         # place where the Linux-only assumptions (bind address reachability, read_only
