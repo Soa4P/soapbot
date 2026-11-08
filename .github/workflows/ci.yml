@@ -32,6 +32,10 @@ env:
 
 jobs:
   backend:
+    # A hung test used to occupy a runner until GitHub's six-hour default; this project
+    # already had the Windows matrix sit for 69 minutes on a blocked `taskkill`. Keep
+    # headroom over the slowest observed run (~6 min) without allowing that again.
+    timeout-minutes: 40
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -161,6 +165,7 @@ jobs:
     # Advisory: reports the current type-error count so it cannot grow silently,
     # without turning a pre-existing baseline into a red build. When the count
     # reaches zero this job should become gating and move into `backend`.
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -183,6 +188,7 @@ jobs:
         run: python -m mypy src
 
   frontend:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -226,6 +232,7 @@ jobs:
     # the shell proves the Rust side still matches the Tauri 2 API, while bundling needs
     # WebView2, NSIS and a signing key that CI does not have. Shipping an unsigned
     # artifact from CI would be worse than shipping none.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -253,6 +260,7 @@ jobs:
 
   package:
     needs: [backend, frontend]
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

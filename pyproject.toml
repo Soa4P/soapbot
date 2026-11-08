@@ -44,6 +44,7 @@ voice = ["edge-tts==7.0.2"]
 dev = [
     "pytest==9.0.3",
     "pytest-asyncio==1.4.1.post1",
+    "pytest-timeout==2.4.0",
     "respx==0.22.0",
     "ruff==0.8.6",
     "mypy==1.14.1",
@@ -93,6 +94,13 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["ignore::DeprecationWarning"]
+# A hung test used to run until GitHub's six-hour ceiling. This project has already had
+# one job sit for 69 minutes waiting on a blocked `taskkill`, with nothing to show for it
+# but a cancelled run. 120s is far above the slowest legitimate test (the restart
+# contract waits ~20s), and `thread` is used because `signal` does not exist on Windows
+# runners — a blocked C call must still be reported rather than waited on silently.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "no_env_key: run this test with DEEPSEEK_API_KEY deliberately unset",
 ]
