@@ -72,7 +72,7 @@ def test_installing_does_not_approve(tmp_path: Path) -> None:
 
 def test_rejects_path_traversal(tmp_path: Path) -> None:
     payload = _zip({"demo/plugin.yaml": MANIFEST, "../../evil.py": "x"})
-    with pytest.raises(InstallError, match="traversal|escapes"):
+    with pytest.raises(InstallError, match=r"traversal|escapes"):
         install_from_zip(payload, tmp_path)
     assert not (tmp_path.parent / "evil.py").exists()
 
@@ -107,7 +107,7 @@ def test_rejects_a_decompression_bomb(tmp_path: Path, monkeypatch: pytest.Monkey
     """The header's size can lie, so the cap is enforced on bytes actually written."""
     monkeypatch.setattr(installer, "MAX_UNCOMPRESSED_BYTES", 4096)
     payload = _zip({"demo/plugin.yaml": MANIFEST, "demo/big.txt": "A" * 200_000})
-    with pytest.raises(InstallError, match="size limit|expands"):
+    with pytest.raises(InstallError, match=r"size limit|expands"):
         install_from_zip(payload, tmp_path)
     assert not (tmp_path / "demo").exists()
 
@@ -137,7 +137,7 @@ def test_rejects_entry_outside_the_wrapping_directory(tmp_path: Path) -> None:
     guess which of the two layouts the author meant.
     """
     payload = _zip({"demo/plugin.yaml": MANIFEST, "stray.py": "x"})
-    with pytest.raises(InstallError, match="outside the plugin directory|under one directory"):
+    with pytest.raises(InstallError, match=r"outside the plugin directory|under one directory"):
         install_from_zip(payload, tmp_path)
 
 

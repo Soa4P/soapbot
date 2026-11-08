@@ -72,7 +72,7 @@ async def test_messages_are_archived_to_db(
     mock_llm_router, provider_router, mock_llm, db
 ) -> None:
     store, kb = build_memory_stack(db, None)
-    server, runtime, adapter = await _spin_up(
+    server, runtime, _adapter = await _spin_up(
         provider_router, store, kb, MemoryExtractor()
     )
 
@@ -105,7 +105,7 @@ async def test_memory_extraction_stores_durable_fact(
     mock_llm_router, provider_router, mock_llm, db
 ) -> None:
     store, kb = build_memory_stack(db, None)
-    server, runtime, adapter = await _spin_up(
+    server, runtime, _adapter = await _spin_up(
         provider_router, store, kb, MemoryExtractor()
     )
 
@@ -141,7 +141,7 @@ async def test_recall_command_answers_without_model(
         scope="onebot11:group:123456",
     )
 
-    server, runtime, adapter = await _spin_up(
+    server, runtime, _adapter = await _spin_up(
         provider_router, store, kb, MemoryExtractor()
     )
     mock_llm.reset()
