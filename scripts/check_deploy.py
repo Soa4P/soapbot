@@ -349,6 +349,30 @@ def check_hardening(report: Report) -> None:
         else:
             report.add("block", f"hardening.{name}", f"{name} 缺失：{why}")
 
+    # "A healthcheck exists" is not the property that matters. The previous check only
+    # matched the `healthcheck:` key, so a TCP-connect probe passed while the data
+    # directory was unwritable and the runtime had failed to build — the process was
+    # running and useless, which is the exact case a probe is supposed to catch.
+    if re.search(r"^\s+healthcheck:", compose, re.MULTILINE):
+        if "/readyz" in compose:
+            report.add(
+                "ok",
+                "hardening.healthcheck-probe",
+                "healthcheck 探测 /readyz（能发现数据目录不可写、数据库不可用、运行时未构建）",
+            )
+        elif "/healthz" in compose:
+            report.add(
+                "warn",
+                "hardening.healthcheck-shallow",
+                "healthcheck 只探测 liveness（/healthz）：数据目录不可写或数据库不可用时仍会被判为健康",
+            )
+        else:
+            report.add(
+                "warn",
+                "hardening.healthcheck-shallow",
+                "healthcheck 未探测 HTTP 端点：进程活着但无法服务时仍会被判为健康",
+            )
+
     # A tmpfs on /tmp is what makes read_only livable; without it, pip/httpx temp files fail.
     if re.search(r"^\s+tmpfs:", compose, re.MULTILINE):
         report.add("ok", "hardening.tmpfs", "tmpfs 已挂载（read_only 下可写临时目录）")

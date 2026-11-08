@@ -8,6 +8,7 @@ to prevent.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import sqlite3
@@ -73,6 +74,104 @@ def test_readyz_fails_when_the_data_dir_cannot_be_created(
     assert response.status_code == 503
     assert response.json()["status"] == "unavailable"
     assert any("data directory" in p for p in response.json()["problems"])
+
+
+class _BrokenDatabase:
+    """A database whose session fails on entry, like a corrupt or unopenable file."""
+
+    @contextlib.asynccontextmanager
+    async def session(self):
+        raise RuntimeError("disk I/O error")
+        yield  # pragma: no cover - unreachable; keeps this an async generator
+
+
+def test_readyz_fails_when_the_database_cannot_be_queried(
+    client: TestClient, monkeypatch
+) -> None:
+    """A writable directory is a proxy, not the property. This is the proxy failing.
+
+    The data directory in this fixture is perfectly writable, so only the query reveals
+    the problem — which is precisely the case the old probe reported as healthy.
+    """
+    from soapbot.memory import db as db_module
+
+    monkeypatch.setattr(db_module, "_db", _BrokenDatabase())
+
+    response = client.get("/readyz")
+    assert response.status_code == 503
+    body = response.json()
+    assert any("database not usable" in p for p in body["problems"])
+    # /readyz is unauthenticated; the driver message can carry a path.
+    assert "disk I/O error" not in response.text
+
+
+def test_readyz_does_not_require_a_database_before_one_exists(
+    client: TestClient, monkeypatch
+) -> None:
+    """The probe must not be the thing that creates the schema it observes."""
+    from soapbot.memory import db as db_module
+
+    monkeypatch.setattr(db_module, "_db", None)
+
+    assert client.get("/readyz").status_code == 200
+
+
+def test_readyz_reports_degraded_without_failing(
+    client: TestClient, monkeypatch
+) -> None:
+    """A broken plugin or offline adapter is degraded, not unavailable.
+
+    Failing readiness there would pull the console out of service exactly when someone
+    needs it to diagnose the plugin.
+    """
+    from soapbot import app as app_module
+
+    monkeypatch.setattr(app_module, "get_startup_errors", lambda: ["adapter qq is offline"])
+
+    response = client.get("/readyz")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["degraded"] is True
+    assert body["startup_errors"] == ["adapter qq is offline"]
+
+
+# ------------------------------------------------------------------ /metrics
+
+
+def test_metrics_exposes_build_and_uptime(client: TestClient) -> None:
+    """Prometheus needs the text format, not JSON, and a stable metric name."""
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "version=0.0.4" in response.headers["content-type"]
+    body = response.text
+    assert 'soapbot_info{version="' in body
+    assert "# TYPE soapbot_uptime_seconds gauge" in body
+
+
+def test_metrics_publishes_empty_provider_families_without_a_runtime(
+    client: TestClient,
+) -> None:
+    """Switching the runtime off must not leave a stale series on a dashboard.
+
+    The families are emitted with no samples, so Prometheus records "no data" instead
+    of continuing to draw the last value from before the runtime was disabled.
+    """
+    body = client.get("/metrics").text
+
+    assert "# TYPE soapbot_provider_calls_total counter" in body
+    assert "# TYPE soapbot_provider_latency_p95_ms gauge" in body
+
+
+def test_metrics_label_values_are_escaped() -> None:
+    """A provider id is operator-controlled config; it must not break the format."""
+    from soapbot.app import _prometheus_label
+
+    assert _prometheus_label('a"b') == 'a\\"b'
+    assert _prometheus_label("a\\b") == "a\\\\b"
+    assert _prometheus_label("a\nb") == "a\\nb"
 
 
 # -------------------------------------------------------------- backup/restore
