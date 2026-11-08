@@ -19,33 +19,33 @@ license = { text = "MIT" }
 # make 'pip install and run' heavier for everyone to serve one feature.
 dependencies = [
     "fastapi==0.162.0",
-    "uvicorn[standard]==0.34.0",
-    "pydantic==2.10.4",
-    "pydantic-settings==2.7.0",
-    "sqlalchemy[asyncio]==2.0.36",
-    "aiosqlite==0.20.0",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.14.2",
+    "pydantic-settings==2.16.2",
+    "sqlalchemy[asyncio]==2.1.8",
+    "aiosqlite==0.22.1",
     "httpx==0.28.1",
     "websockets==14.1",
-    "pyyaml==6.0.2",
+    "pyyaml==6.0.3",
     "pillow==13.0.0",
-    "numpy==2.2.1",
+    "numpy==2.5.4",
     "pyjwt==2.15.1",
     "cryptography==50.0.2",
-    "croniter==6.0.0",
-    "apscheduler==3.11.0",
+    "croniter==6.2.4",
+    "apscheduler==3.11.3",
 ]
 
 [project.optional-dependencies]
 qq-official = ["qq-botpy==1.2.1"]
-precision = ["tiktoken==0.8.0"]
+precision = ["tiktoken==0.14.0"]
 # Text-to-speech for reply-as-voice. Inbound transcription needs no extra: it goes
 # through the provider's ``transcribe`` slot, like every other model call.
-voice = ["edge-tts==7.0.2"]
+voice = ["edge-tts==7.3.1"]
 dev = [
-    "pytest==9.0.3",
+    "pytest==9.2.0",
     "pytest-asyncio==1.4.1",
-    "respx==0.22.0",
-    "ruff==0.8.6",
+    "respx==0.23.1",
+    "ruff==0.17.3",
     "mypy==1.14.1",
     "types-pyyaml==6.0.12.20241230",
 ]
@@ -54,7 +54,7 @@ dev = [
 soapbot = "soapbot.cli:main"
 
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
