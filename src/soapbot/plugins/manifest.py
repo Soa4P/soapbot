@@ -48,6 +48,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from soapbot import __version__
+
 MANIFEST_FILENAME = "plugin.yaml"
 MANIFEST_ALT_FILENAME = "plugin.yml"
 
@@ -214,7 +216,7 @@ class PluginManifest:
     requires: tuple[str, ...] = ()
     """Declared Python dependencies. Displayed to the operator; **never installed**."""
 
-    min_host_version: str = "0.1.0"
+    min_host_version: str = __version__
     trust: TrustLevel = TrustLevel.UNTRUSTED
     channel: Channel = Channel.COMMUNITY
     homepage: str = ""
@@ -437,7 +439,7 @@ def parse_manifest(raw: dict[str, Any], *, digest: str = "") -> PluginManifest:
     except ValueError as exc:
         raise ManifestError(f"unknown trust level {trust_raw!r}") from exc
 
-    min_host = str(raw.get("min_host_version", "0.1.0"))
+    min_host = str(raw.get("min_host_version", __version__))
     if not _VERSION_RE.match(min_host):
         raise ManifestError("min_host_version is not a valid version")
 

@@ -31,6 +31,7 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
+from soapbot import __version__
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import scrub_schema, scrub_tool_text
 
@@ -159,7 +160,7 @@ class McpClient:
                 "params": {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": {"name": "soapbot", "version": "0.1.0"},
+                    "clientInfo": {"name": "soapbot", "version": __version__},
                 },
             }
         )

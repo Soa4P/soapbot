@@ -251,6 +251,25 @@ def _isolated_runtime(monkeypatch, tmp_path):
             os.environ[key] = value
 
 
+@pytest.fixture(autouse=True)
+def _reset_audit_log():
+    """The audit log is a process-wide singleton; one test's events must not reach the next.
+
+    `test_security_e2e.py::test_injection_refused_before_model` asserts on
+    `recent(kind="injection")[-1]` — a positional claim about a shared deque. Without
+    this reset the assertion depends on no earlier test having logged an injection
+    event: it passes alone, passes as a file, and fails in a full run. That is the
+    hardest kind of failure to attribute, and it was reproduced exactly that way before
+    this fixture existed.
+    """
+    from soapbot.security.audit import get_audit_log
+
+    log = get_audit_log()
+    log.clear()
+    yield
+    log.clear()
+
+
 @pytest.fixture
 def mock_llm() -> MockLLM:
     return MockLLM()
