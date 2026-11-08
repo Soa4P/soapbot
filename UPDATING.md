@@ -15,7 +15,7 @@ docker compose -f deploy/docker-compose.yml down      # 或 systemctl stop soapb
 python scripts/backup.py --out backups/pre-upgrade.zip
 
 # 3. 更新代码
-git fetch --tags && git checkout v0.2.0
+git fetch --tags && git checkout vX.Y.Z   # 换成 release 页面对应的 tag
 
 # 4. 装依赖
 pip install -e .            # 或 docker compose build

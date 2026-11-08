@@ -55,6 +55,7 @@ from typing import Any
 
 import yaml
 
+from soapbot import __version__
 from soapbot.config import settings
 from soapbot.plugins.context import PluginContext
 from soapbot.plugins.integrity import compare_async as compare_integrity_async
@@ -191,7 +192,7 @@ class PluginLoader:
         *,
         plugins_dir: Path,
         audit: AuditLog | None = None,
-        host_version: str = "0.1.0",
+        host_version: str = __version__,
         allow_untrusted: bool = False,
         crypto=None,
         storage_backend: dict[str, dict[str, Any]] | None = None,
