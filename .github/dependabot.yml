@@ -4,6 +4,16 @@ version: 2
 # README and docs/configuration.md), which stops version drift but also means nobody
 # notices a security release. Dependabot's job is to open the proposal; the pin stays
 # exact, so a merge is still an explicit decision rather than a floating range.
+#
+# Major versions are deliberately NOT proposed for pip/npm/cargo. Measured on the first
+# run of this file: Dependabot opened `typescript 5.9 -> 7.0` and that PR failed CI
+# immediately, while `pinia 2.3 -> 4.1` was merged within two minutes and then never ran
+# a full CI at all (the concurrency group cancelled it). A pull request whose expected
+# outcome is a red badge is noise that invites exactly that kind of merge. A major bump
+# needs a human to read the changelog first, which is an issue, not a bot PR.
+#
+# `github-actions` is exempt: its major bumps are runtime updates that keep the same
+# inputs, and skipping them means missing the security fixes they usually carry.
 updates:
   - package-ecosystem: "pip"
     directory: "/"
@@ -16,6 +26,9 @@ updates:
       python-minor-and-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/webui"
@@ -26,6 +39,9 @@ updates:
       panel-minor-and-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # The desktop shell is an application, not a library, so `Cargo.lock` is committed
   # and must move with it — Dependabot updates both.
@@ -34,6 +50,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
