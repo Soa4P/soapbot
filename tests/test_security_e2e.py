@@ -86,6 +86,24 @@ async def wait_send(server, timeout: float = 10.0) -> None:
         await asyncio.sleep(0.02)
 
 
+async def wait_until(predicate, *, timeout: float = 10.0, what: str = "condition") -> None:
+    """Poll until `predicate()` holds, or fail naming what we were waiting for.
+
+    `sent_messages()` becoming non-empty does not mean the surrounding stage finished:
+    the audit record for a refused injection is written on the line *after*
+    `adapter.send()`, so a test that asserts on it immediately can win the race on a
+    slower machine. That is exactly how `test_injection_refused_before_model` failed on
+    Windows CI (5m55s job, `assert ([])`) while passing locally.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"超时 {timeout}s，未等到 {what}")
+
+
 async def send_cmd(server, text: str, user_id: str = "20001") -> None:
     await server.push_group_message(
         segments=[
@@ -340,7 +358,12 @@ async def test_injection_refused_before_model(
     assert "系统提示" not in server.last_sent_text()
     from soapbot.security.audit import get_audit_log
 
-    events = get_audit_log().recent(kind="injection")
+    log = get_audit_log()
+    await wait_until(
+        lambda: any(e["action"] == "refusal_delivery" for e in log.recent(kind="injection")),
+        what="refusal_delivery 审计事件",
+    )
+    events = log.recent(kind="injection")
     delivered = [event for event in events if event["action"] == "refusal_delivery"]
     assert delivered and delivered[-1]["outcome"] == "allow"
     assert any(
