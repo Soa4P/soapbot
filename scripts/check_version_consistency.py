@@ -69,6 +69,14 @@ def hardcoded(version: str) -> list[str]:
 
 
 def main() -> int:
+    # Must run before the first print: the Windows CI runner's console is cp1252, and a
+    # Chinese message raised UnicodeEncodeError there — the same failure that once hit
+    # `verify_restart.py --help`. `check_console_encoding.py` now blocks a new script
+    # from shipping without this.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     found = sources()
     values = set(found.values())
     if len(values) != 1:
