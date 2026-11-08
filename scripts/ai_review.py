@@ -201,14 +201,25 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
     )
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
-            body = json.loads(response.read().decode("utf-8", "replace"))
+            status = getattr(response, "status", 0)
+            raw = response.read()
     except urllib.error.HTTPError as exc:
-        # Never echo the Authorization header or the response body verbatim.
-        raise ReviewError(f"模型返回 HTTP {exc.code}") from exc
+        # The body of an HTTP error is where a proxy or a WAF explains itself, so it is
+        # worth more than the status code. No credential is ever in a response body; the
+        # Authorization header is not echoed anywhere.
+        snippet = exc.read()[:300].decode("utf-8", "replace")
+        raise ReviewError(f"模型返回 HTTP {exc.code}（响应开头：{snippet!r}）") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ReviewError(f"无法连接模型：{type(exc).__name__}") from exc
+        raise ReviewError(f"无法连接模型：{type(exc).__name__}: {exc}") from exc
+
+    try:
+        body = json.loads(raw.decode("utf-8", "replace"))
     except (ValueError, TypeError) as exc:
-        raise ReviewError("模型响应不是 JSON") from exc
+        # Distinct from "the model's answer is not JSON": here the *transport* answered
+        # with something that is not JSON at all (an HTML block page, for instance), and
+        # calling that a model problem sent the first investigation in the wrong
+        # direction.
+        raise ReviewError(f"响应体不是 JSON（HTTP {status}，开头：{raw[:300]!r}）") from exc
 
     choice = (body.get("choices") or [{}])[0]
     message = choice.get("message") or {}
