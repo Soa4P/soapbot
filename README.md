@@ -82,6 +82,23 @@ python -m soapbot.cli doctor --strict      # 部署前
 它只负责打开面板，不启动后端：进程生命周期归计划任务或 systemd，两个监管者抢
 6185 端口是没人想调的故障。
 
+## AI 审查
+
+PR 会多一条由 `scripts/ai_review.py` 生成的评论，判 `safe` / `needs_review` /
+`malicious` 并给出理由。它**只评论、只打标签，不批准也不合并** —— 合并决定始终由
+上面那组确定性门禁和维护者做出。
+
+判断不了的时候它说「判断不了」：模型超时、非 200、返回非法 JSON、或 diff 超过上限
+被截断，一律降级为 `needs_review`。截断过的 diff **不会**被判成 `safe`，因为那等于
+对没读过的文本下结论。
+
+工作流用 `pull_request_target`（fork PR 才拿得到 secret），因此把 checkout 钉在
+base commit、只通过 `gh pr diff` 读文本，从不执行 PR 里的代码。
+
+配置：仓库 secret `DEEPSEEK_API_KEY`（必需）；variable `AI_REVIEW_MODEL`（可选，
+默认 `deepseek-chat`）。没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成
+审查过、没问题。
+
 部署、备份、巡检、故障排查和升级在 [docs/operations.md](docs/operations.md)。
 
 MIT，见 [LICENSE](LICENSE)。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
