@@ -24,6 +24,7 @@ only follows imports, so they never enter the bundle unless something imports th
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -100,6 +101,16 @@ def command() -> list[str]:
 
 
 def main() -> int:
+    # Checked before anything expensive: CI failed on this once with a bare
+    # "No module named PyInstaller" from a subprocess, which reads like a broken build
+    # rather than a missing optional dependency.
+    if importlib.util.find_spec("PyInstaller") is None:
+        print(
+            'PyInstaller is not installed; run `pip install -e ".[sidecar]"`',
+            file=sys.stderr,
+        )
+        return 2
+
     dist_missing = not (ROOT / "src" / "soapbot" / "webui" / "dist" / "index.html").is_file()
     if dist_missing:
         print(

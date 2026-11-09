@@ -318,7 +318,7 @@ jobs:
         # a shell that can only connect to an already-running service.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,sidecar]"
           python desktop/sidecar/build.py
 
       - name: Build the installer
