@@ -1,0 +1,11 @@
+# Raised by scripts/check_mypy_baseline.py. This is a ratchet: it may go down, never up.
+#
+# 79 is where the code stood when the guard was added (mypy 1.20.2, 136 files, 31 of
+# them with at least one error). Fixing those is a separate job — most come from `Any`
+# in third-party stubs, a handful are real signature mismatches (the `_ImmutableAssets`
+# override in app.py is one).
+#
+# Lower this number whenever a batch of errors is fixed: the guard prints a hint when the
+# count drops below the baseline, and leaving the old number in place lets the debt climb
+# back silently.
+79

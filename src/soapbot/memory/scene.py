@@ -804,10 +804,4 @@ class SceneMemory:
                 )
         return card, portrait
 
-    async def drop_portrait(self, scope: str) -> bool:
-        """Remove a stored portrait. Returns whether one existed."""
-        async with self.db.write() as session:
-            result = await session.execute(
-                delete(ScenePortraitRow).where(ScenePortraitRow.scope == scope)
-            )
-            return bool(result.rowcount)
+
