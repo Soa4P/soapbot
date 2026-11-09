@@ -30,6 +30,8 @@ import logging
 import re
 import unicodedata
 
+from soapbot.core.text import INVISIBLE
+
 logger = logging.getLogger(__name__)
 
 # --- direct injection patterns -------------------------------------------------
@@ -102,10 +104,9 @@ _INJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 # Charset used by "invisible" smuggling: zero-width, bidi overrides, tag chars.
-_INVISIBLE = dict.fromkeys(
-    [*range(0x200B, 0x2010), *range(0x202A, 0x202F), 0xFEFF, *range(0xE0000, 0xE0080)],
-    None,
-)
+#: The one shared table. See :data:`soapbot.core.text.INVISIBLE` for why a
+#: second copy of it is a bypass rather than a convenience.
+_INVISIBLE = INVISIBLE
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 

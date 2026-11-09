@@ -185,7 +185,7 @@
 
 ## 6.2 流水线顺序不可由 UI 修改
 
-17 个 Stage 的顺序是安全语义（`guard` 在 `whitelist` 前、`sanitize` 在
+22 个 Stage 的顺序是安全语义（`guard` 在 `whitelist` 前、`sanitize` 在
 `injection_screen` 前、`safety` 在 `reply` 前）。因此 09 页只提供**只读拓扑**与一个
 **沙箱**：可以拖拽试排，页面会指出破坏了哪一条具体约束，但结果不写回任何地方。
 
@@ -231,7 +231,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（1290 项通过 / 10 项跳过）
+└── tests/              # pytest（1866 项通过 / 12 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点

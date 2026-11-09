@@ -597,26 +597,41 @@ async def revoke_all_tokens(
         store.revoke(caller_claims.token_id, caller_claims.expires_at)
     cut_off = store.revoke_all()
 
-    # Hand the caller a replacement token. Without this, "revoke all" logs out the owner
-    # who just pressed it, and the way back in — the bootstrap token — was redeemed at
-    # their first login. The next step would be regenerating credentials on the host,
-    # which is exactly the situation an operator cannot recover from at 3am.
-    replacement = ""
-    service = _token_service
-    claims = getattr(request.state, "claims", None)
-    if service is not None and auth.get("mode") == "token":
-        new_token, new_claims = service.issue(
-            claims.subject if claims else "operator",
-            role=claims.role if claims else role.value,
+    # "Revoked" used to be a log line rather than a state: the response immediately
+    # handed the caller a fresh 72h full-privilege token (and a cookie), issued *after*
+    # the cut-off. Every session was gone except the one that mattered — the operator's
+    # own — and getting it back required no explicit login at all.
+    #
+    # Closing the revocation now means: no live session token anywhere, plus a freshly
+    # minted single-use bootstrap credential that must be redeemed through
+    # /api/auth/login. The owner is not locked out (no host round-trip, no restart),
+    # but returning is an explicit authentication step, not an automatic renewal.
+    _clear_session(response)
+    bootstrap = _bootstrap
+    new_bootstrap = bootstrap.regenerate() if bootstrap is not None else ""
+
+    # Verify the terminal state rather than assuming the writes above did what they
+    # claim. A store that silently failed to revoke, or a bootstrap that is still
+    # consumed, must never be reported as a successful closure.
+    caller_claims = getattr(request.state, "claims", None)
+    caller_revoked = caller_claims is None or store.is_revoked(
+        caller_claims.token_id, caller_claims.issued_at
+    )
+    way_back_in = bootstrap is None or bootstrap.available
+    if not caller_revoked or not way_back_in:
+        get_audit_log().record(
+            kind="login",
+            action="revoke_all",
+            outcome="deny",
+            role=role.value,
+            detail=(
+                f"closure_check_failed caller_revoked={caller_revoked} "
+                f"bootstrap_available={way_back_in}"
+            ),
         )
-        replacement = new_token
-        expires_at = new_claims.expires_at
-        # A cookie-backed operator would otherwise be logged out by their own
-        # "revoke everything" click, with no bootstrap token left to get back in.
-        if auth.get("carrier") == "cookie":
-            _set_session(response, new_token, service.ttl_seconds)
-    else:
-        expires_at = 0
+        raise HTTPException(
+            status_code=500, detail="revocation did not reach a closed terminal state"
+        )
 
     get_audit_log().record(
         kind="login",
@@ -625,14 +640,15 @@ async def revoke_all_tokens(
         role=role.value,
         detail=(
             f"revoked_before={int(cut_off)} from={_client_host(request)} "
-            f"replacement_issued={bool(replacement)}"
+            f"caller_revoked={caller_revoked} bootstrap_rotated={bool(new_bootstrap)} "
+            "session_token_issued=False requires_login=True"
         ),
     )
     return {
         "ok": True,
         "revoked_before": cut_off,
-        "access_token": replacement,
-        "expires_at": expires_at,
+        "bootstrap_token": new_bootstrap,
+        "requires_login": True,
     }
 
 

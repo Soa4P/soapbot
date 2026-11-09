@@ -309,6 +309,35 @@ class BootstrapToken:
                 exc,
             )
 
+    def regenerate(self) -> str:
+        """Mint a fresh single-use credential in the **running** process.
+
+        ``reset_bootstrap`` writes the files for a restart, but the live process keeps
+        its old ``_consumed`` object, so the new value is refused until a restart. That
+        is fine for a CLI recovery and useless for "revoke everything": the operator
+        needs a way back in *now*. This method updates both the files and this object.
+
+        Order matters. Write the new token file first, then remove the redeemed marker:
+        a crash in between must leave a usable credential on disk, not a state that a
+        later start reads as "fresh install" and silently rotates again. An instance
+        without files (an explicitly configured ``SOAPBOT_INIT_TOKEN``) rotates only
+        its in-memory value; a restart then returns to the configured one, which is the
+        operator's own lifecycle decision.
+        """
+        value = secrets.token_urlsafe(24)
+        if self._path is not None:
+            write_private_file(
+                self._path, value.encode("utf-8"), what="bootstrap token"
+            )
+            if self._redeemed_marker is not None:
+                self._redeemed_marker.unlink(missing_ok=True)
+        self._token = value
+        self._consumed = False
+        self._enabled = True
+        self._generated = True
+        logger.info("bootstrap credential rotated for the running process")
+        return value
+
 
 def bootstrap_for_data_dir(data_dir: Path, configured: str = "") -> BootstrapToken:
     """Load the credential for this install, creating one only on a *fresh* install.

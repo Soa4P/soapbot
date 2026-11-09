@@ -1,7 +1,7 @@
 # 插件体系安全模型
 
 > 本文回答：**第三方插件能否在加载、运行、输出任一环节越权、注入或泄露数据？**
-> 结论见各节，验证见 `tests/test_wave4_plugin_*.py`（198 项）。
+> 结论见各节，验证见 `tests/test_wave4_plugin_*.py`（194 项）。
 >
 > **2026-10-28 已完成独立安全复审**，发现并修复 8 个真实缺陷（含 4 个高危 SSRF / 审计泄露问题）与 130 项依赖漏洞。详见 [`plugin-security-review.md`](./plugin-security-review.md)。
 
@@ -194,7 +194,7 @@ $env:PYTHONPATH="f:/soapbot/src"
 .\.venv\Scripts\python.exe -m pytest tests/test_wave4_plugins.py `
     tests/test_wave4_plugin_security.py tests/test_wave4_plugin_tools.py `
     tests/test_wave4_plugin_api.py -q
-# 198 passed
+# 128 passed
 ```
 
 全量：`435 passed, 1 skipped`（跳过项为 Windows 符号链接测试），`ruff check` 无告警，

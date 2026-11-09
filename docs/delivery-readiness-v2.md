@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `1291 passed, 10 skipped`；CI 五任务全绿。
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `1866 passed, 12 skipped`；CI 五任务全绿。
 
 > 上一版此处写着「ubuntu 因一个偶发用例失败」，并把它归因于重启竞态。**那个判断是错的**，
 > 修正记录留在这一节里，因为「当时为什么看错」比结论本身更有用：
@@ -153,8 +153,9 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
    新行，属于静默损坏；
 3. **每一步与它的版本号在同一事务内**，中途失败则该步整体回滚、下次重跑，而不是被跳过。
 
-目前 `MIGRATIONS` 是空的（v1 就是初始 schema，没有要改的东西），但框架不是摆设：
-`tests/test_migrations.py` 注册一个测试步骤，断言它恰好执行一次。
+`MIGRATIONS` 现在有 v2..v5 四步（`memory/migrations.py`：消息查找索引、场景层、记忆分层、
+产物索引），`SCHEMA_VERSION = 5`。`tests/test_migrations.py` 用 7 项覆盖「按序执行、
+恰好一次、缺步报错、库比程序新时拒绝」。
 
 ### 7. 系统设置页（第 12 页）
 
@@ -197,18 +198,20 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（12 项）、`test_wave4_plugin_api.py` 上传 3 项 |
 | **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（16 项）+ `tests/test_mcp_live.py`（opt-in）；已接真实 filesystem server，14 个工具 |
 | **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
-| **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（25 项） |
-| **多语言（对外文案 + 面板全 12 页）** | **已完成** | 后端 `tests/test_i18n.py`（22 项）、面板 `test_webui_i18n.py`（8 项）；浏览器逐页实测中英双向切换 |
+| **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（30 项） |
+| **多语言（对外文案 + 面板全 12 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；浏览器逐页实测中英双向切换 |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
 | **面板流式观察（09 页）** | **已完成** | 三段耗时阶梯（首 token / 首句送达 / 整条回复）、分句序列、中断与截断角标；中英双语浏览器实测 |
-| **上游连通性自检（doctor）** | **已完成** | `tests/test_posture.py`（41 项）；`doctor` 实跑输出 `[warn] provider.upstream`；`--probe` 为可选网络探测 |
+| **上游连通性自检（doctor）** | **已完成** | `tests/test_posture.py`（51 项）；`doctor` 实跑输出 `[warn] provider.upstream`；`--probe` 为可选网络探测 |
 
 ---
 
 ## 三、未验证项（写在前面，不假装）
 
-1. **容器未实测**。本机无 `docker`，`Dockerfile` 与 `compose` 只做过静态检查
-   （`scripts/check_deploy.py`，14 项）。它不是构建成功的证明。
+1. **容器已实测**（2026-10-30，真机）。`deploy_remote.py --verify` 14 项全 PASS，
+   `systemctl reboot` 后容器自行回到 `Up (healthy)`、复跑仍 14/14，见
+   [`deploy-layer.md` §8.2](deploy-layer.md)。静态检查（`scripts/check_deploy.py`，16 项）
+   仍只证明配置里写了什么，不构成构建成功的证明——两者是不同层次的证据。
 2. **真机 QQ 未接**。流式与工具链都由 mock 适配器验证；真实 OneBot 下的 5 msg/s 限频、
    被动回复窗口表现未测。
 3. **香港服务器未部署**。SSH 在协议握手前被本机出向策略掐断（22 与 443 均如此，对照
@@ -223,23 +226,24 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 
 ## 四、剩余工作（按建议顺序）
 
-1. **容器实测**：9 条命令与预期输出见 [`deploy-layer.md` §8](deploy-layer.md)。本机无
-   Docker，静态检查能证明配置里写了 `read_only: true`，证明不了容器起得来。
+1. ~~容器实测~~：已完成，见 [`deploy-layer.md` §8.2](deploy-layer.md)（2026-10-30 真机
+   14/14 PASS，重启自愈）。剩余的是「换一台机器复现」，不是「首次验证」。
 2. **真实语音链路实测**：转写槽位由 mock provider 验证过（含 URL 拒绝与降级），但**没有接**
    真实的 STT 厂商端点，`edge-tts` 也只验证了「依赖缺失时明确报错」这一条路径。
 3. **真实云端 Provider 未接**：`config/providers.yaml` 是 `providers: []`，进程没有连接任何
    上游模型端点。流式链路是用本地 fake provider 打通的（见
    [`verification-matrix.md`](verification-matrix.md)），**不是真实云端**。拿到主机地址与凭据后，
    `doctor --probe` 可以直接回答「通不通」。
-4. **第二个迁移版本**：迁移器已就位并被测试覆盖，但 `MIGRATIONS` 是空的。下一次 schema
-   变更才真正考验它。
+4. ~~第二个迁移版本~~：已完成。`MIGRATIONS` 有 v2..v5 四步，`SCHEMA_VERSION = 5`，
+   `soapbot migrate` 可手动执行（`--status` / `--dry-run` 只读）。剩余的是「在真实老库上
+   演练一次」，见 [`UPDATING.md`](../UPDATING.md)。
 
 ---
 
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 1291 passed, 10 skipped
+python -m pytest -q                 # 1866 passed, 12 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度

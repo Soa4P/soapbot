@@ -245,15 +245,18 @@ export const api = {
   /** Revoke this session's own token. The caller must clear its copy afterwards. */
   logout: () => request<{ ok: boolean; revoked: boolean }>('/api/auth/logout', { method: 'POST' }),
   /**
-   * Revoke every token issued so far. Returns a replacement token for the caller —
-   * without one the operator logs themselves out and the bootstrap token they would
-   * need to get back in was consumed at first login.
+   * Revoke every token issued so far. No replacement session token is issued: the
+   * response carries a freshly minted single-use bootstrap credential instead, and the
+   * operator must redeem it through /api/auth/login to get back in. The browser cookie
+   * is cleared by the server, so the next panel action will require that login.
    */
   revokeAllTokens: () =>
-    request<{ ok: boolean; revoked_before: number; access_token: string; expires_at: number }>(
-      '/api/auth/revoke-all',
-      { method: 'POST' },
-    ),
+    request<{
+      ok: boolean;
+      revoked_before: number;
+      bootstrap_token: string;
+      requires_login: boolean;
+    }>('/api/auth/revoke-all', { method: 'POST' }),
   /**
    * Install a plugin package. The server answers `approved: false` on purpose — the
    * caller must send the operator to the approval flow, never assume it is live.

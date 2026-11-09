@@ -20,12 +20,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_desktop  # noqa: E402
 
+#: Build outputs that must not be copied. `target/` is hundreds of megabytes of Rust
+#: objects and `binaries/` holds the frozen 48 MB sidecar; copying them per test filled
+#: the temporary directory after ten fixture setups and produced `OSError: could not
+#: create numbered dir`. None of the checks read either path.
+_SHELL_SKIP = shutil.ignore_patterns("target", "binaries", "dist", "node_modules")
+
 
 @pytest.fixture()
 def shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A copy of the real shell, so a test can break one file without touching the repo."""
     target = tmp_path / "desktop"
-    shutil.copytree(ROOT / "desktop", target)
+    shutil.copytree(ROOT / "desktop", target, ignore=_SHELL_SKIP)
     monkeypatch.setattr(check_desktop, "DESKTOP", target)
     monkeypatch.setattr(check_desktop, "CONF", target / "src-tauri" / "tauri.conf.json")
     monkeypatch.setattr(check_desktop, "CARGO", target / "src-tauri" / "Cargo.toml")
@@ -114,8 +120,15 @@ def test_probe_requires_a_timeout(shell: Path) -> None:
     assert not check_desktop.check_probe().ok
 
 
-def test_spawning_the_backend_is_rejected(shell: Path) -> None:
-    """Two supervisors on one port is the failure this rule exists for."""
+def test_an_unguarded_spawn_is_rejected(shell: Path) -> None:
+    """A second supervisor on one port is the failure this rule exists for.
+
+    The shell may own the backend's lifecycle for a bare desktop install, but only
+    through `spawn_decision` and the two functions that implement it. An extra
+    `Command::new` anywhere else is the same race coming back through a path nobody
+    reviews — which is why the assertion is on the enclosing function, not on the
+    string `std::process::Command`.
+    """
     main_rs = shell / "src-tauri" / "src" / "main.rs"
     main_rs.write_text(
         main_rs.read_text(encoding="utf-8")
@@ -126,7 +139,8 @@ def test_spawning_the_backend_is_rejected(shell: Path) -> None:
     finding = check_desktop.check_no_spawn()
 
     assert not finding.ok
-    assert "std::process::Command" in finding.evidence
+    assert "未受控函数" in finding.detail
+    assert "_spawn" in finding.detail
 
 
 def test_missing_icon_is_reported_by_name(shell: Path) -> None:

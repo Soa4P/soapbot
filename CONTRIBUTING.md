@@ -23,7 +23,10 @@ cd webui && npm ci
 make check
 ```
 
-`make check` = `lint` + `contrast` + `test`，与 CI 一致。三项任一失败都不应提交。
+`make check` 跑 CI `backend` 任务里能在本机跑的全部门禁，任一项失败都不应提交。
+只有两项不在其中：`check_secrets.py --committed` 要读 git 历史，`pip-audit` 要联网。
+这个差集由 `tests/test_gate_parity.py` 断言——往 CI 加门禁却忘了加进 `make check`，
+测试会红。
 
 单独跑：
 
@@ -33,8 +36,10 @@ make check
 | `make lint` | ruff |
 | `make fmt` | ruff 自动修复 |
 | `make contrast` | WCAG 对比度校验（14 组色对） |
-| `make typecheck` | mypy（当前基线非零，尚未作为阻断项） |
+| `make check-deps` | `requirements.txt` 与 `pyproject.toml` 是否一致 |
+| `make console-encoding` | 打印中文的脚本必须先把流设成 UTF-8（Windows CI 专属故障） |
 | `make deploy-check` | 容器配置静态检查（不需要 docker） |
+| `make typecheck` | mypy（当前基线 79 个错误，尚未作为阻断项） |
 | `make progress` | 启动进度看板 `http://127.0.0.1:8099/` |
 
 改前端后还要跑：

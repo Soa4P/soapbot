@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
+from soapbot.core.text import INVISIBLE
 from soapbot.security.principal import normalize_id
 from soapbot.voice.tts import VoiceUnavailableError
 
@@ -307,9 +308,8 @@ class SanitizeStage(Stage):
 
     name = "sanitize"
 
-    _INVISIBLE = dict.fromkeys(
-        map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
-    )
+    # The one shared table; see :mod:`soapbot.core.text`.
+    _INVISIBLE = INVISIBLE
 
     def __init__(self, max_chars: int = 4000) -> None:
         self.max_chars = max_chars

@@ -7,12 +7,18 @@ history provider, closing the loop: archive -> compress -> recall.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, ClassVar
 
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.memory.extractor import MemoryExtractor
+from soapbot.memory.handoff import (
+    GLOBAL_AUDIENCE,
+    HandoffGate,
+    parse_handoff,
+)
 from soapbot.memory.scene import SceneMemory
 from soapbot.memory.store import KnowledgeBase, MemoryStore, RecallResult
 from soapbot.security.audit import AuditLog, get_audit_log
@@ -131,10 +137,15 @@ class RecallStage(Stage):
         min_chars: int = 4,
         scene: SceneMemory | None = None,
         layers: Any = None,
+        handoff_gate: HandoffGate | None = None,
     ) -> None:
         self.store = store
         self.top_k = top_k
         self.min_chars = min_chars
+        #: Deterministic admission for recalled records. Created by default so a caller
+        #: cannot silently opt out by forgetting an argument; injectable so tests and a
+        #: future operator policy can tighten the confidence floor.
+        self.handoff_gate = handoff_gate or HandoffGate()
         # Optional so existing construction sites keep working. When present, the scene
         # card and portrait are injected alongside the recalled fragments — the map next
         # to the territory. Without it, recall still works; it just has no sense of what
@@ -177,12 +188,48 @@ class RecallStage(Stage):
             return StageResult()
 
         if result.items:
-            ctx.extras["recall_prompt"] = result.to_prompt()
-            ctx.extras["recall_count"] = len(result.items)
-            ctx.extras["recall_items"] = [
-                {"id": it.id, "content": it.content, "score": it.score, "source": it.source}
-                for it in result.items
-            ]
+            # Retrieval filters by scope, but a filter is not an authorisation boundary.
+            # Re-check every record here: source, confidence, and an anti-monotone
+            # audience containment test. A record scoped to a different session must
+            # not become context for this one even if the store returned it.
+            session_audience = frozenset({ctx.event.session_key})
+            admitted: list[Any] = []
+            rejected = 0
+            for item in result.items:
+                record = parse_handoff(
+                    {
+                        "content": item.content,
+                        "source": "memory",
+                        "audience": (
+                            (item.scope,) if item.scope else (GLOBAL_AUDIENCE,)
+                        ),
+                        "confidence": max(0.0, min(1.0, item.importance)),
+                    }
+                )
+                if self.handoff_gate.admit(
+                    record, audience=session_audience
+                ).allowed:
+                    admitted.append(item)
+                else:
+                    rejected += 1
+
+            # Measured, not assumed zero. This is this retrieval's rate; the gate also
+            # keeps a cumulative view through stats() for longer-window monitoring.
+            ctx.extras["recall_rejected"] = rejected
+            ctx.extras["recall_residual_unsafe_rate"] = rejected / len(result.items)
+
+            if admitted:
+                ctx.extras["recall_prompt"] = replace(result, items=admitted).to_prompt()
+                ctx.extras["recall_count"] = len(admitted)
+                ctx.extras["recall_items"] = [
+                    {
+                        "id": it.id,
+                        "content": it.content,
+                        "score": it.score,
+                        "source": it.source,
+                    }
+                    for it in admitted
+                ]
 
         if self.layers is not None:
             await self._inject_layers(ctx)

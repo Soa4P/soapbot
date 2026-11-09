@@ -38,7 +38,7 @@
   不加依赖时唯一可验证的替代，文档里如实写明它不是硬超时。
 - 异常吞没：三处 `except ...: pass` 有注释说明但没有任何动作，改成显式降级日志。
 
-新增 `scripts/check_security_boundaries.py`（57 条不变量，接进 CI 双矩阵与
+新增 `scripts/check_security_boundaries.py`（84 条不变量，接进 CI 双矩阵与
 `make check`）、`docs/security-boundaries.md`（18 项逐条证据）、
 `tests/test_security_boundaries.py`、`tests/test_auth_cookie.py`、
 `tests/test_logging_hardening.py`、`tests/test_error_mapping.py`。
@@ -194,6 +194,26 @@ README 按四块重写（定位 / 启动 / 边界 / 门禁），安装细节迁�
   diff 预览 → 二次确认 → 写入，「需重启生效」常驻横幅。
 - **`components/DiffEditor.vue`**：行级 diff，带新旧行号与 `+`/`−` 标记，
   不只靠颜色区分增删。
+- **`soapbot migrate` 子命令**（`cli_migrate.py`，`--status` / `--dry-run` / `--target`）。
+  `UPDATING.md` 从 v0.x 起就让人「升级后跑一次数据库迁移」，而仓库里**没有这个命令**——
+  文档承诺了一个不存在的入口，读者只能去翻 `memory/migrations.py` 猜怎么调。
+  现在 `--status` 是**只读**的：用 `mode=ro` URI 连库，不触发 `current_version()` 里那句
+  `CREATE TABLE`，所以对着一个生产库执行它不会留下任何痕迹。
+  探测分五态而不是三态，因为把不同故障压成同一个词会给出错误建议：
+  `missing`（文件不存在）、`empty`（0 字节，典型是挂载了空卷）、`unreadable`（损坏或权限不足）、
+  `legacy`（有表无版本记录）、`versioned`。前两态提示「先启动一次服务让它建表」，
+  `unreadable` 提示「从备份恢复」——把损坏文件说成空库，会让人去启动服务，然后覆盖掉唯一
+  的备份线索。
+  `legacy` 库先盖章 v1 再顺序跑 v2–v5，与首步同事务：失败回滚后版本表不存在，所以失败
+  提示会**重新探测**再措辞，而不是照着进函数时的快照宣称「仍停在 version 1」。
+- **`core/proc_env.py`**：插件与 MCP 服务共用的子进程环境白名单。此前 MCP 侧传的是
+  `{**os.environ, **server.env}`，于是 `npx -y <某个包>` 起的服务能直接读到
+  `SOAPBOT_MASTER_KEY` 与全部 provider 密钥——而 `SECURITY.md` 把 MCP 定级为「不可信」。
+  一个被实现否定的定级比没有定级更糟，因为它请读者去依赖它。两侧共用一个模块而不是各写
+  一份：两份白名单迟早分叉，而往这个方向分叉是 fail-open。
+- **`tests/test_cli_documented_commands.py`**：扫描文档里出现的 `soapbot <子命令>`，断言
+  解析器真的接受它。`migrate` 缺失这件事能活到被发现，是因为没有任何东西把「文档说了」
+  和「代码有」连起来。同类的下一个缺陷现在会在 CI 里红。
 
 ### 修复
 
@@ -224,6 +244,19 @@ README 按四块重写（定位 / 启动 / 边界 / 门禁），安装细节迁�
   只读位、写后恢复，文件最终仍是只读。
 - **`STAGE_ORDER` 与 `build_pipeline` 不一致**：插件环节实际名为
   `plugin_message_hooks`。漂移测试立刻抓到了它。
+- **`make check` 与 CI `backend` 不是同一组命令**，而 `Makefile` 文件头就写着它们是。
+  实测差集：`check_deps.py`、`check_console_encoding.py`、`check_deploy.py` 只在 CI 跑。
+  三个都是离线、确定性、一秒内跑完的静态扫描——正是最该在本机跑的那类门禁，它们的缺席
+  意味着同一份提交可以本地全绿、CI 全红。现在补进 `check`，并新增
+  `tests/test_gate_parity.py` 解析两边文件、断言差集恰好是两项（`check_secrets
+  --committed` 要 git 历史，`pip-audit` 要联网）。注释里的承诺不是门禁，这个测试是。
+- **Windows 上 `.env` 的跨进程锁有 10 秒硬上限**。`msvcrt.LK_LOCK` 是「重试 10 次 × 1 秒
+  后抛 `OSError`」，预算由系统决定且无法观测。4 个进程各写 20 次同一个文件时，全量跑
+  大约每轮失败一次——看起来像锁的竞态 bug，实际是重试策略的超时。改用 `LK_NBLCK`
+  非阻塞加指数退避（5 ms 起、上限 250 ms），预算 30 秒由我们定；超时抛
+  `EnvLockError`（`TimeoutError` 子类，仍是 `OSError`，四个 API 写入点的
+  `except OSError` 映射不变），日志能说清「另一个写入者正持有它」而不是「磁盘坏了」。
+  睡眠不超过剩余预算，所以超时是真正的上界而不是「上界加一个退避间隔」。
 
 
 - **开发进度看板** `docs/progress/`：`index.html` + `board.css` + `board.js` +

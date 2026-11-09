@@ -44,7 +44,7 @@ cd webui && npm run verify
 
 `doctor --strict` 检查绑定地址、密钥来源、文件权限、插件隔离模式和上游端点，
 有 critical/high 未解决就退出非零。它不替代容器实测：静态配置对了不等于
-`docker compose up` 能起来。
+`docker compose -f deploy/docker-compose.yml up -d` 能起来。
 
 `strict_startup` 默认关闭，一个可选适配器构造失败会被记录并跳过，控制台还能用来
 排障。要硬边界就设 `SOAPBOT_STRICT_STARTUP=true`，启动阶段直接中止。
@@ -99,18 +99,38 @@ python scripts/deploy_remote.py --host <IP> --user root --port 443 \
 健康端点、tini 和 doctor。升级前先备份。回滚步骤见
 [UPDATING.md](../UPDATING.md)。
 
+## 数据库迁移
+
+启动时会自动迁移，`soapbot migrate` 是把这一步单独拿出来执行——换二进制前、恢复备份后、
+或排查启动失败时用：
+
+```bash
+soapbot migrate --status    # 只读：当前 schema 版本 -> 本程序支持的版本
+soapbot migrate --dry-run   # 只读：列出将要执行的步骤，不动库
+soapbot migrate             # 顺序升到本程序支持的版本
+```
+
+三条约束值得记住：**只前进**（`--target` 小于当前版本会被拒绝，不提供降级）；**不建库**
+（文件不存在或为空时拒绝执行，因为那样只会留下一个只有版本号、没有业务表的文件）；
+**老库不会被盖章跳过**（早于版本控制、有业务表但无版本记录的库，会先记为 v1 再顺序补齐，
+而不是直接标成最新）。退出码 `2` 表示库比程序新，与 `doctor --strict` 一致。
+
 ## 门禁清单
 
 | 脚本 | 查什么 |
 |---|---|
 | `check_secrets.py` | 暂存区 / 待推送对象 / 已提交树里的凭据与生产产物 |
-| `check_plugin_ipc.py` | 插件进程边界的 62 条否定式不变量 |
-| `check_security_boundaries.py` | 18 项安全与错误日志契约 |
+| `check_plugin_ipc.py` | 插件进程边界的 65 条否定式不变量 |
+| `check_security_boundaries.py` | 20 项安全与错误日志契约 |
 | `check_deps.py` | `requirements.txt` 与 `pyproject.toml` 运行时依赖一致 |
+| `check_console_encoding.py` | 打印中文的脚本必须先 reconfigure(utf-8)，否则只在 Windows runner 上红 |
 | `check_deploy.py` | 容器配置静态校验 |
 | `check_doc_links.py` | README / SECURITY / docs 的相对链接 |
 | `check_test_gaps.py` | 孤儿模块与文档数字 |
 | `check_contrast.py` / `check_a11y.py` | 对比度与可静态检查的无障碍规则 |
 
-前三个失败会让 push 或 CI 直接红。`pre-push` 用项目虚拟环境的解释器，
-Windows 上不依赖系统 `python`。
+`pre-push` 只跑 `check_secrets.py --pre-push`（用项目虚拟环境的解释器，Windows 上不依赖
+系统 `python`），所以**只有它会挡住 push**；其余八项由 `make check` 与 CI 的 `backend`
+任务拦截，本地不跑就直接推的话，红在 CI 而不是红在 push。
+`tests/test_gate_parity.py` 断言 `make check` 与 CI 的差集恰好是两项（`check_secrets
+--committed` 要 git 历史、`pip-audit` 要联网），两边再漂移就会红。

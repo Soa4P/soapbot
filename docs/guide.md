@@ -33,7 +33,7 @@ dedup → guard → whitelist → wake → strip → sanitize
 | 06 额度审批 | 账本与二次审批 |
 | 07 模型与人格 | Provider 可视化编辑（带 diff 确认）+ 人格卡只读 |
 | 08 运行日志 | 结构化日志 |
-| 09 流水线追踪 | 20 个环节的拓扑、逐环节耗时、中止点、换序沙箱 |
+| 09 流水线追踪 | 22 个环节的拓扑、逐环节耗时、中止点、换序沙箱 |
 | 10 运行指标 | 延迟分位、累计计数、结果分布 |
 | 11 插件包安装 | 上传 zip 安装（不等于批准）、能力风险分级 |
 | 12 系统设置 | 界面语言、回复语言、语音、MCP 连接状态、运行时信息 |
@@ -99,7 +99,7 @@ curl -X POST http://127.0.0.1:6185/api/auth/login \
 | 部署、备份、故障排查、升级 | [operations.md](operations.md) |
 | 写插件、能力授权、进程隔离 | [plugins.md](plugins.md) |
 | 每个平台支持什么、群管命令 | [capabilities.md](capabilities.md) |
-| 18 项边界逐条证据 | [security-boundaries.md](security-boundaries.md) |
+| 20 项边界逐条证据 | [security-boundaries.md](security-boundaries.md) |
 | 参考了哪些外部设计、有哪些没抄 | [reference-ecosystem.md](reference-ecosystem.md) |
 | 威胁模型与已加固项 | [security-model.md](security-model.md) |
 | 借鉴来源与版权边界 | [provenance.md](provenance.md) |

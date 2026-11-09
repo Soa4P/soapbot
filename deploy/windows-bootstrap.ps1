@@ -99,14 +99,19 @@ if ($Start) {
     # (so "it was running" one minute and gone the next, with nothing in any log), and a
     # hidden child of an RDP session dies when the operator closes the window — which for a
     # bot means it stops answering the moment you stop watching it.
+    #
+    # Task name, trigger, principal and settings are kept identical to scripts/install.ps1.
+    # Two installers writing the same name with different triggers is worse than two names:
+    # whichever ran last would silently decide whether the bot comes back after a reboot.
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
-        -Argument "/c cd /d $Dir && `"$python`" -m soapbot.cli start >> `"$Dir\panel.log`" 2>&1"
+        -Argument "/c cd /d `"$Dir`" && `"$python`" -m soapbot.cli start >> `"$Dir\panel.log`" 2>&1"
+    $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName 'SoapbotPanel' -Action $action -Principal $principal `
-        -Settings $settings -Force | Out-Null
-    Start-ScheduledTask -TaskName 'SoapbotPanel'
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName 'SoapbotBot' -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName 'SoapbotBot'
     for ($i = 0; $i -lt 45; $i++) {
         Start-Sleep -Seconds 2
         try {
@@ -117,12 +122,15 @@ if ($Start) {
     }
 }
 
-$token = & $python -m soapbot.cli token 2>$null
 Write-Host ''
 Write-Host '===================================================================='
-Write-Host "  panel : http://${HostAddress}:$Port"
-Write-Host "  token : $token"
-Write-Host "  data  : $(Join-Path $Dir 'data')"
-Write-Host '  next  : install NapCat (napcat.napneko.icu), log the bot QQ in, then'
-Write-Host '          open page 07 and press "Scan this machine".'
+Write-Host "  panel  : http://${HostAddress}:$Port"
+# Not printed, for the same reason as scripts/install.ps1: a token echoed into a console
+# transcript outlives the token, and this one is single-use. The path is enough on the
+# machine that just ran the script.
+Write-Host "  token  : $(Join-Path $Dir 'data\init_token.txt')   (open it on this machine; it is not printed here)"
+Write-Host "  data   : $(Join-Path $Dir 'data')"
+Write-Host '  restart: schtasks /End /TN SoapbotBot && schtasks /Run /TN SoapbotBot'
+Write-Host '  next   : install NapCat (napcat.napneko.icu), log the bot QQ in, then'
+Write-Host '           open page 07 and press "Scan this machine".'
 Write-Host '===================================================================='

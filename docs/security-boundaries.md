@@ -1,6 +1,7 @@
-# 安全边界与错误日志：18 项防线契约
+# 安全边界与错误日志：20 项防线契约
 
-这份表不是设计文档，是验收清单。用户提出的 18 项风险逐条落在下面：每一项都要有
+这份表不是设计文档，是验收清单。用户提出的 18 项风险，加上本轮自查新增的第 19、20
+条（MCP 子进程环境隔离、不可见字符表单一来源），共 20 项逐条落在下面：每一项都要有
 一条能被机器验证的防线，可能是运行时防护、负向回归测试，或 `scripts/check_security_boundaries.py`
 里的静态断言。已解决的项不再写第二套实现，用负向断言锁住「不许退回去」。
 
@@ -11,9 +12,9 @@
 - **属实**：确实没有，本轮补实现。
 
 风险等级沿用复核时的分级，只用来排阅读顺序，不用来决定是否可以失败——门禁对
-18 项一视同仁，缺一条就红。
+20 项一视同仁，缺一条就红。
 
-## 18 项防线契约
+## 20 项防线契约
 
 | # | 项 | 判定 | 等级 | 现状证据 | 防线 | 验收用例 |
 |---|---|---|---|---|---|---|
@@ -35,8 +36,10 @@
 | 16 | 异常类型无分层 | 部分属实 | medium | 35 个异常类有局部层次（`providers/base.py:42`、`budget/models.py:38-73`），但无统一映射表、无全局处理器 | `AppError` 分层 + 映射表接入既有异常类，不重写它们 | `tests/test_error_mapping.py` 覆盖配置、鉴权、上游、插件、限流、内部六类 |
 | 17 | 启动时非 fail-fast | 部分属实 | medium | `app.py:18-21,137-141` 已拒绝；但 `:300-304` 曾跳过失败 adapter、`:594-596` startup errors 仅 debug、`cli.py:204-209` `doctor` 默认退出 0 | `strict_startup` **默认开启**：已启用的适配器构造失败就在启动阶段中止。面板专用部署可显式设 `false`；测试夹具同样显式关闭，避免把每个业务断言变成启动脚本 | `tests/test_error_mapping.py` 的严格模式用例与 `test_wave6_runtime.py:93,128` |
 | 18 | 日志级别滥用 / 无慢调用日志 / 缺定位字段 | 部分属实 | low | `logging_setup.py:69` 仅 4 字段；`providers/router.py:186-207` 有 latency 但无阈值；`security/audit.py:60-71` 无 `message_id`/`provider` | `slow_call_ms` 阈值告警；成功 Provider 调用由 info 降为 debug；`AuditEvent` 增补定位字段；级别规则写入配置文档 | `tests/test_logging_hardening.py` 断言超阈值才 warning、字段齐全 |
+| 19 | 第三方子进程继承宿主环境 | 属实 | critical | `mcp/client.py` 曾用 `{**os.environ, **server.env}` 启动 MCP 服务，于是它能直接读到 `SOAPBOT_MASTER_KEY`、`SOAPBOT_MASTER_KEY_FILE` 与全部 provider key；插件侧 `plugins/isolation.py` 早有白名单，唯独 MCP 没有 | 抽出 `core/proc_env.py` 作为**唯一**白名单，插件与 MCP 共用；MCP 只转发配置里显式声明的 `env`；`SECURITY.md` 把 MCP 定级为「不可信」的实现与该定级一致 | `tests/test_untrusted_child_env.py` 用真实子进程读自己的 `os.environ`；门禁用 AST 禁止 `{**os.environ}`、`env=os.environ`、`os.environ.copy()`、`dict(os.environ)` 四种写法（文本扫描会把本文件对旧代码的引用误判为违规） |
+| 20 | 不可见字符表多份且已漂移 | 属实 | critical | 5 份拷贝：`security/injection.py` 覆盖最全，其余 3 处只有 11 个字符；**全部**漏掉 U+2066–U+2069（Unicode isolate），也漏 word joiner、soft hyphen、ALM | 统一为 `core/text.py` 一张表并补齐上述字符；注入检测、记忆校验、工具文本清洗、id 归一化四条路径读同一张表 | `tests/test_untrusted_child_env.py` 用 isolate 打断「忽略」仍被识别；门禁要求 4 个模块 import 共享表 |
 
-接线不变量（不计入 18 项编号，缺失同样失败）：CI 的 backend 双矩阵与 `make check`
+接线不变量（不计入 20 项编号，缺失同样失败）：CI 的 backend 双矩阵与 `make check`
 都要调用 `scripts/check_security_boundaries.py`，本文件必须存在，否则门禁会退化成
 「一个没人调用的脚本」。
 

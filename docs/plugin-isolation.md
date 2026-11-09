@@ -124,7 +124,7 @@ c._observed_sessions.add("onebot11:group:999999999")   # 再 send 即可向任�
 
 原实现依赖绑定 `127.0.0.1`。但 `SOAPBOT_HOST=0.0.0.0` 一次配置变更，`POST /api/plugins/{name}/load` 就变成**未鉴权的远程代码执行**。
 
-**修复**：新增 `_require_loopback(request)`，校验**实际客户端地址**；非本机返回 **404**（而非 403，避免确认该接口存在）。所有 6 个端点均已接入。
+**修复**：新增 `_authorize(request)`，走 `soapbot.api.auth.authenticate` 校验**实际客户端地址与凭据**；非本机无令牌返回 **401**（早期版本返回 404 以避免确认接口存在，但 UI 无法区分"需要登录"与"接口不存在"，已改为 401 + `WWW-Authenticate`）。此外整个 router 挂 `Depends(require_role(Role.ADMIN))`，因为装插件等于执行第三方代码，MEMBER 能装却不能改一行配置属于权限倒挂。全部 **10 条路由**均已接入。
 
 ---
 
@@ -211,7 +211,7 @@ c._observed_sessions.add("onebot11:group:999999999")   # 再 send 即可向任�
 ```powershell
 $env:PYTHONPATH="f:/soapbot/src"
 
-# 隔离专项：30 项，每项对应一个已实测攻击
+# 隔离专项：32 项，每项对应一个已实测攻击
 .\.venv\Scripts\python.exe -m pytest tests/test_plugin_isolation.py -q
 
 # 全量回归
@@ -228,12 +228,12 @@ $env:PYTHONPATH="f:/soapbot/src"
 |---|---|---|
 | A1 授权不可自改 | `test_i1_*`（4 项） | 三种写法均抛异常，且授权集合不变 |
 | A2 存储不可跨界 | `test_i2_*`（4 项） | 外键访问 `KeyError`；正常命名空间仍可用 |
-| A3 发送不可越界 | `test_i3_*`（5 项） | 无令牌写入被拒；未观察会话被拒；卸载即撤销 |
+| A3 发送不可越界 | `test_i3_*`（6 项） | 无令牌写入被拒；未观察会话被拒；卸载即撤销 |
 | A4 崩溃不传主机 | `test_i4_os_exit_*` / `test_i4_sigkill_*` | 主机进程存活 |
 | A5 挂死可回收 | `test_i4_infinite_loop_times_out` | <6s 返回超时，主机存活 |
 | A6 异常不泄露 | `test_i4_exception_message_*` | 异常消息中的 token 不出现 |
 | A7 子进程不可 import 宿主 | `test_i4_child_cannot_import_host_package` | 抛 `PluginCrashedError` |
-| A8 API fail-closed | `test_i5_*`（6 项） | 非本机 404；本机放行 |
+| A8 API fail-closed | `test_i5_*`（8 项） | 非本机无令牌 401；本机放行 |
 | A9 SQL 标识符白名单 | `test_i6_*`（2 项） | 注入串 `ValueError`；真实表名通过 |
 | A10 能力模型未松动 | `test_capability_two_gate_model_unchanged` | 已批准未声明仍被拒 |
 

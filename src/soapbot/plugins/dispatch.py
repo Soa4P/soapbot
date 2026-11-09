@@ -42,15 +42,31 @@ from soapbot.plugins.context import (
 from soapbot.plugins.loader import LoadedPlugin, PluginLoader, record_invocation
 from soapbot.plugins.sandbox import (
     PluginInvocation,
+    SSRFBlockedError,
+    assert_url_allowed,
     scrub_plugin_output,
 )
 from soapbot.security.audit import AuditLog, get_audit_log
 from soapbot.security.injection import leaked_canary
 from soapbot.security.principal import Principal, Role
+from soapbot.security.provenance import vet_arguments
 
 logger = logging.getLogger(__name__)
 
 _HANDLER_TIMEOUT = 8.0
+
+
+def _resource_allowed(value: str) -> bool:
+    """Deterministic, host-side check injected into the parameter admission gate.
+
+    Returns a bool rather than raising, so the gate never has to interpret an
+    exception type coming from another layer. A checker that rejects is a denial.
+    """
+    try:
+        assert_url_allowed(value)
+    except SSRFBlockedError:
+        return False
+    return True
 
 
 async def _dispatch_event(loader: PluginLoader, event: str, payload: dict[str, Any]) -> None:
@@ -413,6 +429,21 @@ class PluginToolRegistry:
         principal: Principal | None,
         session_key: str = "",
     ) -> str:
+        # Parameter-level admission runs here, at the action boundary, for both plugin
+        # and MCP tools. Role checks answer "may this caller use this tool"; this
+        # answers "may *these arguments* select that resource". Keeping the check in
+        # the same function as the dispatch removes the check-then-act window.
+        admission = vet_arguments(arguments, resource_check=_resource_allowed)
+        if not admission.allowed:
+            self.audit.record(
+                kind="plugin",
+                action=f"tool:{name}",
+                outcome="deny",
+                principal=principal,
+                detail=f"parameter provenance: {admission.reason}",
+            )
+            return f"错误：参数来源未通过校验（{admission.reason}）。"
+
         if name.startswith("mcp__"):
             return await self._invoke_external(name, arguments, principal=principal)
 

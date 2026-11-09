@@ -85,9 +85,17 @@ def test_shell_installer_fails_fast_and_cleans_up() -> None:
 
 
 def test_readme_leads_with_the_three_paths() -> None:
+    """Three ways in — and the Docker one must name a compose file that exists.
+
+    This test used to assert the bare ``docker compose up -d``. That command is broken:
+    the compose file lives at ``deploy/docker-compose.yml``, not at the repository root.
+    Asserting the wrong string had turned a copy-paste failure into a contract, so the
+    assertion now pins the ``-f`` form and forbids the bare one from coming back.
+    """
     text = README.read_text(encoding="utf-8")
     deployment = text.split("## 启动", 1)[1].split("## 边界", 1)[0]
     assert "install.ps1" in deployment
     assert "install.sh" in deployment
-    assert "docker compose up -d" in deployment
+    assert "docker compose -f deploy/docker-compose.yml up -d" in deployment
+    assert "docker compose up -d" not in deployment
     assert "docs/deploy-quickstart.md" in text

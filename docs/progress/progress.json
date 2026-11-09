@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-06T18:05:39+08:00",
+  "updated_at": "2026-11-09T18:32:41+08:00",
   "current": null,
   "phases": [
     {
@@ -108,30 +108,78 @@
         {
           "id": "ph2-t1",
           "name": "句子聚合器",
-          "status": "todo",
-          "note": "ai/streaming.py：标点/长度/首包超时三阈值，纯函数可单测",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/ai/streaming.py:47 class SentenceAggregator（标点/长度/首包超时三阈值，纯函数）；测试：tests/test_streaming_wiring.py（14 项）",
+          "files": [
+            {
+              "path": "src/soapbot/ai/streaming.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_streaming_wiring.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph2-t2",
           "name": "Provider 契约补 stream",
-          "status": "todo",
-          "note": "BaseProvider.stream 默认回退到一次 chat，使「声明了但未实现」不可能发生",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/providers/base.py:301 async def stream（默认回退到一次 chat，「声明了但未实现」不可能发生）；测试：tests/test_streaming_wiring.py（14 项）",
+          "files": [
+            {
+              "path": "src/soapbot/providers/base.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_streaming_wiring.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph2-t3",
           "name": "ModelStage 流式分支",
-          "status": "todo",
-          "note": "仅最后一轮且无 tool_calls 时启用，避免与工具循环纠缠",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/ai/stages.py:235 use_stream 判定（仅最后一轮且无 tool_calls 时启用）；测试：tests/test_streaming_wiring.py（14 项）",
+          "files": [
+            {
+              "path": "src/soapbot/ai/stages.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_streaming_wiring.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph2-t4",
           "name": "ReplyStage 分句发送",
-          "status": "todo",
-          "note": "复用 core/ratelimit；适配器不支持分段时退化为单条",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/ai/stages.py:314 实例化 ProgressiveSender（分句发送入口）、src/soapbot/core/progressive.py:44 class ProgressiveSender（复用 core/ratelimit，适配器不支持分段时退化为单条）、src/soapbot/core/stages.py:385 progressive_sent 分支（trace 字段，供面板 09 页读）；测试：tests/test_streaming_wiring.py（14 项）、tests/test_stream_safety.py（patch ProgressiveSender 验证中断保留已发内容）",
+          "files": [
+            {
+              "path": "src/soapbot/ai/stages.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/progressive.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/stages.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_streaming_wiring.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_stream_safety.py",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -144,23 +192,50 @@
         {
           "id": "ph3-t1",
           "name": "installer 六类攻击防护",
-          "status": "todo",
-          "note": "zip slip / 压缩炸弹 / 多插件包 / 路径歧义 / digest 伪造 / 越界符号链接",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/plugins/installer.py:47-57 MAX_ARCHIVE_BYTES / MAX_UNCOMPRESSED_BYTES / MAX_ENTRIES / _ZIP_MAGIC（zip slip、压缩炸弹、多插件包、路径歧义、digest 伪造、越界符号链接）；测试：tests/test_plugin_installer.py（12 项）",
+          "files": [
+            {
+              "path": "src/soapbot/plugins/installer.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_plugin_installer.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph3-t2",
           "name": "install 路由",
-          "status": "todo",
-          "note": "只落地文件，不写批准记录——否则安装即提权",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/api/plugins.py:125 @router.post(\"/install\")（只落地文件、不写批准记录，安装不等于提权）；测试：tests/test_plugin_installer.py（12 项）",
+          "files": [
+            {
+              "path": "src/soapbot/api/plugins.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_plugin_installer.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph3-t3",
           "name": "11 页插件市场",
-          "status": "todo",
-          "note": "",
-          "files": []
+          "status": "done",
+          "note": "代码：webui/src/views/MarketView.vue（上传区、风险三档图例 :149、插件网格）+ webui/src/router/index.ts:79 /market；测试：tests/test_plugin_installer.py（12 项）",
+          "files": [
+            {
+              "path": "webui/src/views/MarketView.vue",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/router/index.ts",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -173,16 +248,38 @@
         {
           "id": "ph4-t1",
           "name": "MCP 连接与握手",
-          "status": "todo",
-          "note": "stdio，只允许 config/mcp.yaml 显式声明的命令",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/mcp/client.py:89 class McpClient（stdio，只允许 config/mcp.yaml 显式声明的命令；initialize / tools/list / tools/call）；测试：tests/test_mcp_wiring.py（16 项）",
+          "files": [
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_wiring.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph4-t2",
           "name": "汇入 PluginToolRegistry",
-          "status": "todo",
-          "note": "wiring 测试断言越权角色看不到 MCP 工具",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/plugins/dispatch.py:317 class PluginToolRegistry，src/soapbot/core/builder.py:561-563 实际构造；测试：tests/test_mcp_wiring.py（16 项，断言越权角色看不到 MCP 工具）",
+          "files": [
+            {
+              "path": "src/soapbot/plugins/dispatch.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/builder.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_mcp_wiring.py",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -195,16 +292,38 @@
         {
           "id": "ph5-t1",
           "name": "STT 经 Provider transcribe",
-          "status": "todo",
-          "note": "不引本地模型；SegmentType.RECORD 与 Capability.RECORD 早已预留但无人使用",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/voice/stt.py:172 class ProviderTranscriber + src/soapbot/providers/base.py:321 async def transcribe（不引本地模型）；测试：tests/test_voice.py（30 项）",
+          "files": [
+            {
+              "path": "src/soapbot/voice/stt.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/providers/base.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_voice.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph5-t2",
           "name": "TTS 可选依赖",
-          "status": "todo",
-          "note": "[voice] 组；缺依赖时报明确错误而非静默",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/voice/tts.py:86 class EdgeTts（:87 注释说明依赖惰性导入以保持可选）、:50 class ProviderTts、:26 VoiceUnavailableError（缺依赖时报明确错误而非静默）；测试：tests/test_voice.py（30 项）",
+          "files": [
+            {
+              "path": "src/soapbot/voice/tts.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_voice.py",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -217,16 +336,42 @@
         {
           "id": "ph6-t1",
           "name": "后端 gettext + JSON 目录",
-          "status": "todo",
-          "note": "只翻译面向使用者的文案；日志是运维搜索用的，翻译会破坏 grep",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/i18n/catalog.py:97 def translate + :31 LOCALES_DIR（locales/en-US.json、zh-CN.json；只翻译面向使用者的文案，日志保持英文以便 grep）；测试：tests/test_i18n.py（20 项）",
+          "files": [
+            {
+              "path": "src/soapbot/i18n/catalog.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_i18n.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph6-t2",
           "name": "前端 t() 与 12 页系统设置",
-          "status": "todo",
-          "note": "",
-          "files": []
+          "status": "done",
+          "note": "代码：webui/src/i18n/index.ts:67 export function t + webui/src/views/SettingsView.vue（四卡片独立保存）；测试：tests/test_webui_i18n.py（8 项）、tests/test_settings_api.py（19 项）",
+          "files": [
+            {
+              "path": "webui/src/i18n/index.ts",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/views/SettingsView.vue",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_webui_i18n.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_settings_api.py",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -239,23 +384,62 @@
         {
           "id": "ph7-t1",
           "name": "healthz / readyz",
-          "status": "todo",
-          "note": "/readyz 需在 DB 不可写时返回非 200",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/app.py:672 /healthz、:682 /readyz（就绪检查覆盖数据目录可写与数据库可查，且不泄露驱动路径）；测试：tests/test_ops_readiness.py:45,52,64,88,108,119（6 项）",
+          "files": [
+            {
+              "path": "src/soapbot/app.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ops_readiness.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph7-t2",
           "name": "soapbot migrate + 顺序迁移",
-          "status": "todo",
-          "note": "UPDATING.md 已承诺该命令，必须真实存在——否则重蹈 soapbot token 的覆辙",
-          "files": []
+          "status": "done",
+          "note": "代码：src/soapbot/cli_migrate.py（三态只读探测 missing/empty/legacy/versioned，legacy 先盖章为 v1 再顺序补齐，--status 与 --dry-run 不写盘）+ src/soapbot/cli.py 注册；测试：tests/test_cli_migrate.py（15 项）、tests/test_cli_documented_commands.py（9 项）",
+          "files": [
+            {
+              "path": "src/soapbot/cli_migrate.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/cli.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_cli_migrate.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_cli_documented_commands.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph7-t3",
           "name": "backup / restore 脚本",
-          "status": "todo",
-          "note": "UPDATING.md 已引用 scripts/backup.py 与 restore.py；判据是备份→清空→恢复后数据一致",
-          "files": []
+          "status": "done",
+          "note": "代码：scripts/backup.py（:39 只读探测 schema 版本）、scripts/restore.py（:60-67 拒绝更高版本备份）；测试：tests/test_ops_readiness.py:205 往返、:232 拒更高 schema、:245 拒路径穿越（3 项）",
+          "files": [
+            {
+              "path": "scripts/backup.py",
+              "status": "done"
+            },
+            {
+              "path": "scripts/restore.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ops_readiness.py",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -268,9 +452,18 @@
         {
           "id": "ph8-t1",
           "name": "delivery-readiness-v2.md",
-          "status": "todo",
-          "note": "旧报告顶部已声明不随后续改动重写，因此新开一份而非改数字",
-          "files": []
+          "status": "done",
+          "note": "代码：docs/delivery-readiness-v2.md（248 行，逐条对应本看板的任务与门禁）；测试：tests/test_progress_board.py（8 项，约束看板自身不漂移）",
+          "files": [
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_progress_board.py",
+              "status": "done"
+            }
+          ]
         },
         {
           "id": "ph8-t2",
@@ -322,9 +515,14 @@
         {
           "id": "ph9-t2",
           "name": "容器实测",
-          "status": "todo",
-          "note": "本机 Docker 装不上：winget 下载与校验成功但安装需 UAC 提权，退出码 4294967291；账户 IsAdmin=False；无 WSL 发行版；VirtualizationFirmwareEnabled=False；家庭版无 Hyper-V。待云服务器",
-          "files": []
+          "status": "done",
+          "note": "已实测：docs/deploy-layer.md:426-449 §8.2 记录 2026-10-30 真机 deploy_remote.py --verify 14 项全 PASS，systemctl reboot 后容器自行回到 Up (healthy)，复跑仍 14/14。本机无 Docker，故此处引用真机记录而非本地复现。",
+          "files": [
+            {
+              "path": "docs/deploy-layer.md",
+              "status": "done"
+            }
+          ]
         }
       ]
     },
@@ -643,6 +841,1227 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph13",
+      "index": "P13",
+      "name": "两条 critical 声明的兑现与口径收敛",
+      "goal": "把 SECURITY.md 里两条与实现不符的声明变成可执行的门禁：MCP 子进程不再继承宿主环境、不可见字符表收敛为单一来源；随后把因此漂移的契约数、pytest 总数与测试基线一次对齐，并新增数量一致性门禁防止再次漂移。",
+      "tasks": [
+        {
+          "id": "ph13-t1",
+          "name": "MCP 子进程环境隔离",
+          "status": "done",
+          "note": "曾用 {**os.environ, **server.env} 启动 MCP 服务，于是 npx -y 拉来的第三方代码能直接读到主密钥与全部 provider key。抽出 core/proc_env.py 作为唯一白名单，插件与 MCP 共用；MCP 只转发配置里显式声明的 env。测试让真实子进程回传自己的 os.environ，而不是断言工具函数的返回值——后者证明不了它被传给了 create_subprocess_exec",
+          "files": [
+            {
+              "path": "src/soapbot/core/proc_env.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/plugins/isolation.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_untrusted_child_env.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph13-t2",
+          "name": "不可见字符表单一来源",
+          "status": "done",
+          "note": "5 份拷贝已漂移：注入检测覆盖最全，其余 3 处只有 11 个字符，全部漏掉 U+2066-U+2069。漏在最弱那份的字符能同时骗过注入检测、记忆校验与工具文本清洗，然后进入 prompt。统一到 core/text.py 一张表，四个模块改为 import 同一对象；门禁要求 import 存在，测试用 isolate 打断「忽略」验证仍被识别",
+          "files": [
+            {
+              "path": "src/soapbot/core/text.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/security/injection.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/security/principal.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/ai/stages.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/stages.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph13-t3",
+          "name": "门禁 s19/s20 与数量一致性检查",
+          "status": "done",
+          "note": "s19 用 AST 而非文本扫描：proc_env.py 靠引用旧代码来解释缺陷，文本门禁会把它判成违规，于是让门禁变绿最省事的做法变成删掉解释。另新增 _contract_count_is_consistent，从表格行数反推契约数，断言行号连续、n>=20 单向棘轮、10 处散文声明全部命中——原来那条只查「## 20 项防线契约」字符串的断言，删一行表格照样绿",
+          "files": [
+            {
+              "path": "scripts/check_security_boundaries.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_security_boundaries.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph13-t4",
+          "name": "口径与基线收尾",
+          "status": "done",
+          "note": "契约数 18→20 涉及 9 处散文，其中两处「18 项」是 test_mcp_write 的用例数、必须保留；pytest 总数 1291/10→1747/12 需看板与三份文档同改，否则断层门禁会红；test_gaps_baseline.txt 删掉已被新测试引用的 soapbot.core.text",
+          "files": [
+            {
+              "path": "docs/security-boundaries.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "scripts/test_gaps_baseline.txt",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph14",
+      "index": "P14",
+      "name": "门禁口径对齐与偶发失败消除",
+      "goal": "让「文档声称的门禁」与「实际执行的门禁」成为同一件事：把三个只在 CI 跑的本地可跑门禁补进 make check，把无法本地化的两项写成明确的排除理由而不是继续声称完全一致；同时修掉 Windows 文件锁的固定 10 秒预算，它是并发写测试偶发失败的根因。",
+      "tasks": [
+        {
+          "id": "ph14-t1",
+          "name": "make check 与 CI backend 对齐",
+          "status": "done",
+          "note": "实测差集：check_deps、check_console_encoding、check_deploy 只在 CI 跑，而三者都是离线、确定性、一秒内跑完的静态扫描——正是最该在本机跑的那类门禁。Makefile 文件头写着「Every target here is also what CI runs」，于是同一份提交可以本地全绿、CI 全红。补进 check 后新增 tests/test_gate_parity.py 解析两边文件断言差集恰好两项，并带反向用例证明断言非空；另加两条断言把「两项例外必须在 README 里被解释」与「边界门禁的 Makefile needle 仍命中」也变成可失败的检查。check-deps 原本用 $(PY) 而非 $(BIN)/python，会绕过虚拟环境，一并统一",
+          "files": [
+            {
+              "path": "Makefile",
+              "status": "done"
+            },
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_gate_parity.py",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/operations.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph14-t2",
+          "name": "Windows 文件锁改为有界重试",
+          "status": "done",
+          "note": "msvcrt.LK_LOCK 是「重试 10 次 × 1 秒后抛 OSError」，预算由系统决定且无法观测；4 进程 × 20 次写同一文件时全量跑约每轮失败一次，看起来像锁的竞态 bug，实际是重试策略的超时。改用 LK_NBLCK 非阻塞加指数退避（5ms 起、上限 250ms），预算 30 秒由我们定，超时抛 EnvLockError（TimeoutError 子类，仍是 OSError，四个 API 写入点的 except OSError 映射不变）。睡眠不超过剩余预算，所以超时是真正的上界而不是「上界加一个退避间隔」",
+          "files": [
+            {
+              "path": "src/soapbot/core/config_write.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_env_concurrent_write.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph14-t3",
+          "name": "被实测证伪的数字与未入档的能力",
+          "status": "done",
+          "note": "mypy 基线 53/42→79（四处：ci.yml 两处、deployment.md、verification-matrix.md）、安全不变量 57→84、--verify 十三项→14 项、test_mcp_wiring 15→16 项、IPC 不变量 62→65；两处「子集列举」（test_mcp_write 的 3 项、test_posture 的 7 项）经核实正确、不动。operations.md 另有一句「前三个失败会让 push 或 CI 直接红」也不成立：scripts/pre-push 只跑 check_secrets.py --pre-push，其余八项拦在 CI 而非 push。migrate 与 proc_env 在 CHANGELOG 与验证矩阵中原本零命中，属本轮交付物没有记录，已补条目并标注证据等级",
+          "files": [
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph15",
+      "index": "P15",
+      "name": "文档计数失真与计数门禁",
+      "goal": "把「文档里写的用例数」变成可失败的检查：修正全仓扫描实测证伪的 10 处计数与陈述，新增一条抽取「tests/xxx.py（N 项）」并与真实收集数比对的用例，另把孤儿模块数与流水线环节数从散文变成断言。",
+      "tasks": [
+        {
+          "id": "ph15-t1",
+          "name": "修正被实测证伪的计数与陈述",
+          "status": "done",
+          "note": "用 pytest --collect-only 实测 24 处「tests/xxx.py（N 项）」并逐条核对非测试类计数。改动：plugin-security 的 glob 198→194、命令段 198→128；security-model 的 glob 93→119；verification-matrix 的 a11y 22→32 个组件、孤儿基线 16→10、check_deploy 16→17 项（16 通过 + 1 告警）；guide 与 architecture 的环节数 20/17→22；deploy-layer 去掉白名单里并不存在的 TZ 并写清「声明 19 条 / Linux 实测 11 条」；plugin-isolation 重写 I5（_require_loopback→_authorize、404→401、6→10 条路由）与隔离专项 30→32、i3 5→6、i5 6→8；plugin-security-review 75→74。两处子集列举（test_mcp_write 3 项、test_posture 7 项）经核实正确、不动；各轮「N passed」历史记录不动",
+          "files": [
+            {
+              "path": "docs/plugin-security.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/security-model.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/guide.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-layer.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/plugin-isolation.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/plugin-security-review.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph15-t2",
+          "name": "新增计数门禁 tests/test_doc_test_counts.py",
+          "status": "done",
+          "note": "抽取 README.md 与 docs/**/*.md 里的「tests/xxx.py（N 项）」，一次 pytest --collect-only 取真值后逐条比对，失败信息带文档行号、文档值、真值。glob 声明由本模块自己展开——实测 pytest 把 tests/test_security_*.py 当字面路径、收集到 0 项，交给它会让每条 glob 声明都对着 0 比较。子集声明走 SUBSET_CLAIMS 显式 allowlist 并写明理由，另有断言防止豁免过期（子集涨到等于文件总数时必须删掉）。三条反向用例：合成声明改一个数字必须报错、glob 必须按求和比对、文件消失必须报「没有这个文件」而不是按 0 通过；再加抽取条数下界 20 防止正则失配后空转。端到端复验：把 verification-matrix 的 8 项改成 9 项，门禁返回 1 并指出该行",
+          "files": [
+            {
+              "path": "tests/test_doc_test_counts.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph15-t3",
+          "name": "孤儿数与环节数变成断言",
+          "status": "done",
+          "note": "check_test_gaps.py 增第三条规则：读 docs/verification-matrix.md 的「孤儿模块基线（N 个）」并与 len(orphans) 比对，找不到该句也算失败（规则静默失配与通过无法区分）；docstring 同步为三条规则并说明第三条仍不跑套件。tests/test_pipeline_trace.py 增 test_docs_state_the_real_stage_count，同时钉住 guide.md 的「09 流水线追踪 N 个环节」与 architecture.md 的「N 个 Stage 的顺序是安全语义」。两条都做了改错复验：孤儿数改 16 时 --strict 返回 1",
+          "files": [
+            {
+              "path": "scripts/check_test_gaps.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_pipeline_trace.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph15-t4",
+          "name": "同步基线数字与看板",
+          "status": "done",
+          "note": "新增用例使全量从 1784 升到 1790 passed / 12 skipped，同步 verification-matrix 与 delivery-readiness-v2 三处；test_pipeline_trace 从 34 项升到 35 项，同步验证矩阵",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph16",
+      "index": "P16",
+      "name": "修 Windows CI 锁竞态并补齐文档计数门禁",
+      "goal": "先修掉 2026-11-08 晚间 Windows CI 红的真实根因，再把上一轮两道计数门禁覆盖不到的两类声明变成可失败的检查；提交与推送单独等待授权。",
+      "tasks": [
+        {
+          "id": "ph16-t1",
+          "name": "修复 .env 旁路锁的 Windows 字节竞态",
+          "status": "done",
+          "note": "按 diagnose 流程先建确定性反馈循环：构造 A 进程持 byte0 锁、B 进程仍按 size=0 去写，稳定复现 PermissionError [Errno 13]，并测出 os.open 不受锁影响、0 字节文件可直接上锁且仍互斥、能解锁。根因是 _acquire_windows_lock 里为保证有可锁字节而写的 os.write：它落在别人已锁住的字节范围内，Windows 拒绝而非排队，子进程直接死掉。删掉该初始化，直接锁 byte0（LockFile 允许锁超出 EOF），fcntl 分支不动。回归测试先失败后通过；20 轮乘 4 进程乘 20 次写共 1600 次并发写 0 失败。",
+          "files": [
+            {
+              "path": "src/soapbot/core/config_write.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_env_concurrent_write.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph16-t2",
+          "name": "修正两处门禁盲区里的过期数字",
+          "status": "done",
+          "note": "architecture.md 目录树里的 1290 项通过 / 10 项跳过描述的是当前仓库结构而非轮次记录，改为实测值；plugin-security-review.md 命令注释 75 passed 改为 74（该文件实测 74 项，上一轮只改了同文档正文的 75 项）。wave3/wave5/wave6 等带轮次语境的 N passed 全部不动。",
+          "files": [
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/plugin-security-review.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph16-t3",
+          "name": "扩展两道门禁堵住各自的盲区",
+          "status": "done",
+          "note": "check_test_gaps.py 把 architecture.md 纳入 LIVE_DOCUMENTS，并新增 SKIPPED 正则，让同一行的 N 项跳过也必须与看板一致（总数改对但跳过数不改仍会红）。test_doc_test_counts.py 新增第二类声明：单文件 pytest 命令的 # N passed 注释，先合并 PowerShell 反引号续行再对列出的文件求和比对；跑全量 tests/ 的命令是轮次记录，跳过。新增 4 项测试（含 3 条反向用例与抽取条数下界 3），三条门禁共用一次 collect-only。端到端改错复验：74 改回 75 返回 1 并指出该行；1290 与 10 分别改回也各返回 1。",
+          "files": [
+            {
+              "path": "scripts/check_test_gaps.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_doc_test_counts.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph16-t4",
+          "name": "同步全量基线与看板",
+          "status": "done",
+          "note": "新增 5 项用例使全量从 1790 升到 1795 passed / 12 skipped，同步 architecture.md、delivery-readiness-v2.md 两处、verification-matrix.md 与看板 verification.pytest；test_env_concurrent_write.py 从 7 项升到 8 项，同步验证矩阵该项的列举与实测证据。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph17",
+      "index": "P17",
+      "name": "双端交付文档与上下文不中断",
+      "goal": "按代码库核实新一批授权与组合不变量要求；纠正 Windows 仅开发、桌面端与多模型接入的判断，把傻瓜式文档写进仓库；修复压缩摘要闭环，让折叠历史不再随请求消失。",
+      "tasks": [
+        {
+          "id": "ph17-t1",
+          "name": "核实新一批 22 条授权与不变量要求",
+          "status": "done",
+          "note": "逐条映射代码库：已实现/部分/未实现/不适用。五个真实缺口按影响排序：组合不变量与授权包络缺失（sandbox.py:130-139 只判单个能力）、同进程信任域未闭合、token 无上下文与认证版本绑定、记忆缺来源/置信度/受众三元组与反单调准入、撤销后立即重签 token 且退役仅置 archived。六类要求因单租户、无跨 Agent 通信、不加载模型权重而不适用，未照单全收。",
+          "files": []
+        },
+        {
+          "id": "ph17-t2",
+          "name": "傻瓜式多模型与双端部署文档进仓库",
+          "status": "done",
+          "note": "新建 docs/model-providers.md：三步网页接入、十家预填值（全部取自 ConfigView.vue:240-249，不编造第三方 URL）、表里没有的厂商自填步骤、本地模型、报错对照、可选手写 YAML。README 改为按机器选路径的表并写明 Windows 不是仅开发；修 docker compose up -d 为 -f deploy/docker-compose.yml up -d（根目录本无 compose 文件）；deploy-quickstart.md 补 Windows 不能用 Docker 的逐条内核原因、原生路径无容器加固、doctor 验证、桌面端现状；deploy-layer.md 补验收表两种工作目录的说明；operations.md 统一 -f。",
+          "files": [
+            {
+              "path": "docs/model-providers.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-layer.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/operations.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph17-t3",
+          "name": "查清桌面端与双端一键链路",
+          "status": "done",
+          "note": "桌面端 desktop/ 不是可用 Windows 交付物：只是连接 6185 的 Tauri 托盘壳，不携带 Python 后端（main.rs:3-7、check_desktop.py:204-223 写成门禁），CI desktop job 在 Ubuntu 只跑 cargo check，从不生成 exe/msi。三个 Windows 脚本任务名 SoapbotBot / SoapbotPanel / soapbot-panel 不一致、令牌策略相反。已写进部署文档，未写成已支持。",
+          "files": []
+        },
+        {
+          "id": "ph17-t4",
+          "name": "修复压缩摘要闭环（上下文不中断先手）",
+          "status": "done",
+          "note": "根因：ContextCompressor.compress 已支持 prior_summary 且返回更新后的 result.summary，MemoryStore 已有 latest_summary/save_summary，MemoryStage 已注入【会话摘要】，但 AIEngine._prepare 既不传也不存，builder 也未接线，导致 L1 恒空、每轮从头重压缩。现 AIEngine 注入 summary_loader/summary_saver 两个 callable，_prepare 读 prior、在模型调用前回写变化后的摘要；读写失败只记日志不中断任务；builder 用同一个 MemoryStore 接线。新增 tests/test_context_continuity.py 5 项，含闭环、未变化不重写、读写失败不中断与接线防漂移；改错复验两处均返回 1 并指出具体断言。",
+          "files": [
+            {
+              "path": "src/soapbot/ai/engine.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/core/builder.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_context_continuity.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph17-t5",
+          "name": "修正固化错误命令的测试并同步基线",
+          "status": "done",
+          "note": "test_install_scripts.py::test_readme_leads_with_the_three_paths 原本断言裸 docker compose up -d，把错误命令变成契约；改为断言 -f 形式并禁止裸命令回归。新增 5 项用例使全量从 1795 升到 1800 passed / 12 skipped，同步 architecture.md、delivery-readiness-v2.md 两处、verification-matrix.md 与看板。全量 exit 0；13 条 CI 静态门禁待复验。",
+          "files": [
+            {
+              "path": "tests/test_install_scripts.py",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph18",
+      "index": "P18",
+      "name": "出站目标预允许列表",
+      "goal": "把模型或插件生成的外部资源标识符从「只拒绝明显坏地址」改成「先查预允许列表」，作为 p3b 安全批次的第一项。",
+      "tasks": [
+        {
+          "id": "ph18-t1",
+          "name": "assert_url_allowed 增加目标预允许列表",
+          "status": "done",
+          "note": "原实现是纯 deny-list（私网/保留端口/URL 凭据），任何公网主机都过。现新增可选 allowed_hosts：先做精确或前导点子域匹配，未列入即 SSRFBlockedError；之后仍完整执行原有 deny-list，作为纵深防御。空集合是 fail-closed（全部拒绝），None 保持旧行为以兼容尚未配置的调用方。",
+          "files": [
+            {
+              "path": "src/soapbot/plugins/sandbox.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph18-t2",
+          "name": "SafeHttpClient 在每次 fetch 传入列表并补回归测试",
+          "status": "done",
+          "note": "列表在调用时传给校验，不在构造时固化，便于轮换。新增 tests/test_url_allowlist.py 6 项：公网未列入被拒、精确与子域规则、空列表 fail-closed、None 保持旧行为、allowlist 不能授权私网、客户端每次转发并支持轮换。改错复验两处：去掉 allowlist 检查报 DID NOT RAISE，去掉参数转发报 assert None == frozenset，均恢复。修 ruff I001/B015/N818 后全通过。",
+          "files": [
+            {
+              "path": "tests/test_url_allowlist.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph18-t3",
+          "name": "核实 MCP 版本 pin 的接入风险并暂缓",
+          "status": "done",
+          "note": "读 mcp/client.py:125-185 确认握手在 try 之外调用 _accept_protocol；若在该处因版本不匹配抛错，已启动的子进程与 stderr 任务不会被清理。因此本轮不实现「pin 不匹配即拒绝」，留到补上进程清理之后，避免为了加一道检查引入进程泄漏。已记录在案，不写成已支持。",
+          "files": []
+        },
+        {
+          "id": "ph18-t4",
+          "name": "同步基线与看板",
+          "status": "done",
+          "note": "新增 6 项用例使全量从 1800 升到 1806 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处、verification-matrix.md 与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph19",
+      "index": "P19",
+      "name": "记忆 handoff 与反单调准入",
+      "goal": "在检索结果进入 prompt 之前建立确定性授权边界：写入按来源/置信度/受众标记，下游只能收窄受众，残余不安全检索率可度量。不改 DB schema。",
+      "tasks": [
+        {
+          "id": "ph19-t1",
+          "name": "新建结构化 handoff 与确定性准入门",
+          "status": "done",
+          "note": "memory/handoff.py：Handoff 带 content/source/audience/confidence/constraints；parse_handoff 只做结构解析、明确不作任何授权判断；HandoffGate.decide 每次重新校验结构（不信任上游 well_formed 结论），拒绝空 audience、日志/遥测来源、低于置信度下限、以及受众被放宽（反单调：下游 audience 必须是上游子集，或上游显式 GLOBAL）。constraints 必须含 untrusted，缺失即 malformed。stats() 给出 total/admitted/rejected 与 residual_unsafe_rate，是观测值不是归零假设。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/handoff.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph19-t2",
+          "name": "在 RecallStage 接线并度量",
+          "status": "done",
+          "note": "memory/stages.py：RecallStage 默认持有 HandoffGate（可注入更严策略），逐条从 MemoryItem 的 scope/importance 构造 Handoff，按本次 session_key 做反单调准入；只有准入通过的记录进 recall_prompt 与 recall_items；extras 记录 recall_rejected 与 recall_residual_unsafe_rate = 本次被拒/本次检索总数。store.recall 的 scope 过滤仍保留，但不再被当作授权边界。默认策略下既有行为不变（同会话与全局记录均通过）。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/stages.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph19-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_memory_handoff.py 8 项覆盖解析/授权分离、反单调、数据-only 来源、置信度下限、篡改结构重校验、残余率、跨会话记录不进 prompt、置信度在检索边界生效。改错复验三处均 rc=1：绕过准入后跨会话事实进入 prompt、去掉数据-only 规则、去掉反单调规则。既有记忆/引擎测试 150 项全通过。",
+          "files": [
+            {
+              "path": "tests/test_memory_handoff.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph19-t4",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "verification-matrix.md 补两行（出站目标预允许列表 6 项、记忆受众准入 8 项）。新增 8 项用例使全量从 1806 升到 1814 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph20",
+      "index": "P20",
+      "name": "撤销达到闭合终态",
+      "goal": "修掉「revoke-all 撤销全部后立刻重签一枚 72h 完整会话」这一使撤销只停留在日志层面的反例，并逐一验证终态。",
+      "tasks": [
+        {
+          "id": "ph20-t1",
+          "name": "运行中的进程可轮换一次性引导凭据",
+          "status": "done",
+          "note": "security/tokens.py 新增 BootstrapToken.regenerate()：reset_bootstrap 只写文件、进程内旧对象仍 consumed，必须重启才生效，正是当初选择重签 token 的原因。新方法同时更新进程内状态与磁盘（先写新 token 再删 redeemed marker，崩溃中间态仍留有可用凭据），使撤销后无需重启、无需主机往返即可重新登录。无文件实例（显式配置 SOAPBOT_INIT_TOKEN）只轮换内存值并在注释说明重启后回到配置值。",
+          "files": [
+            {
+              "path": "src/soapbot/security/tokens.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph20-t2",
+          "name": "revoke-all 不再签发会话并验证终态",
+          "status": "done",
+          "note": "api/auth.py：删除替代 token 与重设 cookie 的逻辑，改为清除会话 cookie + 轮换一次性引导凭据；返回 bootstrap_token 与 requires_login，不再有 access_token。返回前逐一验证终态：caller 自己的 token 确实被撤销、新引导凭据确实可用，任一不成立则记 deny 审计并返回 500，不报 ok。审计 detail 明确写 session_token_issued=False 与 requires_login=True，取代含糊的 replacement_issued。前端 client.ts 响应类型与注释同步；check:api 55 called / 80 served 通过。",
+          "files": [
+            {
+              "path": "src/soapbot/api/auth.py",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/api/client.ts",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph20-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_revocation_closure.py 4 项：运行中轮换、无文件仅内存轮换、撤销后无会话且新凭据可兑换、终态检查失败不上报成功。改错复验两处均 rc=1：不轮换凭据时终态验证自己报 500，去掉终态检查时 DID NOT RAISE。既有认证/撤销/引导持久化测试 69 passed / 1 skipped 未受影响；ruff 全通过。前端 vue-tsc 本地未安装（CI 会 npm ci 后执行），仅跑了 check:api，未声称本地 typecheck 通过。",
+          "files": [
+            {
+              "path": "tests/test_revocation_closure.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph20-t4",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "verification-matrix.md 补撤销闭合一行（4 项）。新增 4 项用例使全量从 1814 升到 1818 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph21",
+      "index": "P21",
+      "name": "工具参数级信息流溯源",
+      "goal": "把工具授权从「主体能不能用这个工具」推进到「这些参数从哪里来、能不能选这个资源」，并将校验与执行收在同一个原子边界内。",
+      "tasks": [
+        {
+          "id": "ph21-t1",
+          "name": "新建不可伪造的参数来源标记",
+          "status": "done",
+          "note": "security/provenance.py：ToolArguments 是 dict 子类，来源标记放在属性而非键上——模型输出是 JSON，无法设置 Python 属性，因此不可从提示词伪造；同时所有既有 handler 与 isinstance(dict) 检查保持不变。Provenance 带 origin 与 vetted 集合；vet_arguments 在动作边界重新校验标记，不信任上游已检查的结论；数据-only 来源（log/telemetry/tool_result）一律拒绝成为资源选择器；模型来源的出站资源标识符必须由宿主注入的确定性 resource_check 通过，或已有 mark_vetted 记录。检查器无法运行即拒绝，不放行。本批覆盖 url/uri/endpoint/host/address，与 plugins.sandbox 的 URL 校验同一边界；本地路径与命令参数需各自宿主校验后才能加入，未列入不等于已授权，已在模块 docstring 写明。",
+          "files": [
+            {
+              "path": "src/soapbot/security/provenance.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph21-t2",
+          "name": "模型输出边界打标、动作边界准入",
+          "status": "done",
+          "note": "ai/stages.py 的 _run_tools 在 json.loads 之后、tools.invoke 之前把参数包成 ToolArguments(origin=model)：解析层只做结构，语义授权独立。plugins/dispatch.py 的 invoke 在角色校验与 mcp__/plugin 两条分发路径之前做 vet_arguments，注入 _resource_allowed（包装 assert_url_allowed，返回 bool 而非抛异常，避免授权层解析其它层的异常类型），拒绝即记 deny 审计并返回错误。检查与执行在同一函数内，无 check-then-act 窗口。全仓只有 ai/stages.py:483 一处把模型参数送进 invoke，接线点唯一。",
+          "files": [
+            {
+              "path": "src/soapbot/ai/stages.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/plugins/dispatch.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph21-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_parameter_provenance.py 10 项，含两条静态接线防漂移断言（模型阶段必须先打标、注册表准入必须先于两条分发路径）。改错复验三处均 rc=1：去掉标记、去掉注册表准入、去掉数据-only 规则。既有工具/插件/认证测试 115 passed / 1 skipped 未受影响；ruff 全通过。",
+          "files": [
+            {
+              "path": "tests/test_parameter_provenance.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph21-t4",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "verification-matrix.md 补参数级溯源一行（10 项）。新增 10 项用例使全量从 1818 升到 1828 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph22",
+      "index": "P22",
+      "name": "可移植运行时证明记录",
+      "goal": "把插件加载时的工件哈希、策略版本与实际执行证据绑成一条可移植、可离线重验的记录，在运行时组合点重新验证而非只看安装时扫描。",
+      "tasks": [
+        {
+          "id": "ph22-t1",
+          "name": "新建证明记录模块",
+          "status": "done",
+          "note": "plugins/attestation.py：RuntimeAttestation 绑定 artifact_digest（sha256 树摘要）、policy_version（host_version + capability 集合 + integrity_mode 的稳定指纹）、ExecutionEvidence（完整性判定、是否进程隔离、导入/setup 是否成功、声明与已批准能力、加载时刻）与 record_digest（规范化 payload 哈希）。to_dict/from_dict 全 JSON 类型，可跨进程携带；verify() 在运行时重新 forget+哈希工件并重算策略指纹，检出 artifact_changed / policy_drift / record_tampered / execution_incomplete / schema_mismatch。签名边界如实写明：signature 字段与 signable_payload() 为未来接密钥后端预留，当前为空，硬件可验证不在范围内，未声称已签名。",
+          "files": [
+            {
+              "path": "src/soapbot/plugins/attestation.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph22-t2",
+          "name": "两条加载路径产生记录并提供运行时重验",
+          "status": "done",
+          "note": "plugins/loader.py：_attest() 在导入与 setup 真正成功后调用，重新哈希即将执行的字节而非复用安装时扫描；进程内与 supervisor 隔离两条路径都接入，reload 走 load(force=True) 自动重建记录。新增 attestation(name) 与 verify_attestation(name)，后者要求插件当前已加载，未加载返回 None 而非报告通过。构建失败不阻断加载，但清除旧记录并记 deny 审计，绝不留下静默的已验证状态。审计 action=attestation 带 artifact/policy/record 摘要与 isolated/integrity。",
+          "files": [
+            {
+              "path": "src/soapbot/plugins/loader.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph22-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_runtime_attestation.py 8 项，含 JSON 往返可移植性、签名边界显式说明与两条加载路径的静态接线断言。改错复验四处均 rc=1：去掉隔离路径证明产生、去掉策略漂移/工件变更/记录篡改任一重验规则。既有插件加载测试 214 passed / 1 skipped 未受影响；ruff 全通过（修 RUF022 与 I001）。",
+          "files": [
+            {
+              "path": "tests/test_runtime_attestation.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph22-t4",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "verification-matrix.md 补运行时证明记录一行（8 项）。新增 8 项用例使全量从 1828 升到 1836 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph23",
+      "index": "P23",
+      "name": "MCP 实现版本 pin 与握手失败清理",
+      "goal": "收口 p3b：先补上握手失败时的子进程清理，再让版本不匹配的拒绝不会留下活进程；把第三方 MCP 实现的版本纳入供应链跟踪。",
+      "tasks": [
+        {
+          "id": "ph23-t1",
+          "name": "补握手失败的统一清理路径",
+          "status": "done",
+          "note": "mcp/client.py：原 _ensure_started 只对 _await_response 的 McpError 调 _settle_stderr（连子进程都没终止），_accept_protocol 与 _notify 完全在 try 之外，超时也不是 McpError 会直接逃逸。新增 _abort_handshake(cause)：先等 stderr reader 追上、在 close() 置空 _proc 之前用 _handshake_failure 读出退出码与 stderr，然后 close() 一次完成 terminate/wait/kill/communicate 与 reader cancel，最后清空 protocol_version、实现身份并写 last_error。整个握手段（send/await/accept/notify）纳入一个 except (McpError, TimeoutError, OSError, ValueError, TypeError)。这是加 pin 的前置条件，顺序不能反。",
+          "files": [
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph23-t2",
+          "name": "实现版本 pin 与供应链记录",
+          "status": "done",
+          "note": "McpServer 加可选 pinned_version（空=只记录不强制，避免升级包就起不来）；mcp/config.py 解析并裁剪、限长 128。_accept_protocol 读 serverInfo.name/version，pin 不匹配或缺失即抛 McpError；两种结果都写 kind=mcp / action=implementation 审计（拒绝事件事后无法从 status 重建）。McpManager.status() 暴露 pinned_version / protocol_version / implementation / implementation_version 四元组。_spawn_signature 纳入 pin：改策略必须重连重新握手，否则旧进程会跑在从未校验过的策略下。协议版本仍按协商结果宽容接受，没有把两件事混在一起。",
+          "files": [
+            {
+              "path": "src/soapbot/mcp/client.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/mcp/config.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph23-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_mcp_version_pin.py 10 项，用 argv 传版本的 fake MCP server（绕开 sanitize_env 白名单），覆盖配置、纯逻辑校验、真实子进程的匹配/不匹配/缺 serverInfo、未 pin 记录、status 视图与重连签名；明确指出不匹配用例同时验证「无残留活进程 / 无 stderr reader」。改错复验四处均 rc=1：去掉握手清理报「a refused server must not keep a live process」、去掉 pin 校验报 DID NOT RAISE、去掉签名中的 pin、去掉配置解析。既有 MCP 测试 63 passed 未受影响；ruff 全通过。",
+          "files": [
+            {
+              "path": "tests/test_mcp_version_pin.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph23-t4",
+          "name": "同步验证矩阵、基线与看板，p3b 收口",
+          "status": "done",
+          "note": "verification-matrix.md 补 MCP pin 一行（10 项）。新增 10 项用例使全量从 1836 升到 1846 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。范围 3 的安全实质至此完成：URL 预允许列表、记忆 handoff 反单调准入、撤销闭合、参数级信息流溯源、运行时证明记录、MCP 实现版本 pin。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph24",
+      "index": "P24",
+      "name": "范围 4 起步：Windows 双端服务契约统一",
+      "goal": "修掉三条 Windows 入口互相打架的任务名与令牌策略，让双端安装结果可预期，并补上「没装 Python」时的官方一键入口。",
+      "tasks": [
+        {
+          "id": "ph24-t1",
+          "name": "统一任务名、触发器与令牌策略",
+          "status": "done",
+          "note": "deploy/windows-bootstrap.ps1 原注册 SoapbotPanel、无触发器、把 soapbot.cli token 打到终端；scripts/install.ps1 注册 SoapbotBot、AtStartup、只给路径。现统一为 SoapbotBot + AtStartup + SYSTEM/Highest + ExecutionTimeLimit Zero + -Force，Action 的 cd 路径补引号；令牌改为只打印 data\\init_token.txt 路径并给 restart 命令。同名不同触发器比不同名更糟：-Force 会覆盖，最后跑的那个决定重启后是否回来。docs/deployment.md 的 soapbot-panel 与 deploy-quickstart 的「三个名字互相打架」说明同步更新。start-panel.bat 仍打印令牌，它是前台本地路径、没有服务化，作为显式豁免保留。",
+          "files": [
+            {
+              "path": "deploy/windows-bootstrap.ps1",
+              "status": "done"
+            },
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph24-t2",
+          "name": "补上没装 Python 的官方入口",
+          "status": "done",
+          "note": "README 的启动表格从三条扩为四条，把 deploy/windows-bootstrap.ps1 -Start 与 scripts/install.ps1 并列为 Windows 的两条等价路径，写明默认目录都是 C:\\soapbot、任务名相同、可互相覆盖升级，先用哪条只看机器上有没有 Python。命令段说明该脚本带 param() 与 -Start，必须下载后运行而不是管道 iex，避免给出未验证的一行命令。",
+          "files": [
+            {
+              "path": "README.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph24-t3",
+          "name": "契约测试与改错复验",
+          "status": "done",
+          "note": "tests/test_windows_service_contract.py 7 项：两个安装器注册同名、都设 AtStartup、桌面壳 main.rs 的 Windows fallback 与离线页 schtasks 命令同名、文档同名且无旧名、两个服务化脚本都不含 cli token 且都指出 init_token.txt、只有前台脚本打印令牌且豁免显式列在 allowlist、解析器反向用例证明不会空转。改错复验四处均 rc=1：任务名改回 SoapbotPanel、触发器改 AtLogOn、把 cli token 加回 install.ps1、文档写回 soapbot-panel。ruff 全通过。",
+          "files": [
+            {
+              "path": "tests/test_windows_service_contract.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph24-t4",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "verification-matrix.md 补 Windows 服务契约一行（7 项）。新增 7 项用例使全量从 1846 升到 1853 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板 verification.pytest。范围 4 剩余：桌面端 sidecar 打包 exe/msi、Windows runner 上的 tauri build 与签名，需要单独一轮并需要证书与 PyInstaller 配置，未在本轮声称支持。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph25",
+      "index": "P25",
+      "name": "桌面 sidecar：可独立冻结的后端",
+      "goal": "范围 4 的第二块：把后端打成单文件可执行程序，先在没有 Tauri 的情况下验证它能独立启动、服务面板并正确落位数据。",
+      "tasks": [
+        {
+          "id": "ph25-t1",
+          "name": "冻结入口先钉目录再 import",
+          "status": "done",
+          "note": "desktop/sidecar/entry.py：Settings 的 PROJECT_ROOT 由 __file__ 的 parents[2] 推导，onefile 下会指向临时解压目录。因此在 import soapbot.cli 之前用 setdefault 钉住 SOAPBOT_DATA_DIR / CONFIG_DIR / CONFIG_TEMPLATE_DIR / ENV_FILE 四项；ENV_FILE 必须最先，SettingsConfigDict 在类定义时读它，import 之后再设无效。双击无参数时注入 start，不打印版本号后闪退。",
+          "files": [
+            {
+              "path": "desktop/sidecar/entry.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph25-t2",
+          "name": "可复现的构建脚本与两个实测坑",
+          "status": "done",
+          "note": "desktop/sidecar/build.py：一条命令产出 onefile（Tauri externalBin 要求单文件），声明 webui/dist 与 config 两棵 --add-data，收集 uvicorn/soapbot/sqlalchemy.dialects.sqlite 子模块并显式列出 soapbot.app、aiosqlite 等动态导入。实测坑一：缺 dialect 时启动会在 create_async_engine 失败且 traceback 只到 db.py:358；坑二：onefile bootloader 派生真实子进程，只杀父会留下孤儿并占住日志文件，关闭必须杀进程树。两者都写进脚本与部署文档。前端产物缺失时返回 2 而不是打出一个空面板的包。",
+          "files": [
+            {
+              "path": "desktop/sidecar/build.py",
+              "status": "done"
+            },
+            {
+              "path": ".gitignore",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph25-t3",
+          "name": "实际打包与运行验证",
+          "status": "done",
+          "note": "本机 Windows 实跑 build.py：46.3 MiB onefile。以独立 SOAPBOT_DATA_DIR 与 6197 端口启动后，/api/health 返回 {status:ok,version:0.1.0}，/ 返回 200（883 字节面板首页），日志出现 runtime scheduler started 与 Application startup complete，数据目录生成 init_token.txt/jwt.key/config/ 等。两次失败都真实发生并修掉：先缺 dialect 启动失败，再发现杀父留孤儿。",
+          "files": []
+        },
+        {
+          "id": "ph25-t4",
+          "name": "契约测试、文档与基线同步",
+          "status": "done",
+          "note": "tests/test_sidecar_build.py 7 项：入口变量齐全且 ENV_FILE 早于 import、双击默认 start、两条 add-data、动态导入覆盖、onefile、缺前端返回 2、产物被 gitignore。改错复验四处均 rc=1：删 ENV_FILE、删 config 的 add-data、删 aiosqlite、把 onefile 改 onedir。部署文档改写桌面端段落，如实说明后端可冻结但 Tauri externalBin/子进程生命周期/Windows runner 打包/签名仍缺。新增 7 项使全量 1853 → 1860 passed / 12 skipped（exit 0）。",
+          "files": [
+            {
+              "path": "tests/test_sidecar_build.py",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph26",
+      "index": "P26",
+      "name": "桌面壳托管 sidecar 的受控生命周期",
+      "goal": "把「禁止桌面壳启动后端」改成「先探测、只在受控函数内启动、退出杀进程树」，让桌面壳能托管 sidecar 又不重新引入两个后端抢一个端口的竞争。",
+      "tasks": [
+        {
+          "id": "ph26-t1",
+          "name": "Rust 侧：探测优先的 spawn 决策与进程树关闭",
+          "status": "done",
+          "note": "main.rs 重写：新增纯函数 spawn_decision(port_open, sidecar_present) 三态（AlreadyRunning/NoSidecar/Spawn），启动时先 TCP 探测 6185，已监听就不启动第二个；端口空且壳旁或 resource_dir 找到 soapbot-backend 才 spawn。stop_backend 在 Windows 用 taskkill /PID <pid> /T /F（PyInstaller onefile 的 bootloader 会 fork，直接 Child::kill 会留下持端口的孤儿——上一轮已实测），非 Windows 退化为 child.kill。通过 RunEvent::ExitRequested/Exit 调 stop_owned_backend，用 Mutex<Option<Child>>::take 保证幂等。5 项 Rust 单元测试覆盖三态与两种探测边界。",
+          "files": [
+            {
+              "path": "desktop/src-tauri/src/main.rs",
+              "status": "done"
+            },
+            {
+              "path": "desktop/src-tauri/tauri.conf.json",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph26-t2",
+          "name": "门禁从「禁止 spawn」改为「受控 spawn」",
+          "status": "done",
+          "note": "check_desktop.py：check_no_spawn 重写为 shell.sidecar-guarded，要求存在 fn spawn_decision、存在 AlreadyRunning 分支、不得出现 python -m soapbot、Windows 杀法必须是 taskkill、且 Command::new 只能出现在 start_sidecar/stop_backend。规则体拆成纯函数 sidecar_rule_problems(source)，便于喂合成源码做反向测试。文件头补第 6 条策略说明。旧测试 test_spawning_the_backend_is_rejected 按新语义改写为 test_an_unguarded_spawn_is_rejected，断言落在「未受控函数」而不是字符串 std::process::Command。",
+          "files": [
+            {
+              "path": "scripts/check_desktop.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_desktop_config.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph26-t3",
+          "name": "打包产物进 Tauri resources 并绕过 cargo check 的路径校验",
+          "status": "done",
+          "note": "tauri.conf.json 声明 bundle.resources 指向 binaries/ 目录而不是单个文件：Tauri 在 cargo check 的 build-script 阶段就校验资源路径存在，而 CI 的 desktop job 不产 46 MiB 二进制。仓库提交 binaries/.gitkeep 保留目录，.gitignore 忽略目录内容但保留占位。build.py 打包后 shutil.copy2 到 src-tauri/binaries/，实测 staging 成功（48.5 MB）。第一次用单文件路径时 cargo check 直接报 resource path does not exist，改成目录后通过。",
+          "files": [
+            {
+              "path": "desktop/src-tauri/tauri.conf.json",
+              "status": "done"
+            },
+            {
+              "path": ".gitignore",
+              "status": "done"
+            },
+            {
+              "path": "desktop/src-tauri/binaries/.gitkeep",
+              "status": "done"
+            },
+            {
+              "path": "desktop/sidecar/build.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph26-t4",
+          "name": "验证与基线同步",
+          "status": "done",
+          "note": "cargo check --locked 1.33s 通过；cargo test 5 项通过；check_desktop.py 15/15 通过；新增 tests/test_sidecar_build.py 4 项（真实壳通过受控规则、裸 spawn 被拒、调用点归因、staging 断言），该文件从 7 项升到 11 项。反向复验四处均 rc=1：删 spawn_decision、taskkill 改名、在 main 里加裸 Command::new、删 staging。全量 1860 → 1864 passed / 12 skipped（exit 0）；两次失败都是「规则变了测试还在断言旧契约」，已按新语义修正。部署文档改为如实描述：壳已能托管，但 tauri build 仍未在 Windows runner 实跑、签名无证书。",
+          "files": [
+            {
+              "path": "tests/test_sidecar_build.py",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph27",
+      "index": "P27",
+      "name": "撤销闭合与桌面端签名方案",
+      "goal": "撤掉「撤销后立刻重签完整会话」这个使撤销只停留在日志层面的反例，并逐一验证终态；同时把 Windows 代码签名的真实门槛写进仓库。",
+      "tasks": [
+        {
+          "id": "ph27-t1",
+          "name": "运行中的进程可轮换一次性引导凭据",
+          "status": "done",
+          "note": "security/tokens.py 新增 BootstrapToken.regenerate()：reset_bootstrap 只写文件、进程内旧对象仍 consumed，必须重启才生效，这正是当初 revoke-all 选择重签 token 的原因。新方法同时更新进程内状态与磁盘（先写新 token 再删 redeemed marker，崩溃中间态仍留有可用凭据）。无文件实例（显式配置 SOAPBOT_INIT_TOKEN）只轮换内存值，重启后回到配置值，不假装能改写不存在的文件。",
+          "files": [
+            {
+              "path": "src/soapbot/security/tokens.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph27-t2",
+          "name": "revoke-all 不再签发会话并验证终态",
+          "status": "done",
+          "note": "api/auth.py：删除替代 token 与重设 cookie，改为清除会话 cookie + 轮换引导凭据；返回 bootstrap_token 与 requires_login，不再有 access_token。返回前逐一验证：caller 自己的 token 确实被撤销、新引导凭据确实可用，任一不成立则记 deny 审计并返回 500，不报 ok。审计 detail 明确写 session_token_issued=False 与 requires_login=True。前端 client.ts 类型与注释同步。",
+          "files": [
+            {
+              "path": "src/soapbot/api/auth.py",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/api/client.ts",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph27-t3",
+          "name": "回归测试与改错复验",
+          "status": "done",
+          "note": "tests/test_revocation_closure.py 6 项：撤销后不签发会话、调用者自己的 token 立即失效、轮换后的引导凭据是唯一回程且只能用一次、会话 cookie 被清除、终态检查失败返回 500、无文件实例仅内存轮换。改错复验四处均 rc=1：去掉清 cookie 报 []、不轮换凭据时报 500、去掉终态检查报 assert 200 == 500、响应里加回 access_token 报断言失败。既有认证测试 74 passed / 1 skipped 未受影响。",
+          "files": [
+            {
+              "path": "tests/test_revocation_closure.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph27-t4",
+          "name": "桌面端签名方案进仓库",
+          "status": "done",
+          "note": "新建 docs/desktop-signing.md：SmartScreen 警告的成因；五条路（不签、自签、OV、EV、Azure Trusted Signing）的费用量级与是否能消除警告；开源项目的两条免费通道（SignPath Foundation、Certum 开源证书）；CI 的真实卡点是 USB 硬件令牌无法插入 runner，因此只有云 HSM、云端签名服务、或本地人工签名三种可能；Tauri 2 的 certificateThumbprint 与 signCommand 两种接法；明确区分代码签名与 TAURI_SIGNING_PRIVATE_KEY（更新包签名，不能消除 SmartScreen 警告）；仓库当前未签名的状态与证书到位后只改两处。deploy-quickstart.md 的桌面端段落链接过去。",
+          "files": [
+            {
+              "path": "docs/desktop-signing.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph27-t5",
+          "name": "同步验证矩阵、基线与看板",
+          "status": "done",
+          "note": "验证矩阵的撤销闭合一行按实际覆盖点重写为 6 项并更新改错复验证据。旧文件 4 项被新 6 项替换，净增 2 项，全量从 1864 升到 1866 passed / 12 skipped（exit 0），同步 architecture.md、delivery-readiness-v2.md 两处与看板。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph28",
+      "index": "P28",
+      "name": "Windows 安装包实测与未签名决策",
+      "goal": "把桌面端从「只有托盘壳」推进到「真能产出带后端的 NSIS 安装包」，并把「先不申请证书」的代价写成可查的清单。",
+      "tasks": [
+        {
+          "id": "ph28-t1",
+          "name": "补齐桌面端 lock 文件",
+          "status": "done",
+          "note": "desktop/package-lock.json 原先缺失，而 src-tauri/Cargo.lock 是提交的——同一个应用两套依赖，一个锁一个不锁。用 npm install --package-lock-only 生成（7.7 KB），CI 才能用 npm ci 而不是不可复现的 npm install。",
+          "files": [
+            {
+              "path": "desktop/package-lock.json",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph28-t2",
+          "name": "本地实测 tauri build 产出安装包",
+          "status": "done",
+          "note": "cd desktop && npm run build：Rust release 编译 2m43s，NSIS 下载并打包，产出 soapbot_0.1.0_x64-setup.exe 47.48 MiB。验证 sidecar 真的进包：target/release/binaries/soapbot-backend.exe 存在；installer.nsi 第 688 行明确写了 File /a 把 binaries\\\\soapbot-backend.exe 写入安装目录，卸载段对应删除。空壳约 4 MiB，47.48 MiB 的差额就是后端。路径解析与 main.rs 的 resource_dir()/binaries 候选一致。",
+          "files": []
+        },
+        {
+          "id": "ph28-t3",
+          "name": "CI 新增 desktop-bundle job",
+          "status": "done",
+          "note": "ci.yml 新增 desktop-bundle：windows-latest、45 分钟超时、needs desktop、仅在 workflow_dispatch 或 v* tag 触发（每次 push 都跑会多花几分钟，PR 里没人下载安装包）。步骤依次为 setup-python/setup-node（双 lock 缓存）、rust-cache、webui 构建、desktop/sidecar/build.py 冻结、desktop npm ci + npm run build、列出产物、upload-artifact。同时改写 desktop job 的旧注释——原文写「从 CI 发布未签名产物比不发布更糟」，在桌面端成为唯一 Windows 双击路径后这个权衡反了，改为明确说明为什么允许未签名产出。YAML 用 safe_load 校验结构。",
+          "files": [
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph28-t4",
+          "name": "未签名决策写进文档",
+          "status": "done",
+          "note": "desktop-signing.md 新增「先不签名会怎样」：用户第一次运行需点两次、浏览器下载提示、杀软误报概率更高、企业 AppLocker 可能直接拦；不受影响的是功能、面板访问、自动更新（updater 用独立密钥）、CI 与源码/Docker 部署。第五节的仓库状态从「CI 不在 Windows 跑、拿不到产物」改为「本地已实测出包、CI 有 on-demand job」。README 与 deploy-quickstart 的桌面端段落从「不是安装包」改为「能出安装包、包里自带后端、未签名需点两次」，并给出三段构建命令与 installer.nsi 证据。",
+          "files": [
+            {
+              "path": "docs/desktop-signing.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph28-t5",
+          "name": "验证与基线",
+          "status": "done",
+          "note": "本轮不改 Python 代码，全量仍为 1866 passed / 12 skipped（exit 0）。check_desktop / check_doc_links（62 链接 33 文件）/ check_test_gaps --strict / ruff 全绿；受影响的门禁测试 35 passed。CI 的 desktop-bundle job 本身无法本地执行，只能校验 YAML 结构与各步骤的本地等价命令——首次真实运行需要 push 后手动触发。",
+          "files": [
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph29",
+      "index": "P29",
+      "name": "依赖升级兼容性实测",
+      "goal": "在隔离环境里用远程 pin 的 16 个升级包跑全量，确认范围 1 的推送不会因为依赖升级引入回归；主环境保持不动。",
+      "tasks": [
+        {
+          "id": "ph29-t1",
+          "name": "建立隔离验证环境",
+          "status": "done",
+          "note": "在 %TEMP%\\soapbot-remote-check 下用主 .venv 的 Python 3.12.10 新建 venv，装远程 requirements.txt 的运行时 pin（pydantic 2.14.3 / pydantic-settings 2.16.2 / SQLAlchemy 2.1.8 / uvicorn 0.54.0 / numpy 2.5.4 / aiosqlite 0.22.1 / websockets 14.2 / fastapi 0.162.0 等）与远程 dev pin（pytest 9.2.0 / pytest-asyncio 1.4.1.post1 / pytest-timeout 2.4.0 / respx 0.23.1）。不装 -e .，用 PYTHONPATH=src 指向源码，避免在工作区生成 egg-info。主 .venv 与工作区未被改动。",
+          "files": []
+        },
+        {
+          "id": "ph29-t2",
+          "name": "在新依赖组合下跑全量",
+          "status": "done",
+          "note": "结果 1866 passed / 12 skipped（exit 0，304s），与旧 pin 的本机基线逐项一致。跨度的五个包——pydantic 2.10.4→2.14.3、SQLAlchemy 2.0.36→2.1.8、uvicorn 0.34.0→0.54.0、numpy 2.2.1→2.5.4、pytest 9.0.3→9.2.0——没有造成任何用例回归。此前已用 pip install --dry-run 确认远程 pin 组合可解析、无版本冲突。",
+          "files": []
+        },
+        {
+          "id": "ph29-t3",
+          "name": "记录证据",
+          "status": "done",
+          "note": "verification-matrix.md 新增「依赖升级兼容性」一行，写明隔离环境、16 个包、结果与主环境未改动。范围 1 只剩「与远程 master 合流并推送」这一步，需要用户明确授权；推送后还要观察 Windows CI 是否因依赖升级出现新问题。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -738,12 +2157,12 @@
     }
   ],
   "verification": {
-    "pytest": "1291 passed, 10 skipped",
+    "pytest": "1866 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
-    "deploy_check": "静态 0 阻断 / 1 告警 / 14 通过；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
+    "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
     "deps": "依赖清单一致",
     "clean_venv": "pip install . 成功并实际启动，/api/health 200",
-    "docker_runtime": "未验证（本机无 Docker，装不上）"
+    "docker_runtime": "已验证（2026-10-30 真机 14/14 PASS，systemctl reboot 后容器自愈，见 deploy-layer.md §8.2）"
   }
 }

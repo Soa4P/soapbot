@@ -5,13 +5,37 @@ QQ 群里的 AI 机器人。Python 3.12 / FastAPI / Vue3。第三方插件跑在
 
 不内置 QQ 协议逆向代码，不持有支付凭据，不调用支付 API。
 
-## 启动
+## 启动：按你的机器选一条
 
-三条命令，选一条。Windows 和 Linux 只需要 Python 3.12+，Docker 连 Python 都不用装。
+| 你的机器 | 用哪条 | 前提 |
+| --- | --- | --- |
+| Windows（已装 Python） | `scripts/install.ps1` | Python 3.12+ |
+| Windows（没装 Python） | `deploy/windows-bootstrap.ps1 -Start` | 管理员 PowerShell；脚本自己下载并静默安装 Python 3.12 |
+| Linux | `scripts/install.sh` | Python 3.12+ |
+| Linux（容器加固版） | `deploy/docker-compose.yml` | Docker；**这条只有 Linux 能用** |
+
+两条 Windows 路径注册的是**同一个**计划任务 `SoapbotBot`（SYSTEM、开机启动），默认目录
+都是 `C:\soapbot`，可以互相覆盖升级；先用哪条只看这台机器上有没有 Python。
+
+**为什么 Docker 那条 Windows 用不了**：不是 Docker Desktop 装没装的问题。容器配置用了
+`user: 10001`、`read_only`、`cap_drop: ALL`、`seccomp`、`tini` 和 `0600` 权限位，全是
+Linux 内核语义；验收脚本还要读 `/proc/1/comm`、跑 `systemctl`。逐条原因见
+[部署文档](docs/deploy-quickstart.md)。Windows 的等价交付是 PowerShell 脚本（原生进程 +
+计划任务），**它不带这些容器加固**，这个差别在部署文档里写明了。
+
+**桌面端** `desktop/` 能打出 Windows 安装包（NSIS），**包里自带后端**：装完不需要单独
+装 Python，双击就是托盘入口。它是**未签名**的，SmartScreen 会提示「未知发布者」，点
+「更多信息 → 仍要运行」即可；原因与证书方案见[桌面端签名](docs/desktop-signing.md)。
+构建命令与 CI 触发方式见[部署文档](docs/deploy-quickstart.md)。
 
 ```powershell
-# Windows，管理员 PowerShell
+# Windows 已装 Python，管理员 PowerShell
 irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 | iex
+
+# Windows 没装 Python，管理员 PowerShell。下载后运行而不是管道执行：
+# 这个脚本带 param() 块和 -Start 开关，直接 iex 会把参数吃掉。
+irm https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/windows-bootstrap.ps1 -OutFile "$env:TEMP\soapbot-bootstrap.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-bootstrap.ps1" -Start
 ```
 
 ```bash
@@ -20,12 +44,13 @@ curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/instal
 ```
 
 ```bash
-# Docker
-docker compose up -d
+# Docker（仅 Linux）
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 装完打开 `http://127.0.0.1:6185`，一次性登录令牌在 `data/init_token.txt`（Docker 里是
-`docker compose exec soapbot cat /data/init_token.txt`）。脚本不会把令牌打进终端。
+`docker compose -f deploy/docker-compose.yml exec soapbot cat /data/init_token.txt`）。
+脚本不会把令牌打进终端。
 
 从源码跑（改代码时用）：
 
@@ -39,11 +64,23 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 任何一步失败都停在窗口里说明原因。没有浏览器用 `python -m soapbot.cli setup`
 走交互向导，校验不过不写盘。
 
-启动后在面板第 07 页填「模型 Key」和「QQ 接入」，两行各点一次「测试」。不用手改
-YAML：`config/` 是模板，首次启动播种到 `data/config`，`git pull` 不会覆盖你的那份。
+## 装完之后：三步让机器人能回话
 
-三条路径的细节、常见失败和卸载在 [docs/deploy-quickstart.md](docs/deploy-quickstart.md)。
-面板 12 页、群范围、语音、远程访问和登录在 [docs/guide.md](docs/guide.md)。
+1. 打开 `http://127.0.0.1:6185`，用上面那个令牌登录。
+2. 进**第 07 页「模型与人格」**，点一下你那家模型厂商的名字（接口地址和模型名已经
+   预填好），粘贴 API Key，点同一行的**「测试」**，出绿灯再点**「保存」**。
+3. 同一页填「QQ 接入」，也点一次「测试」。
+
+不用改代码，不用手改 YAML：`config/` 是模板，首次启动播种到 `data/config`，`git pull`
+不会覆盖你的那份。
+
+**十家厂商的预填值、表里没有的厂商（MiniMax / 混元 / seed / Nemotron / Llama 等）怎么
+自己加、本地模型怎么配、401 / 404 / 超时分别怎么读**，全在
+[模型接入指南](docs/model-providers.md)。
+
+三条路径的细节、常见失败、验证命令和卸载在
+[部署文档](docs/deploy-quickstart.md)。面板 12 页、群范围、语音、远程访问和登录在
+[使用指南](docs/guide.md)。
 
 ## 边界
 
@@ -62,21 +99,27 @@ YAML：`config/` 是模板，首次启动播种到 `data/config`，`git pull` �
   官方机器人审核、B 站数据合规、支付边界见 [SECURITY.md](SECURITY.md) 与
   [docs/provenance.md](docs/provenance.md)。
 
-18 项边界逐条证据在 [docs/security-boundaries.md](docs/security-boundaries.md)，
+20 项边界逐条证据在 [docs/security-boundaries.md](docs/security-boundaries.md)，
 认证与威胁模型在 [docs/security-model.md](docs/security-model.md)。
 
 ## 门禁
 
 ```bash
-make check          # lint / contrast / a11y / gaps / doclinks / ipc-audit / boundary-audit / desktop-check / pytest
+make check          # CI backend 的全部本地可跑门禁 + pytest（差集只有两项，见下）
 cd webui && npm run verify
 python -m soapbot.cli doctor --strict      # 部署前
 ```
 
-`make check` 与 CI 的 backend 双矩阵跑的是同一组命令。三个静态门禁值得单独说：
-`scripts/check_plugin_ipc.py` 守插件进程边界，`scripts/check_security_boundaries.py`
-守 18 项安全与错误日志契约，`scripts/check_desktop.py` 守桌面壳的 CSP、单实例与
-「不自己拉起后端」。它们只读源码、打印证据行，失败就退出非零。
+`make check` 跑的是 CI `backend` 任务里**能在本机跑的全部**门禁：lint、version、
+check-deps、console-encoding、deploy-check、contrast、a11y、gaps、doclinks、
+ipc-audit、boundary-audit、desktop-check、pytest。只有两项不在其中，原因是它们
+依赖本机没有的东西——`check_secrets.py --committed` 要读待审提交的 git 历史，
+`pip-audit` 要联网。这个差集由 `tests/test_gate_parity.py` 断言，两边再漂移就会红。
+
+三个静态门禁值得单独说：`scripts/check_plugin_ipc.py` 守插件进程边界，
+`scripts/check_security_boundaries.py` 守 20 项安全与错误日志契约，
+`scripts/check_desktop.py` 守桌面壳的 CSP、单实例与「不自己拉起后端」。它们只读
+源码、打印证据行，失败就退出非零。
 
 桌面壳在 [desktop/](desktop/)，构建需要 Rust 与 WebView2，`make desktop` 出安装包。
 它只负责打开面板，不启动后端：进程生命周期归计划任务或 systemd，两个监管者抢

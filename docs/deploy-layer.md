@@ -91,8 +91,10 @@ from soapbot.plugins.base import Plugin   # 正常  ← 公开 API
 ### 1.5 子进程环境变量：白名单而非黑名单
 
 ```python
-env = sanitize_env(base=os.environ)   # 只保留 PATH/LANG/TZ/HOME 等 11 项
+env = sanitize_env(base=os.environ)   # 白名单声明 19 条，Linux 上实际保留 11 条
 ```
+
+白名单声明 19 条（`SAFE_ENV_KEYS`），其中 Windows 专属键（`SYSTEMROOT`、`COMSPEC`、`PATHEXT` 等）在 Linux 上不存在，所以容器里实测保留 11 条：`PATH`、`HOME`、`LANG`、`LC_ALL`、`LC_CTYPE`、`TMPDIR`、`PYTHONIOENCODING`、`PYTHONUTF8`、`SSL_CERT_FILE`、`SSL_CERT_DIR`、`REQUESTS_CA_BUNDLE`。注意 `TZ` **不在**白名单里——需要时区时由容器自己的 `TZ` 环境变量决定，不经宿主透传。
 
 白名单的理由很实际：凭据类变量名是**开放集合**（`AWS_SECRET_ACCESS_KEY`、`HF_TOKEN`、`AZURE_CLIENT_SECRET`……），黑名单永远漏。白名单默认安全。
 
@@ -224,6 +226,15 @@ worker 启动前就被别人花掉一部分，于是子进程第一次 `run_in_e
 soapbot doctor            # 人读
 soapbot doctor --json     # 机器读
 soapbot doctor --strict   # CI 门禁：critical/high 未解决 → exit 2
+```
+
+其余子命令：
+
+```bash
+soapbot version           # 打印版本，脚本里用来确认装的是哪一版
+soapbot migrate --status  # 只读：当前 schema 版本 -> 本程序支持的版本
+soapbot migrate --dry-run # 只读：列出将要执行的步骤，不动库
+soapbot migrate           # 顺序升到本程序支持的版本（只前进，不降级）
 ```
 
 实测输出：
@@ -387,6 +398,11 @@ tmpfs: [/tmp]
 
 前置：`deploy/daemon-mirror.md` 里的镜像加速必须先配好，否则 `build` 在第一条 `FROM`
 就超时（已实测直连 Docker Hub 不通）。
+
+> **工作目录要说清楚**：下表第 1–2 步从仓库根目录跑，所以写了
+> `-f deploy/docker-compose.yml`；第 3–9 步是在 `cd deploy` 之后跑的，同目录就有
+> `docker-compose.yml`，所以命令里没带 `-f`。**从仓库根目录复现 3–9 步时，每条都要补上
+> `-f deploy/docker-compose.yml`**，否则 Compose 找不到配置文件。别把两种目录混着抄。
 
 | # | 命令 | 预期结果 | 失败通常意味着 |
 |---|---|---|---|

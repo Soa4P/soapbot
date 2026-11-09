@@ -36,6 +36,7 @@ import logging
 import re
 import socket
 import time
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -377,13 +378,38 @@ class SSRFBlockedError(ValueError):
     """Raised when a plugin tries to reach an address it must not."""
 
 
-def assert_url_allowed(url: str) -> None:
+def _host_in_allowlist(host: str, allowed: Collection[str]) -> bool:
+    """Exact host, or a leading-dot rule that also covers subdomains."""
+    for entry in allowed:
+        rule = entry.lower().strip().rstrip(".")
+        if not rule:
+            continue
+        if rule.startswith("."):
+            base = rule[1:]
+            if host == base or host.endswith("." + base):
+                return True
+        elif host == rule:
+            return True
+    return False
+
+
+def assert_url_allowed(url: str, *, allowed_hosts: Collection[str] | None = None) -> None:
     """Reject URLs that reach private/infrastructure addresses.
 
     Threat: a plugin with ``HTTP`` capability is an SSRF primitive. Without this
     check it can read the cloud metadata service (``169.254.169.254``), the bot's
     own admin API on ``127.0.0.1:6185``, or a database on ``10.0.0.0/8`` — using
     the bot's network position, which the plugin author does not otherwise have.
+
+    ``allowed_hosts`` is a **pre-allow-list** for destinations, checked before the
+    deny-list. A deny-list alone answers "is this address obviously bad?", which is the
+    wrong question for an identifier the model produced: any public host passes,
+    including one the operator never agreed to talk to. With a list, a host that is not
+    named is rejected first; the private-address checks stay as defence in depth,
+    because an allow-list entry can itself be stale or mistyped.
+
+    ``None`` keeps the legacy deny-list-only behaviour for callers not yet configured.
+    An **empty** collection is deliberately fail-closed: no outbound host is allowed.
 
     Checks performed on the literal URL *and* on the resolved IPs, because a
     hostname can resolve to a private address (DNS rebinding is mitigated by
@@ -398,6 +424,8 @@ def assert_url_allowed(url: str) -> None:
         raise SSRFBlockedError("url has no host")
 
     host = parts.hostname.lower().strip(".")
+    if allowed_hosts is not None and not _host_in_allowlist(host, allowed_hosts):
+        raise SSRFBlockedError(f"host {host!r} is not in the destination allow-list")
     if host in _BLOCKED_HOSTNAMES:
         raise SSRFBlockedError(f"host {host!r} is blocked")
     if host.endswith(".internal") or host.endswith(".local"):
@@ -555,9 +583,20 @@ class SafeHttpClient:
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
     MAX_TIMEOUT = 15.0
 
-    def __init__(self, guard: CapabilityGuard, *, client_factory=None) -> None:
+    def __init__(
+        self,
+        guard: CapabilityGuard,
+        *,
+        client_factory=None,
+        allowed_hosts: Collection[str] | None = None,
+    ) -> None:
         self._guard = guard
         self._client_factory = client_factory
+        #: Destination pre-allow-list. ``None`` keeps the legacy deny-list-only
+        #: behaviour; an empty collection is fail-closed. Handed to
+        #: :func:`assert_url_allowed` on every fetch, not once at construction, so a
+        #: rotated list cannot be bypassed by an object created before the rotation.
+        self._allowed_hosts = allowed_hosts
 
     def _sanitize_headers(self, headers: dict[str, str] | None) -> dict[str, str]:
         """Allow-list only, and fail loudly on anything else.
@@ -598,7 +637,7 @@ class SafeHttpClient:
         timeout: float = 10.0,
     ) -> tuple[int, bytes]:
         self._guard.check(Capability.HTTP, detail=f"{method} {urlsplit(url).netloc}")
-        assert_url_allowed(url)
+        assert_url_allowed(url, allowed_hosts=self._allowed_hosts)
         parts = urlsplit(url)
         host = parts.hostname or ""
         vetted = await resolve_and_verify(host)

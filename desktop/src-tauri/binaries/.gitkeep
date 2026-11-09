@@ -1,0 +1,8 @@
+# Keeps this directory in the repository.
+#
+# `tauri.conf.json` declares `bundle.resources: ["binaries/"]`, and Tauri's build script
+# validates that path while running `cargo check` — not only at bundle time. CI checks
+# the shell without building the 46 MiB sidecar, so the directory has to exist and the
+# binary inside it does not.
+#
+# `desktop/sidecar/build.py` writes `soapbot-backend.exe` here after freezing it.
