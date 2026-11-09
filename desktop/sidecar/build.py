@@ -100,11 +100,21 @@ def command() -> list[str]:
     return args
 
 
+def _pyinstaller_available() -> bool:
+    """Whether the bundler is importable.
+
+    Split out of :func:`main` so the two preconditions can be tested independently: the
+    environment running the tests may or may not have this optional extra installed, and
+    a test for the *other* guard must not depend on which.
+    """
+    return importlib.util.find_spec("PyInstaller") is not None
+
+
 def main() -> int:
     # Checked before anything expensive: CI failed on this once with a bare
     # "No module named PyInstaller" from a subprocess, which reads like a broken build
     # rather than a missing optional dependency.
-    if importlib.util.find_spec("PyInstaller") is None:
+    if not _pyinstaller_available():
         print(
             'PyInstaller is not installed; run `pip install -e ".[sidecar]"`',
             file=sys.stderr,
