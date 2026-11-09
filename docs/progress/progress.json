@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-09T22:35:23+08:00",
+  "updated_at": "2026-11-10T00:10:24+08:00",
   "current": null,
   "phases": [
     {
@@ -2317,6 +2317,74 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph33",
+      "index": "P33",
+      "name": "破坏性操作确认统一与门禁",
+      "goal": "把面板里 5 处原生 window.confirm 换成组件化对话框，并用一条静态规则防止回退。",
+      "tasks": [
+        {
+          "id": "ph33-t1",
+          "name": "MemoryView 三种删除共用一个对话框",
+          "status": "done",
+          "note": "原先 removeMemory / removeDocument / removeSkill 各自 window.confirm：阻塞事件循环、渲染在焦点陷阱之外、只能显示字符串，导致三种不同删除在确认那一刻看起来一样。现在 PendingDelete 带 kind（memory/document/skill），deleteDialog 据此给出标题与后果（复用 memory.deleteMemoryConfirm / deleteConfirm / skillDeleteConfirm 文案），三个执行体改名 deleteMemory / deleteDocument / deleteSkill 且不再自行确认；confirmDelete 在请求期间置 deleteBusy，成功才关闭对话框，失败保持打开。三个模板按钮改为 askDelete(...)，文档与技能按钮补 :disabled。",
+          "files": [
+            {
+              "path": "webui/src/views/MemoryView.vue",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph33-t2",
+          "name": "PluginsView 撤销与删除统一",
+          "status": "done",
+          "note": "revoke 与 remove 改为 askAction({kind}) → revokePlugin / deletePlugin。对话框标题用 plugins.revokeTitle / deleteTitle，正文用 revokeConfirm + 运行时选定的 revokeNoteRunning/Stopped（撤销的含义取决于插件当前是否在跑，所以在打开时选文案），删除用 deleteConfirm。只有 delete 标记 irreversible——撤销不删除文件，标成不可逆是错的。",
+          "files": [
+            {
+              "path": "webui/src/views/PluginsView.vue",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph33-t3",
+          "name": "门禁增加第五条规则",
+          "status": "done",
+          "note": "check_a11y.py 新增 check_native_confirm：扫描 webui/src 的 .vue/.ts，跳过以 // * /* <!-- 开头的行（规则自身的解释会提到该 API），命中即报 文件:行。用 path.is_relative_to(ROOT) 兜底，因为测试会把 VIEWS 指向 tmp_path。tests/test_a11y_gates.py 3 项：真实调用被抓到且报出行号、注释提及不误报、仓库当前干净。",
+          "files": [
+            {
+              "path": "scripts/check_a11y.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_a11y_gates.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph33-t4",
+          "name": "前端验证与基线",
+          "status": "done",
+          "note": "vue-tsc --noEmit 通过、eslint --max-warnings 0 通过、check-i18n 844 used / 906 defined、vitest 37 passed、vite build 2.42s（vendor 104.28 kB、index 143.67 kB）。全量 1871 → 1874 passed / 12 skipped。本轮未动 build_runtime 的拆分：菜单变宽的那一项留到下一轮，避免同一个 PR 里同时改装配逻辑和交互。",
+          "files": [
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2412,7 +2480,7 @@
     }
   ],
   "verification": {
-    "pytest": "1871 passed, 12 skipped",
+    "pytest": "1874 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

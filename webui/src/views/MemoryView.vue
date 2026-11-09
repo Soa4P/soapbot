@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import GroupScopeCard from '@/components/GroupScopeCard.vue'
 import { t } from '@/i18n'
@@ -89,6 +90,68 @@ const memoryFilter = ref('')
 const memoryHasMore = ref(false)
 const deletingId = ref<number | null>(null)
 
+/**
+ * The delete that is awaiting confirmation.
+ *
+ * One dialog for all three lists, instead of three `window.confirm` calls. A native
+ * confirm blocks the event loop, renders outside this app's focus trap, and can only
+ * show a string — so all three deletions looked identical at the moment of no return.
+ * The target carries its own kind, which is what lets the dialog name the right noun.
+ */
+type PendingDelete =
+  | { kind: 'memory'; row: any }
+  | { kind: 'document'; doc: any }
+  | { kind: 'skill'; skill: any }
+
+const pendingDelete = ref<PendingDelete | null>(null)
+const deleteBusy = ref(false)
+
+const deleteDialog = computed(() => {
+  const target = pendingDelete.value
+  if (!target) return { open: false, title: '', detail: '' }
+  if (target.kind === 'memory') {
+    return {
+      open: true,
+      title: t('common.delete'),
+      detail: t('memory.deleteMemoryConfirm', { id: target.row.id }),
+    }
+  }
+  if (target.kind === 'document') {
+    return {
+      open: true,
+      title: t('common.delete'),
+      detail: t('memory.deleteConfirm', {
+        name: target.doc.title || target.doc.doc_id,
+      }),
+    }
+  }
+  return {
+    open: true,
+    title: t('common.delete'),
+    detail: t('memory.skillDeleteConfirm', { name: target.skill.title }),
+  }
+})
+
+function askDelete(target: PendingDelete): void {
+  pendingDelete.value = target
+}
+
+async function confirmDelete(): Promise<void> {
+  const target = pendingDelete.value
+  if (!target) return
+  deleteBusy.value = true
+  try {
+    // The dialog stays open while the request runs, and closes only on success. Closing
+    // first would make a failed delete look finished.
+    if (target.kind === 'memory') await deleteMemory(target.row)
+    else if (target.kind === 'document') await deleteDocument(target.doc)
+    else await deleteSkill(target.skill)
+    pendingDelete.value = null
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
 async function loadMemories(reset = true): Promise<void> {
   memoryLoading.value = true
   memoryError.value = ''
@@ -114,8 +177,7 @@ async function loadMemories(reset = true): Promise<void> {
   }
 }
 
-async function removeMemory(row: any): Promise<void> {
-  if (!window.confirm(t('memory.deleteMemoryConfirm', { id: row.id }))) return
+async function deleteMemory(row: any): Promise<void> {
   deletingId.value = row.id
   memoryError.value = ''
   memoryNotice.value = ''
@@ -202,8 +264,7 @@ function editDocument(doc: any): void {
   saveError.value = null
 }
 
-async function removeDocument(doc: any): Promise<void> {
-  if (!window.confirm(t('memory.deleteConfirm', { name: doc.title || doc.doc_id }))) return
+async function deleteDocument(doc: any): Promise<void> {
   saveError.value = null
   saveNotice.value = null
   try {
@@ -394,9 +455,8 @@ async function createSkill(topic: string): Promise<void> {
   }
 }
 
-async function removeSkill(skill: any): Promise<void> {
+async function deleteSkill(skill: any): Promise<void> {
   if (!sceneScope.value) return
-  if (!window.confirm(t('memory.skillDeleteConfirm', { name: skill.title }))) return
   skillError.value = ''
   skillNotice.value = ''
   try {
@@ -553,7 +613,7 @@ function confidencePct(value: number): string {
                   class="btn ghost"
                   :disabled="deletingId === row.id"
                   :aria-label="t('memory.deleteMemoryAria', { id: row.id })"
-                  @click="removeMemory(row)"
+                  @click="askDelete({ kind: 'memory', row })"
                 >
                   {{ t('common.delete') }}
                 </button>
@@ -637,7 +697,13 @@ function confidencePct(value: number): string {
             <td class="num">{{ doc.chunks }}</td>
             <td style="white-space: nowrap">
               <button class="btn ghost" @click="editDocument(doc)">{{ t('memory.replace') }}</button>
-              <button class="btn ghost" @click="removeDocument(doc)">{{ t('common.delete') }}</button>
+              <button
+                class="btn ghost"
+                :disabled="deleteBusy"
+                @click="askDelete({ kind: 'document', doc })"
+              >
+                {{ t('common.delete') }}
+              </button>
             </td>
           </tr>
         </tbody>
@@ -857,7 +923,11 @@ function confidencePct(value: number): string {
                     <span class="tag">{{ t('memory.skillSupport', { n: skill.support }) }}</span>
                     <span class="tag">{{ confidencePct(skill.confidence) }}</span>
                     <span class="strip__spacer" />
-                    <button class="btn ghost" @click="removeSkill(skill)">
+                    <button
+                      class="btn ghost"
+                      :disabled="deleteBusy"
+                      @click="askDelete({ kind: 'skill', skill })"
+                    >
                       {{ t('common.delete') }}
                     </button>
                   </div>
@@ -894,5 +964,16 @@ function confidencePct(value: number): string {
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :open="deleteDialog.open"
+      :title="deleteDialog.title"
+      :detail="deleteDialog.detail"
+      tone="danger"
+      irreversible
+      :busy="deleteBusy"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
   </section>
 </template>
