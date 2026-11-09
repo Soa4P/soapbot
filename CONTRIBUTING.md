@@ -63,9 +63,29 @@ gh pr checks --watch                           # 4. 等 5 个检查全绿
 gh pr merge --squash --delete-branch           # 5. 合并并删分支
 ```
 
-五道必需检查是 `ci` 里的 `backend (ubuntu-latest)`、`backend (windows-latest)`、
-`frontend`、`types`、`desktop`。`package` 与 `desktop-bundle` 不在必需列表里：前者是
-打包一致性，后者是按需产物，都不该拦住一次普通改动。
+五道必需检查（读自 `branches/master/protection`，不是凭印象）是
+`backend (ubuntu-latest, 3.12)`、`backend (windows-latest, 3.12)`、`frontend`、
+`desktop`、`package`。`types` 是咨询性类型检查、`desktop-bundle` 按需触发，两者都不在
+必需列表里。
+
+### 单人维护时的 review 要求
+
+保护规则还要求 1 个批准。仓库只有一个人时 GitHub 不允许自己批自己，PR 会停在
+`REVIEW_REQUIRED`，`gh pr merge` 被拒：
+
+```
+X Pull request #N is not mergeable: the base branch policy prohibits the merge.
+```
+
+这时用管理员的 `--admin`：
+
+```bash
+gh pr merge <N> --admin --squash --delete-branch
+```
+
+`--admin` 只跳过 review 这一项：PR 存在、5 个检查全绿、diff 与检查结果都留在 PR 里。
+它和直推 `master` 不是一回事——直推把 PR 和检查一起跳过了。等有第二个维护者时，
+`required_approving_review_count` 保持为 1，`--admin` 就不该再用。
 
 为什么不允许直推：
 
