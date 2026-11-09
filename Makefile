@@ -1,8 +1,9 @@
 # soapbot developer entry points.
 #
 # The point of this file is that a contributor never has to read a document to
-# find the right command. Every target here is also what CI runs, so "works on my
-# machine" and "passes in CI" are the same command rather than two similar ones.
+# find the right command. Every gate in `check` is also a step of the CI `backend`
+# job, so "works on my machine" and "passes in CI" are the same command rather than
+# two similar ones. The two exceptions (git history, network) are named at `check`.
 
 PY ?= python
 VENV ?= .venv
@@ -12,7 +13,7 @@ else
 	BIN := $(VENV)/bin
 endif
 
-.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps progress deploy-check doclinks ipc-audit boundary-audit guard desktop-check desktop
+.PHONY: help venv install dev test lint fmt typecheck contrast check webui build ui run doctor clean check-deps console-encoding progress deploy-check doclinks ipc-audit boundary-audit guard desktop-check desktop
 
 help:
 	@echo "make install    创建虚拟环境并安装开发依赖"
@@ -24,10 +25,12 @@ help:
 	@echo "make a11y       可访问性静态检查（含在 check 内）"
 	@echo "make gaps       测试断层扫描：孤儿模块与过期数字（含在 check 内）"
 	@echo "make doclinks   文档相对链接检查（含在 check 内）"
-	@echo "make check      lint + contrast + a11y + gaps + doclinks + test（CI 阻断项同款）"
+	@echo "make check      CI backend 全部本地可跑门禁 + test（差集只有两项，见下）"
+	@echo "make check-deps 依赖清单一致性（requirements.txt vs pyproject.toml）"
+	@echo "make console-encoding  脚本打印中文前必须 reconfigure(utf-8)"
 	@echo "make deploy-check 容器部署配置静态检查（不需要 docker）"
 	@echo "make ipc-audit   插件进程 / IPC 边界静态审计（含在 check 内）"
-	@echo "make boundary-audit  18 项安全与错误日志边界审计（含在 check 内）"
+	@echo "make boundary-audit  20 项安全与错误日志边界审计（含在 check 内）"
 	@echo "make desktop-check  桌面壳静态门禁：CSP、单实例、探测、不拉起后端（含在 check 内）"
 	@echo "make desktop    构建 Tauri 桌面壳（需要 Rust 与 WebView2）"
 	@echo "make guard       只读巡检插件 worker 进程（需要 docker / ps）"
@@ -85,7 +88,7 @@ doclinks:
 ipc-audit:
 	$(BIN)/python scripts/check_plugin_ipc.py
 
-# The 18 contracts in docs/security-boundaries.md. Same command CI runs; a local
+# The 20 contracts in docs/security-boundaries.md. Same command CI runs; a local
 # gate that differs from CI is a gate nobody trusts.
 boundary-audit:
 	$(BIN)/python scripts/check_security_boundaries.py
@@ -110,13 +113,27 @@ progress:
 	@echo "http://127.0.0.1:8099/  (Ctrl+C 停止)"
 	$(BIN)/python -m http.server 8099 --directory docs/progress
 
-# `check` is what CI gates on: lint + tests. Type checking stays separate because its
-# baseline is not clean yet (42 pre-existing errors); folding it in would make
-# `make check` fail on a correct change and train people to ignore the target.
+# `check` is every gate the CI `backend` job runs that can also run here. Two of them
+# cannot, and the difference is deliberate rather than an oversight:
+#
+#   check_secrets.py --committed  needs the git history of the commit under review;
+#                                 locally it would scan whatever happens to be staged.
+#   pip-audit                     needs the network. A gate that fails when PyPI is
+#                                 slow is a gate people learn to re-run until green.
+#
+# Everything else is in the list below, including the three that used to be CI-only
+# (`check-deps`, `console-encoding`, `deploy-check`). They were seconds-fast, offline
+# and deterministic — exactly the gates that should have been local, and their absence
+# is why a contributor could get a green `make check` and a red `backend` job.
+# `tests/test_gate_parity.py` now fails if this list and ci.yml drift apart again.
+#
+# Type checking stays separate because its baseline is not clean yet (79 pre-existing
+# errors); folding it in would make `make check` fail on a correct change and train
+# people to ignore the target.
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint version contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check test
+check: lint version check-deps console-encoding deploy-check contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:
@@ -138,7 +155,12 @@ doctor:
 # silently — a stale requirements.txt is how a deployment ends up running a
 # dependency set nobody tested.
 check-deps:
-	$(PY) scripts/check_deps.py
+	$(BIN)/python scripts/check_deps.py
+
+# A script that prints Chinese without forcing UTF-8 dies on the Windows runner and
+# nowhere else. That has cost two red builds; the rule is mechanical, so it is a gate.
+console-encoding:
+	$(BIN)/python scripts/check_console_encoding.py
 
 # Container config cannot be *executed* here (no docker on this machine), but the
 # mistakes that make `compose up` fail are findable without a daemon — and two of them

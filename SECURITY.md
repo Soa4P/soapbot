@@ -38,7 +38,7 @@
 | 插件 | **不可信** | 默认进程隔离运行；能力逐项授权；`manifest_digest` 钉住被评审的确切字节 |
 | Provider 响应 | **不可信** | 模型输出可能包含指令注入载荷，进入工具循环前需过滤 |
 | 知识库文档 | **不可信** | 以 `wrap_untrusted(kind="knowledge")` 包裹后进入提示词 |
-| MCP 服务 | **不可信** | 只允许 `config/mcp.yaml` 中显式声明的命令；禁止从网络取命令 |
+| MCP 服务 | **不可信** | 只允许 `config/mcp.yaml` 中显式声明的命令；禁止从网络取命令；子进程只继承白名单环境变量，拿不到主密钥与 provider 密钥 |
 | 管理员 | **可信** | 但操作仍需审计，且配置写入走 diff 确认 |
 
 ### 明确不防的事
@@ -92,10 +92,14 @@
   慢调用按 `SOAPBOT_SLOW_CALL_MS` 告警，成功调用降为 DEBUG
 - 输入与上传：正则入口先按 `SOAPBOT_MAX_REGEX_INPUT_CHARS` 截断；上传校验 zip
   魔数与条目后缀白名单；`doc_id` 由统一函数校验
-- 18 项契约：`scripts/check_security_boundaries.py` 在 CI 双矩阵与 `make check`
+- 第三方子进程环境：插件与 MCP 服务共用 `core/proc_env.py` 的同一份白名单，
+  只转发 `SAFE_ENV_KEYS` 与显式声明的变量；门禁禁止任何子进程继承 `os.environ`
+- 不可见字符：注入检测、记忆校验、工具文本清洗与 id 归一化共用 `core/text.py` 的
+  **一张**表（含 Unicode isolate `U+2066–U+2069`）；门禁禁止任何模块自建副本
+- 20 项契约：`scripts/check_security_boundaries.py` 在 CI 双矩阵与 `make check`
   中运行，逐条打印证据行
 
-18 项逐条证据与残余风险见 [docs/security-boundaries.md](docs/security-boundaries.md)，
+20 项逐条证据与残余风险见 [docs/security-boundaries.md](docs/security-boundaries.md)，
 认证行为见 [docs/security-model.md](docs/security-model.md)。
 
 ## 部署基线

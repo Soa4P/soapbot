@@ -54,6 +54,16 @@ webui/.vite/
 # floating dependency set is how a shell that compiled last month stops compiling.
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+# Frozen backend the shell will spawn (PyInstaller onefile, ~46 MiB), its work
+# directory, and the copy staged into the Tauri bundle. Build artefacts, not sources:
+# `desktop/sidecar/build.py` reproduces all three.
+desktop/sidecar/dist/
+build/
+# The directory itself is committed (an empty `.gitkeep`), because Tauri validates
+# `bundle.resources` at build-script time: a missing directory fails `cargo check`, and
+# CI checks the shell without producing the 46 MiB sidecar.
+desktop/src-tauri/binaries/*
+!desktop/src-tauri/binaries/.gitkeep
 # The built panel ships inside the Python package, so it must not be gitignored:
 # the Docker image builds a wheel from src/ alone and would otherwise have no UI.
 !src/soapbot/webui/dist/

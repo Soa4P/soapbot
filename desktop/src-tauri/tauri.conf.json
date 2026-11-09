@@ -29,6 +29,7 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "resources": ["binaries/"],
     "shortDescription": "soapbot 控制台桌面壳",
     "longDescription": "打开本机 soapbot 控制台。后端未启动时给出启动命令，而不是一块白屏。"
   }

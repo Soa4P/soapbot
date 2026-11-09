@@ -44,6 +44,7 @@ import os
 import stat
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -506,6 +507,36 @@ def write_atomic(path: Path, text: str) -> None:
 #: thread, and an asyncio lock is bound to one event loop.
 _ENV_LOCK = threading.Lock()
 
+#: How long a writer waits for the cross-process lock before giving up.
+#:
+#: Windows is the reason this is a number we choose rather than one the OS chooses.
+#: ``msvcrt.LK_LOCK`` retries ten times one second apart and then raises, so the budget
+#: was fixed at ~10 s with no way to see how close a run came to it. Four writers each
+#: doing twenty saves against one file spent enough of that budget to fail the
+#: concurrency test roughly once per full-suite run — a flake that looks like a race
+#: bug in the lock and is really a timeout in the retry policy.
+#:
+#: Thirty seconds is not a guess about how long a save takes (it is milliseconds); it
+#: is a bound that a contended-but-healthy system cannot reach, so exceeding it means
+#: something is actually wrong and the error should say so.
+_ENV_LOCK_TIMEOUT = 30.0
+
+#: First backoff interval; doubles per attempt up to :data:`_ENV_LOCK_BACKOFF_MAX`.
+_ENV_LOCK_BACKOFF = 0.005
+_ENV_LOCK_BACKOFF_MAX = 0.25
+
+
+class EnvLockError(TimeoutError):
+    """The cross-process ``.env`` lock could not be acquired in time.
+
+    Subclasses ``TimeoutError``, which is itself an ``OSError``: the four API writers
+    already catch ``OSError`` and answer ``api.write_failed``, and a lock timeout *is*
+    a write that did not happen, so that mapping is correct and needs no new handler.
+    The distinct type exists so the log line says "another writer is holding it"
+    instead of the generic filesystem message — same user-visible outcome, different
+    diagnosis for whoever reads the log.
+    """
+
 
 @contextlib.contextmanager
 def env_transaction(path: Path) -> Iterator[None]:
@@ -519,7 +550,9 @@ def env_transaction(path: Path) -> Iterator[None]:
 
     Failing to acquire the lock raises rather than silently degrading to "no lock":
     a save that reports success while another writer may be in flight is exactly the
-    lost-update bug this exists to prevent.
+    lost-update bug this exists to prevent. The wait is bounded by
+    :data:`_ENV_LOCK_TIMEOUT` and the failure is :class:`EnvLockError`, so a
+    contended-but-healthy system never trips it and a genuinely stuck one says so.
     """
     with _ENV_LOCK:
         lock_path = path.with_name(path.name + ".lock")
@@ -529,11 +562,7 @@ def env_transaction(path: Path) -> Iterator[None]:
             if os.name == "nt":
                 import msvcrt
 
-                # msvcrt.locking() needs at least one lockable byte in the file.
-                if os.fstat(fd).st_size == 0:
-                    os.write(fd, b"\0")
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                _acquire_windows_lock(fd, lock_path)
                 try:
                     yield
                 finally:
@@ -551,6 +580,49 @@ def env_transaction(path: Path) -> Iterator[None]:
                         fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+
+def _acquire_windows_lock(fd: int, lock_path: Path) -> None:
+    """Take the byte-range lock on ``fd``, retrying with backoff until the deadline.
+
+    ``msvcrt.LK_LOCK`` is not used: it blocks for a fixed ten seconds and then raises
+    ``OSError``, which is both too short under contention and indistinguishable from a
+    real I/O error. ``LK_NBLCK`` is the non-blocking variant, so the retry policy is
+    ours and the failure mode is a named exception instead of a bare ``OSError``.
+
+    The sidecar file is deliberately **never written**. Windows' ``LockFile`` accepts a
+    byte range past EOF, so byte 0 of a zero-length file is a valid exclusive lock —
+    measured: a second process gets ``PermissionError [Errno 13]`` while the first holds
+    it, succeeds after the unlock, and the file stays at zero bytes throughout.
+
+    The old "ensure one lockable byte" ``os.write(fd, b"\\0")`` was the whole race, not
+    a harmless setup step: four writers that all stat a zero-length sidecar all try to
+    write byte 0, and once another process has locked that range Windows rejects the
+    write instead of queuing it. That killed a child in
+    ``test_separate_processes_do_not_overwrite_each_other`` on the Windows CI job
+    (run 42486262686, 2026-11-08) with ``PermissionError: [Errno 13]``. A lock that
+    requires writing the locked range cannot be acquired by two processes at once.
+    """
+    import msvcrt
+
+    deadline = time.monotonic() + _ENV_LOCK_TIMEOUT
+    delay = _ENV_LOCK_BACKOFF
+    while True:
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise EnvLockError(
+                    f"could not lock {lock_path} within {_ENV_LOCK_TIMEOUT:g}s; "
+                    "another writer is holding it"
+                ) from None
+        # Sleep no longer than the budget left, so the timeout is a real bound rather
+        # than "the bound plus one backoff interval".
+        time.sleep(min(delay, remaining))
+        delay = min(delay * 2, _ENV_LOCK_BACKOFF_MAX)
 
 
 def write_env_updates(path: Path, updates: Mapping[str, str]) -> str:

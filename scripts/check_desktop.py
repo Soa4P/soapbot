@@ -18,6 +18,10 @@ rather than a compile error:
    as "the app is broken" instead of "the service is not running".
 5. **A missing icon.** Tauri fails at bundle time with an error that does not name the
    file, so this reports it in one line instead.
+6. **An unguarded spawn.** The shell may own the backend's lifecycle for a bare desktop
+   install, but only through `spawn_decision` (probe first) and `taskkill /T` (the
+   onefile bootloader forks, so killing the direct child leaves the server holding the
+   port). A `Command::new` anywhere else is a second supervisor waiting to race.
 
 Every finding prints the file and the line it relied on. Exit code is non-zero when any
 check fails; there is no warning tier, because each of these is a one-line fix.
@@ -201,26 +205,72 @@ def check_probe() -> Finding:
     )
 
 
-def check_no_spawn() -> Finding:
-    """The shell must not start the backend itself.
+#: `Command::new` is allowed only inside these two functions. Anywhere else is a spawn
+#: path nobody reviews, which is how the original "no spawn at all" rule came to exist.
+_SPAWN_FUNCTIONS = ("start_sidecar", "stop_backend")
 
-    Two supervisors on one port is the failure this forbids: the scheduled task or
-    systemd unit already owns the process, and a shell-spawned child would either fail to
-    bind or — worse — win, leaving the supervised copy dead and the operator with a
-    process that no restart command can reach.
+
+def _spawn_calls_outside_allowed(source: str) -> list[str]:
+    """`Command::new` sites, tagged with the function that encloses them.
+
+    Line-based on purpose: a real parser would be a dependency for one file this small,
+    and the approximation's failure mode is a false positive that adding the call to the
+    allowed pair fixes.
+    """
+    offenders: list[str] = []
+    current = "<top>"
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("fn "):
+            current = stripped[3:].split("(", 1)[0].strip()
+        if "Command::new" in line and current not in _SPAWN_FUNCTIONS:
+            offenders.append(f"{current}: {stripped[:48]}")
+    return offenders
+
+
+def check_no_spawn() -> Finding:
+    """The shell may start the backend, but only as a guarded sidecar.
+
+    The old rule banned `Command::new` outright. That was right for a supervised install
+    — the scheduled task or systemd unit already owns the process, and a second backend
+    either fails to bind or wins the race and leaves the supervised copy unreachable —
+    and wrong for the desktop bundle, where nothing else would ever start it.
+
+    Removing the ban would let the race back in; keeping it would force the spawn through
+    an unreviewed path. So the rule now constrains the *shape* of the lifecycle: a pure
+    `spawn_decision` decides from "is the port open" and "is the binary there", spawning
+    and killing live only in their two functions, the Windows kill uses `taskkill /T`
+    because the onefile bootloader forks, and running the source tree stays forbidden.
     """
     main = _text(MAIN_RS)
-    offenders = [
-        needle
-        for needle in ("Command::new", "std::process::Command", "python -m soapbot")
-        if needle in main
-    ]
+    problems = sidecar_rule_problems(main)
     return Finding(
-        not offenders,
-        "shell.no-spawn",
-        "桌面壳不得自行拉起 Python 后端" if offenders else "桌面壳不启动后端",
-        ", ".join(offenders) if offenders else "main.rs 无进程启动调用",
+        not problems,
+        "shell.sidecar-guarded",
+        "；".join(problems) if problems else "先探测、只在受控函数内启动、退出杀进程树",
+        _line_of(main, "fn spawn_decision")
+        if "fn spawn_decision" in main
+        else "main.rs 未找到 spawn_decision",
     )
+
+
+def sidecar_rule_problems(source: str) -> list[str]:
+    """Pure rule body, so a reverse test can feed it a bad shell without a temp file."""
+    problems: list[str] = []
+
+    if "fn spawn_decision" not in source:
+        problems.append("缺少探测优先的 spawn_decision")
+    if "SpawnDecision::AlreadyRunning" not in source:
+        problems.append("没有「端口已监听则不启动」分支")
+    if "python -m soapbot" in source:
+        problems.append("不得直接运行源码树")
+    if "taskkill" not in source:
+        problems.append("Windows 需用 taskkill /T 关闭进程树")
+
+    stray = _spawn_calls_outside_allowed(source)
+    if stray:
+        problems.append("Command::new 出现在未受控函数 " + "; ".join(stray))
+    return problems
 
 
 def check_icons() -> Finding:

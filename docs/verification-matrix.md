@@ -26,27 +26,41 @@
 | 能力 | 代码位置 | 自动化测试 | 人工实测 | 结论 |
 |---|---|---|---|---|
 | 分句渐进发送 | `ai/stages.py`、`core/progressive.py`、`core/stages.py` | `tests/test_streaming_wiring.py`（14 项） | 09 页：用真实 `ModelStage`+`ReplyStage` 生成 3 句回复，页面显示 3 条分句 | **自动 + 实测**（本地 fake provider，非真实云端） |
-| 09 页流式面板 | `webui/src/views/PipelineView.vue`、`api/client.ts` | `tests/test_pipeline_trace.py`（34 项，含 API 层 `chunks`/`stream` 断言） | 浏览器三种形态：3 句、1 句、单条发送；中英双语各一次；12 页无横向溢出 | **自动 + 实测** |
+| 09 页流式面板 | `webui/src/views/PipelineView.vue`、`api/client.ts` | `tests/test_pipeline_trace.py`（35 项，含 API 层 `chunks`/`stream` 断言与文档环节数断言） | 浏览器三种形态：3 句、1 句、单条发送；中英双语各一次；12 页无横向溢出 | **自动 + 实测** |
 | 面板内编辑 MCP（引擎） | `core/mcp_write.py` | `tests/test_mcp_write.py`（18 项：增删改、argv 强制、重复名、脱敏、陈旧哈希） | — | **仅自动**（引擎本身不直接面向用户） |
 | 面板内编辑 MCP（API） | `api/config_write.py` | `tests/test_mcp_config_api.py`（14 项：权限、409/422、审计不留值、热重载） | 面板实际调用同一组端点完成写入 | **自动 + 实测** |
 | 面板内编辑 MCP（界面） | `components/McpServers.vue`、`views/ConfigView.vue` | i18n 静态检查（键必须双目录存在、模板无残留中文） | 浏览器：新增 → `查看将要写入的改动` → 确认 → `mcp.yaml` 落盘。diff 显示 `GITHUB_TOKEN: redacted:be0b532d`，磁盘上写的是真值 | **自动 + 实测** |
 | `McpManager.reload`（热生效） | `mcp/client.py` | `tests/test_mcp_write.py`（3 项：保留未变 client、改名才重启、空列表）、`test_mcp_wiring.py::test_the_first_server_added_shows_up_without_a_restart` | 带真服务的热生效：07 页写入后表格显示「已连接 · 14 个工具」，无需重启 | **自动 + 实测** |
-| 真实 MCP 服务端（第三方 filesystem server） | `mcp/client.py`、`core/builder.py` | `tests/test_mcp_live.py`（opt-in：`SOAPBOT_LIVE_MCP=1`）、`test_mcp_wiring.py`（15 项） | 07 页写入 `npx -y @modelcontextprotocol/server-filesystem <dir>` → 热加载 → 14 个工具；`tools/call` 读回文件内容 | **自动 + 实测** |
+| 真实 MCP 服务端（第三方 filesystem server） | `mcp/client.py`、`core/builder.py` | `tests/test_mcp_live.py`（opt-in：`SOAPBOT_LIVE_MCP=1`）、`test_mcp_wiring.py`（16 项） | 07 页写入 `npx -y @modelcontextprotocol/server-filesystem <dir>` → 热加载 → 14 个工具；`tools/call` 读回文件内容 | **自动 + 实测** |
 | MCP 握手协商与失败区分 | `mcp/client.py` | `test_mcp_wiring.py`（服务端回旧版本时采纳其版本；握手期崩溃的错误带 stderr 与退出码） | 真实服务端返回 `2025-06-18`，客户端采纳而非假定自己的 | **自动 + 实测** |
 | 三家 Provider 的报文映射 | `providers/anthropic.py`、`gemini.py`、`ollama.py` | `tests/test_providers_mapping.py`（7 项：system 提升、data URL 转换、token 字段名、`done` 终止、角色重命名、429→`ProviderError`） | — | **仅自动** |
-| 可访问性静态规则 | `scripts/check_a11y.py` | 22 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 规则查出两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space。**但这两行的键盘路径只由模板断言覆盖**：本机没有已配置的人格与会话，表格为空，浏览器里按不到那一行 | **仅自动**（键盘实测缺数据） |
-| 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（16 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；三家 provider 补测后降为 16 | **自动 + 实测** |
-| 容器部署 | `deploy/docker-compose.yml`、`deploy/Dockerfile` | `scripts/check_deploy.py`（静态，14 项） | 雨云 Ubuntu 24.04 真机：镜像 430 MB、`Up (healthy)`、`uid=10001`、只读根、`tini`、`doctor: PASS`、`down/up` 后 `/data` 数据不变、设置写入后 `/data/.env` 落盘且重启可读回。§8 九条全过，见 `deploy-layer.md` §8.1 | **自动 + 实测** |
+| 可访问性静态规则 | `scripts/check_a11y.py` | 32 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 规则查出两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space。**但这两行的键盘路径只由模板断言覆盖**：本机没有已配置的人格与会话，表格为空，浏览器里按不到那一行 | **仅自动**（键盘实测缺数据） |
+| 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（10 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；补测后逐步降为 10 | **自动 + 实测** |
+| 容器部署 | `deploy/docker-compose.yml`、`deploy/Dockerfile` | `scripts/check_deploy.py`（静态，17 项：16 通过 + 1 告警） | 雨云 Ubuntu 24.04 真机：镜像 430 MB、`Up (healthy)`、`uid=10001`、只读根、`tini`、`doctor: PASS`、`down/up` 后 `/data` 数据不变、设置写入后 `/data/.env` 落盘且重启可读回。§8 九条全过，见 `deploy-layer.md` §8.1 | **自动 + 实测** |
 | 上游连通性静态检查 | `security/posture.py` | `tests/test_posture.py`（7 项：空配置、缺文件、坏 YAML、本机端点、明文 http、远端、进报告） | `python -m soapbot.cli doctor` 实跑，输出 `[warn] provider.upstream (medium)` | **自动 + 实测** |
 | `doctor --probe` 网络探测 | `security/posture.py`、`cli.py` | `test_posture.py`：401 ⇒ 可达、503 ⇒ 不可达（mock transport，规则本身）；另有本地回环服务端的 Socket 测试 | 只对本地回环跑过。**本机回环被拦截返回 502，那条 Socket 测试在此环境会 skip**，规则由 mock 版覆盖 | **仅自动**（真实云端探测**未验证**） |
 | 进度看板契约 | `docs/progress/` | `tests/test_progress_board.py`（8 项：时间戳带时区、状态枚举、blocked 必须写原因、done 不得留未完成文件） | 浏览器打开：显示「最后更新 32 秒前」，无陈旧横幅 | **自动 + 实测** |
 | 插件 IPC 请求关联与帧预算 | `plugins/supervisor.py`、`plugins/isolation.py` | `tests/test_plugin_ipc_hardening.py`（伪造/迟到结果丢弃、未绑定回调拒绝、父子帧上限一致、出站超限含实际字节）、`tests/test_worker_limits.py`（两个 `-I` 子脚本的 AST 名检查） | 本机实跑 `scripts/check_plugin_ipc.py`，逐条打印证据行并全部成立 | **自动 + 实测**（本机；生产容器内的帧洪水与真实崩溃仍按下方「未验证」处理） |
 | 进程数上限与统一回收 | `config.py`、`core/builder.py`、`plugins/loader.py`、`app.py` | `tests/test_plugin_ipc_hardening.py`（容量 fail-closed、非法值拒绝、退出看护 reap 与代际守卫）、`tests/test_deploy_isolation.py`（熔断不随时间自动恢复） | — | **仅自动** |
 | 离线审计门禁与只读巡检 | `scripts/check_plugin_ipc.py`、`scripts/plugin_worker_guard.py`、`deploy/plugin-worker-guard.{service,timer}` | `tests/test_plugin_ipc_hardening.py`（门禁对故意移除不变量会失败、巡检自检的解析断言）、`make ipc-audit`、`make guard` | 本机跑过门禁与 `--self-test`；生产上实跑 `--json`，输出 `warnings: []`、`restart_performed: false`、退出码 0 | **自动 + 实测** |
-| 18 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、18 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
+| 20 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、20 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
 | Cookie 会话与角色分级 | `api/auth.py`、`webui/src/api/client.ts`、`webui/src/stores/auth.ts` | `tests/test_auth_cookie.py`（Cookie 标志、CSRF/Origin、角色门槛、回环读写分离、登录登出） | 本机 TestClient 覆盖；云服务器上的登录/登出见本轮发布验收 | **仅自动**（云服务器实测见发布记录） |
 | 日志净化与统一错误层 | `logging_setup.py`、`core/log_context.py`、`api/errors.py`、`security/audit.py` | `tests/test_logging_hardening.py`（控制字符、ContextVar 不串请求、有界正则）、`tests/test_error_mapping.py`（状态码映射、响应不含异常原文） | 本机跑过；日志环与 `X-Request-ID` 由 TestClient 断言 | **仅自动** |
 | 生态对照与落地抉择 | `docs/reference-ecosystem.md` | `scripts/check_doc_links.py`、`scripts/check_test_gaps.py --strict` | 5 类抽样，每条对照对应本仓库一处改动或不改的理由 | **仅自动**（文档） |
+| 数据库迁移入口 | `cli_migrate.py`、`cli.py` | `tests/test_cli_migrate.py`（15 项：五态探测、`--status` 只读不建表、`--dry-run` 不写盘、legacy 盖章后顺序跑 v2–v5、失败后重新探测再措辞、损坏文件不被报成空库） | 本机对真实 `data/soapbot.db` 跑 `--status`，输出 `versioned · version 5`；对 0 字节文件跑，输出 `empty` 并提示先启动一次服务 | **自动 + 实测** |
+| 文档承诺的命令必须存在 | `tests/test_cli_documented_commands.py` | 扫描 `README.md`、`docs/*.md`、`UPDATING.md` 里的 `soapbot <子命令>`，断言 `build_parser()` 接受它（9 项） | 该测试抓出的第一个缺陷就是 `migrate` 本身：`UPDATING.md` 让人跑它，而它不存在 | **自动 + 实测** |
+| 第三方子进程环境净化 | `core/proc_env.py`、`mcp/client.py`、`plugins/isolation.py` | `tests/test_untrusted_child_env.py`（27 项：真实子进程读自己的 `os.environ`、MCP 与插件共用同一白名单、`prefix=""` 不等于通配）、`check_security_boundaries.py` 的 AST 规则禁止四种 `os.environ` 透传写法 | 本机起真实 MCP 子进程，其环境里只有 `SAFE_ENV_KEYS` 与显式声明的 `env`，无 `SOAPBOT_MASTER_KEY` | **自动 + 实测** |
+| `make check` 与 CI 门禁一致 | `Makefile`、`.github/workflows/ci.yml` | `tests/test_gate_parity.py`（7 项：正向差集、反向多余门禁、例外仍然有效、反向用例证明断言非空、磁盘上的 `check_*.py` 都被接线、两项例外在 README 里被解释、边界门禁的 Makefile needle 仍命中） | 补进 `check-deps`、`console-encoding`、`deploy-check` 后本机逐条跑通，退出码均为 0 | **自动 + 实测** |
+| `.env` 并发写不丢键 | `core/config_write.py` | `tests/test_env_concurrent_write.py`（8 项：24 线程同写、4 进程同写、外部进程持锁时不因初始化字节而失败、锁超时抛命名异常且遵守预算、`EnvLockError` 仍是 `OSError`、sidecar 不混入 `.env`、注释与未知键保留、四个 API 写入点都走加锁入口） | 本机 20 轮 × 4 进程 × 20 次写（1600 次）0 失败；修掉 Windows CI 的 `PermissionError [Errno 13]` | **自动 + 实测** |
+| 出站目标预允许列表 | `plugins/sandbox.py` | `tests/test_url_allowlist.py`（6 项：公网未列入被拒、精确与子域规则、空列表 fail-closed、`None` 保持旧行为、allowlist 不能授权私网、客户端逐次转发且支持轮换） | 改错复验：去掉列表检查报 DID NOT RAISE，去掉参数转发报 `assert None == frozenset`；既有 URL 校验测试未受影响 | **自动** |
+| 记忆检索的受众准入 | `memory/handoff.py`、`memory/stages.py` | `tests/test_memory_handoff.py`（8 项：解析不作授权、反单调受众收窄、日志/遥测拒绝、置信度下限、篡改结构重校验、残余不安全检索率、跨会话记录不进 prompt、置信度在检索边界生效） | 改错复验三处：去掉准入后跨会话事实进入 prompt，去掉数据-only 与反单调规则后对应断言失败 | **自动** |
+| 撤销达到闭合终态 | `api/auth.py`、`security/tokens.py`、`webui/src/api/client.ts` | `tests/test_revocation_closure.py`（6 项：撤销后不签发会话、调用者自己的 token 立即失效、轮换后的引导凭据是唯一回程且只能用一次、会话 cookie 被清除、终态检查失败返回 500、无文件实例仅内存轮换） | 改错复验四处均返回 1：去掉清 cookie 报 `[]`、不轮换凭据时报 500、去掉终态检查报 `assert 200 == 500`、响应里加回 `access_token` 报断言失败；既有认证测试 74 项未受影响 | **自动** |
+| 工具参数级信息流溯源 | `security/provenance.py`、`ai/stages.py`、`plugins/dispatch.py` | `tests/test_parameter_provenance.py`（10 项：宿主调用不标记、伪造标记重校验、数据-only 来源拒绝、模型资源参数需宿主校验、校验失败即拒绝、非字符串/空值不放行、`mark_vetted` 记录已验、operator 来源免逐次校验、模型阶段接线、注册表准入先于两条分发路径） | 改错复验三处均返回 1：去掉标记、去掉注册表准入、去掉数据-only 规则；既有工具/插件测试 115 项未受影响 | **自动** |
+| 运行时证明记录 | `plugins/attestation.py`、`plugins/loader.py` | `tests/test_runtime_attestation.py`（8 项：三元组绑定、JSON 往返可移植、工件变更、策略漂移、记录篡改、执行未完成、签名边界显式、两条加载路径接线与重验入口） | 改错复验四处均返回 1：去掉任一重验规则或去掉隔离路径的证明产生；既有插件加载测试 214 项未受影响 | **自动** |
+| MCP 实现版本 pin 与握手清理 | `mcp/client.py`、`mcp/config.py` | `tests/test_mcp_version_pin.py`（10 项：配置读取与裁剪、空 pin、超长报错、纯逻辑校验、匹配时记录身份、不匹配被拒且无残留子进程、缺 serverInfo 被拒、未 pin 仍记录、status 暴露供应链视图、改 pin 触发重连） | 改错复验四处均返回 1：去掉握手清理报出「残留活进程」、去掉 pin 校验报 DID NOT RAISE、去掉签名中的 pin、去掉配置解析；既有 MCP 测试 63 项未受影响 | **自动** |
+| Windows 服务名与令牌策略 | `scripts/install.ps1`、`deploy/windows-bootstrap.ps1`、`desktop/src-tauri/src/main.rs`、`desktop/ui/index.html` | `tests/test_windows_service_contract.py`（7 项：两个安装器注册同名任务、都设开机启动、桌面壳与离线页同名、文档同名且无旧名、服务化脚本不打印令牌、前台脚本是显式豁免、解析器反向用例） | 改错复验四处均返回 1：任务名改回 `SoapbotPanel`、触发器改 `AtLogOn`、把 `cli token` 加回、文档写回 `soapbot-panel` | **自动** |
+| 桌面 sidecar 可构建且自钉目录 | `desktop/sidecar/entry.py`、`desktop/sidecar/build.py`、`desktop/src-tauri/src/main.rs` | `tests/test_sidecar_build.py`（11 项：入口先钉四个目录再 import、双击默认 start、两条 `--add-data`、动态导入覆盖、onefile、缺前端时拒绝构建、产物被忽略、真实壳通过受控 spawn 规则、裸 spawn 被拒、调用点归因到函数、产物 staging 到 Tauri） | 本机 Windows 实际打包 46.3 MiB 并 staging 进 `src-tauri/binaries/`；启动后 `/api/health` 200、`/` 200、数据目录出现 `init_token.txt` 与 `config/`；`cargo check --locked` 与 5 项 `cargo test` 通过；实测踩到 onefile 子进程孤儿、SQLAlchemy dialect、`bundle.resources` 在 `cargo check` 阶段就校验路径三个坑 | **自动 + 实测** |
+| 依赖升级兼容性 | `pyproject.toml`、`requirements.txt` | 隔离 venv 安装远程 pin（pydantic 2.14.3、SQLAlchemy 2.1.8、uvicorn 0.54.0、numpy 2.5.4、pytest 9.2.0 等 16 项）后跑全量 | `1866 passed, 12 skipped`，与旧 pin 的本机结果完全一致；`pip install --dry-run` 先行确认无版本冲突；主 `.venv` 未改动 | **实测** |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 
@@ -83,18 +97,18 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：1291 passed / 10 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：1866 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁
 python -m ruff check src tests scripts
-python -m mypy src            # 基线 53，不得增加
+python -m mypy src            # 基线 79，不得增加
 cd webui && npm run typecheck && npm run build
 python scripts/check_contrast.py
 python scripts/check_deploy.py
 
 # 部署侧复验（需要一台已部署的主机）
-python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --verify   # §8 十三项
+python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --verify   # §8 十四项
 python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --backup   # 数据卷快照
 
 # 部署姿态（含本轮新增的上游检查）

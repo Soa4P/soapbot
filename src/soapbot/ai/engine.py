@@ -140,6 +140,8 @@ class AIEngine:
         compressor: ContextCompressor | None = None,
         descriptions: DescriptionCache | None = None,
         history_provider: HistoryProvider | None = None,
+        summary_loader: Callable[[str], Awaitable[str]] | None = None,
+        summary_saver: Callable[[str, str, int], Awaitable[None]] | None = None,
         default_max_tokens: int = 800,
     ) -> None:
         self.router = router
@@ -148,6 +150,14 @@ class AIEngine:
         self.descriptions = descriptions or DescriptionCache()
         self._history_provider = history_provider
         self._default_max_tokens = default_max_tokens
+        #: The rolling summary belongs to the session, not to one request. Injecting the
+        #: reader/writer as callables keeps this module free of SQL (same reason as
+        #: ``history_provider``), and keeps the two halves testable with a dict.
+        #:
+        #: Both are optional: a caller that has no memory store still gets a working
+        #: engine, just without a summary that outlives the turn.
+        self._summary_loader = summary_loader
+        self._summary_saver = summary_saver
         # Wire the summariser to a cheap path through the same router.
         if getattr(self.compressor, "_summarizer", None) is None:
             self.compressor._summarizer = self._summarize
@@ -226,7 +236,44 @@ class AIEngine:
         messages.extend(history)
         messages.append(user_message)
 
-        compressed = await self.compressor.compress(messages)
+        # Context continuity: the compressor folds older turns into a rolling summary,
+        # but that summary only survives this one request unless somebody owns it.
+        # Previously this line called compress() with no prior and discarded the result,
+        # so every turn re-summarised from scratch and the L1 summary table stayed empty.
+        #
+        # Both directions are best-effort. A broken memory store must not turn into a
+        # message with no reply: the summary is an improvement to context, not a
+        # precondition for answering. Failures are logged, never raised.
+        prior_summary = ""
+        if self._summary_loader is not None:
+            try:
+                prior_summary = await self._summary_loader(req.session_key)
+            except Exception as exc:
+                logger.warning(
+                    "summary load failed session=%s err=%s",
+                    req.session_key,
+                    type(exc).__name__,
+                )
+
+        compressed = await self.compressor.compress(messages, prior_summary=prior_summary)
+
+        # Persist before the model call. If the provider fails after folding removed
+        # those turns from the request, the summary is the only copy of them left.
+        if (
+            self._summary_saver is not None
+            and compressed.summary
+            and compressed.summary != prior_summary
+        ):
+            try:
+                await self._summary_saver(
+                    req.session_key, compressed.summary, compressed.folded_turns
+                )
+            except Exception as exc:
+                logger.warning(
+                    "summary save failed session=%s err=%s",
+                    req.session_key,
+                    type(exc).__name__,
+                )
 
         chat_req = ChatRequest(
             messages=[_dict_to_chat_message(m) for m in compressed.messages],

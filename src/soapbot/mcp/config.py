@@ -106,6 +106,16 @@ def parse_servers(entries: Any) -> list[McpServer]:
         if not isinstance(env, dict):
             raise McpConfigError(f"server {name!r}: env must be a mapping")
 
+        # `pinned_version` is optional: an empty value records the server's reported
+        # version without refusing a start. Coerced like the other string fields (a
+        # YAML number is a perfectly reasonable version), but bounded because the value
+        # goes into the audit log and the status view.
+        pinned = str(entry.get("pinned_version") or "").strip()
+        if len(pinned) > 128:
+            raise McpConfigError(
+                f"server {name!r}: pinned_version is too long (max 128 characters)"
+            )
+
         servers.append(
             McpServer(
                 name=name,
@@ -114,6 +124,7 @@ def parse_servers(entries: Any) -> list[McpServer]:
                 timeout=timeout_value,
                 min_role=role,
                 description=str(entry.get("description") or ""),
+                pinned_version=pinned,
             )
         )
 

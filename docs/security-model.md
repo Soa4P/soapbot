@@ -1,7 +1,7 @@
 # 安全模型：越权防护与信息泄露控制
 
 > 本文回答一个问题：**未获白名单授权的用户，能否通过敏感词绕过或指令注入，获取受限信息或实施提权？**
-> 答案必须是"不能"，且必须可验证。验证方式见 `tests/test_security_*.py`（93 项）。
+> 答案必须是"不能"，且必须可验证。验证方式见 `tests/test_security_*.py`（119 项）。
 
 ## 1. 一条不可妥协的原则
 
@@ -248,4 +248,4 @@ $env:PYTHONPATH="f:/soapbot/src"
 Provider 响应正文可能回显提示词、密钥或别人的数据，所以它不进 `last_error`，
 不进 WebUI 的日志环。异常消息只保留 `kind + HTTP status`。用户消息正文继续不写日志。
 
-18 项契约、每条的判定与证据在 [security-boundaries.md](security-boundaries.md)。
+20 项契约、每条的判定与证据在 [security-boundaries.md](security-boundaries.md)。

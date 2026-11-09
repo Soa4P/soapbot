@@ -4,11 +4,13 @@ The most valuable test in this file is ``test_stage_order_matches_build_pipeline
 Everything else checks that the ring stores what it was given; that one checks the
 thing a reviewer cannot: whether the graph the panel draws still describes the
 pipeline that actually runs. Drift there is silent — the panel keeps rendering a
-correct-looking 20-stage path while the runtime has 21, and the extra one is invisible
+correct-looking 22-stage path while the runtime has 23, and the extra one is invisible
 exactly when someone is trying to find where a message stopped.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -311,6 +313,37 @@ def test_stage_order_matches_build_pipeline() -> None:
     # that this particular assembly omitted.
     missing = [n for n in resolved if n not in STAGE_ORDER]
     assert not missing, f"STAGE_ORDER 缺少 build_pipeline 实际装配的 Stage：{missing}"
+
+
+def test_docs_state_the_real_stage_count() -> None:
+    """The count a reader is told must equal the pipeline they will actually run.
+
+    Two documents quote it — `guide.md` describes what page 09 shows, `architecture.md`
+    explains why the order is a security property — and both said 20/17 while
+    ``build_pipeline`` assembled 22. Neither number is derivable from prose, so it drifted
+    silently for several rounds; this is the assertion that makes it drift loudly.
+    """
+    import re
+
+    expected = len(STAGE_ORDER)
+    patterns = {
+        "docs/guide.md": r"09 流水线追踪 \| (\d+) 个环节",
+        "docs/architecture.md": r"(\d+) 个 Stage 的顺序是安全语义",
+    }
+
+    found: dict[str, int] = {}
+    for relative, pattern in patterns.items():
+        path = Path(__file__).resolve().parents[1] / relative
+        text = path.read_text(encoding="utf-8")
+        match = re.search(pattern, text)
+        assert match, f"{relative} 里找不到环节数的声明，正则需要更新：{pattern}"
+        found[relative] = int(match.group(1))
+
+    wrong = {k: v for k, v in found.items() if v != expected}
+    assert not wrong, (
+        f"文档里的环节数与 STAGE_ORDER（{expected} 个）不一致：{wrong}；"
+        "改文档而不是改 STAGE_ORDER"
+    )
 
 
 def test_constraints_reference_known_stages() -> None:

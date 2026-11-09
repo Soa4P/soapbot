@@ -3,31 +3,39 @@
 Why not coverage
 ----------------
 ``coverage`` is not installed, and adding it would break the rule that requirements are
-an audit surface (``scripts/check_deps.py``). So neither rule below runs the suite.
+an audit surface (``scripts/check_deps.py``). So none of the rules below runs the suite.
 
 What this finds is not "uncovered lines". It is the shape of the bug that motivated the
 file: ``MessageTrace.extras`` was declared in TypeScript, never serialised by
 ``to_dict``, read by the page — and every test passed. Nothing was uncovered. A field
 simply had a reader and no writer, and no test ever named the module on both sides.
 
-Two rules, both cheap and both checkable:
+Three rules, all cheap and all checkable:
 
 1. **Orphan modules** — a file under ``src/soapbot`` that no test names anywhere. Not
    proof it is untested (a test may reach it through a higher-level import), but every
    entry is a place where "nobody looked" is the default.
-2. **Stale totals in prose** — a "N passed" in a *live* document that disagrees with
-   ``docs/progress/progress.json``. It cannot know the true number without running the
-   suite, so it enforces the weaker but checkable property: the number a new reader sees
-   matches the board, and the board is separately dated by ``tests/test_progress_board.py``.
+2. **Stale totals in prose** — a "N passed" / "N skipped" in a *live* document that
+   disagrees with ``docs/progress/progress.json``. It cannot know the true number without
+   running the suite, so it enforces the weaker but checkable property: the number a new
+   reader sees matches the board, and the board is separately dated by
+   ``tests/test_progress_board.py``. Both halves are checked: a line that updates its
+   total but leaves an old skipped count is still telling a reader something false.
 
    Scope matters. A round report ("那一轮 435 passed") is a record of a day, and pinning
    every record to today's count would forbid writing history. Only documents that are
    read as *the current state* are checked; the list is explicit rather than inferred.
+3. **Stale orphan count in prose** — ``docs/verification-matrix.md`` describes this very
+   gate as "孤儿模块基线（N 个）". That number is a claim about today, and it went from 19
+   to 16 to 10 while the prose kept quoting an older one. Rule 1 already computes the
+   truth, so the only work is reading the number back and comparing.
+
+   Still no suite run: the count comes from the same textual scan as rule 1.
 
 Usage::
 
     python scripts/check_test_gaps.py                 # report only
-    python scripts/check_test_gaps.py --strict        # exit 1 when the orphan set drifts
+    python scripts/check_test_gaps.py --strict        # exit 1 when a rule finds drift
     python scripts/check_test_gaps.py --write-baseline  # accept today's orphans
 """
 
@@ -48,6 +56,10 @@ BASELINE = Path(__file__).with_name("test_gaps_baseline.txt")
 #: says "N 项通过". A rule that only knew one of them would have missed the README line
 #: that sat at "800 项通过" for several rounds.
 PASSED = re.compile(r"(\d+)\s+(?:passed|项通过)")
+#: The skipped count travels with the total on the same line. Checking only the total
+#: left `architecture.md` free to keep saying "10 项跳过" after the suite reached 12 —
+#: half of a stale sentence is still a stale sentence.
+SKIPPED = re.compile(r"(\d+)\s+(?:skipped|项跳过)")
 
 #: Documents a newcomer reads as "what is true today". Everything else under ``docs/``
 #: is a snapshot of a round and keeps its own numbers.
@@ -55,11 +67,28 @@ PASSED = re.compile(r"(\d+)\s+(?:passed|项通过)")
 #: The delivery readiness report is included because its "未验证项" list and its header
 #: both read as the current state — it was quoting 886 and 959 passed while the suite ran
 #: 1024, and it still claimed the real MCP server had never been connected.
-LIVE_DOCUMENTS = ("README.md", "docs/verification-matrix.md", "docs/delivery-readiness-v2.md")
+#:
+#: ``architecture.md`` is here for the same reason and is the one this rule missed for
+#: several rounds: its directory tree ends with a line describing the *current* suite,
+#: and that line sat at "1290 项通过 / 10 项跳过" while the suite ran 1791/12. It is a map
+#: of this repository, not a report of one round, so its number has to be today's.
+LIVE_DOCUMENTS = (
+    "README.md",
+    "docs/verification-matrix.md",
+    "docs/delivery-readiness-v2.md",
+    "docs/architecture.md",
+)
 
 #: What this rule can and cannot do: it pins *numbers*. A prose claim like "the real
 #: server was never connected" is invisible to it, so the list above is where the
 #: coverage stops. Pretending otherwise would be worse than the gap.
+
+#: The document that describes this gate, and the sentence in it that quotes the orphan
+#: count. Kept as one pattern rather than a bare number so the reader can see which claim
+#: is being pinned; if the sentence is rewritten, the rule fails loudly instead of
+#: silently checking nothing.
+ORPHAN_COUNT_CLAIM = re.compile(r"孤儿模块基线（(\d+) 个）")
+ORPHAN_COUNT_DOCUMENT = ROOT / "docs" / "verification-matrix.md"
 
 #: Modules that exist to be executed rather than imported (an entry point, a script), or
 #: that only a subprocess can reach. Named here instead of guessed by regex, so the
@@ -111,6 +140,10 @@ def stale_totals() -> list[str]:
         return [f"{BOARD.relative_to(ROOT)} 的 verification.pytest 里没有总数：{recorded!r}"]
 
     expected = match.group(1)
+    skipped = SKIPPED.search(recorded)
+    if not skipped:
+        return [f"{BOARD.relative_to(ROOT)} 的 verification.pytest 里没有跳过数：{recorded!r}"]
+    expected_skipped = skipped.group(1)
     problems: list[str] = []
     for relative in LIVE_DOCUMENTS:
         path = ROOT / relative
@@ -125,7 +158,38 @@ def stale_totals() -> list[str]:
                     f"{path.relative_to(ROOT)}:{lineno} 写着 {found.group(1)} passed，"
                     f"看板是 {expected}"
                 )
+            found_skipped = SKIPPED.search(line)
+            if found_skipped and found_skipped.group(1) != expected_skipped:
+                problems.append(
+                    f"{path.relative_to(ROOT)}:{lineno} 写着 {found_skipped.group(1)} skipped，"
+                    f"看板是 {expected_skipped}"
+                )
     return problems
+
+
+def stale_orphan_count(orphans: list[str]) -> list[str]:
+    """The document's quoted orphan count must equal the one just computed.
+
+    Fails when the sentence disappears too: a rule that quietly stops matching is
+    indistinguishable from a rule that passes, and this one exists precisely because the
+    number drifted unnoticed for several rounds.
+    """
+    if not ORPHAN_COUNT_DOCUMENT.is_file():
+        return [f"{ORPHAN_COUNT_DOCUMENT.relative_to(ROOT)} 不存在"]
+    text = ORPHAN_COUNT_DOCUMENT.read_text(encoding="utf-8", errors="replace")
+    match = ORPHAN_COUNT_CLAIM.search(text)
+    if not match:
+        return [
+            f"{ORPHAN_COUNT_DOCUMENT.relative_to(ROOT)} 里找不到「孤儿模块基线（N 个）」，"
+            "这条规则正在空转"
+        ]
+    quoted = int(match.group(1))
+    if quoted != len(orphans):
+        return [
+            f"{ORPHAN_COUNT_DOCUMENT.relative_to(ROOT)} 写着孤儿基线 {quoted} 个，"
+            f"实际是 {len(orphans)} 个"
+        ]
+    return []
 
 
 def read_baseline() -> set[str]:
@@ -160,6 +224,7 @@ def main(argv: list[str]) -> int:
     strict = "--strict" in argv
     orphans = orphan_modules()
     totals = stale_totals()
+    counts = stale_orphan_count(orphans)
 
     if "--write-baseline" in argv:
         write_baseline(orphans)
@@ -176,6 +241,13 @@ def main(argv: list[str]) -> int:
             print("  -", item)
     else:
         print("\n文档里的 pytest 总数与看板一致。")
+
+    if counts:
+        print(f"\n文档里的孤儿数与实际不一致：{len(counts)}")
+        for item in counts:
+            print("  -", item)
+    else:
+        print("文档里的孤儿数与实际一致。")
 
     baseline = read_baseline()
     added = sorted(set(orphans) - baseline)
@@ -195,7 +267,7 @@ def main(argv: list[str]) -> int:
     if not strict:
         return 0
 
-    if totals or added or removed or not baseline:
+    if totals or counts or added or removed or not baseline:
         print("\n严格模式下不合格：请补测试、更新基线，或修正文档数字。")
         return 1
     print("\n严格模式通过。")

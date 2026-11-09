@@ -5,6 +5,12 @@ stage, and the progressive sender that emits sentences while the model is still
 talking. Two copies of the invisible-character table would drift, and the drift would
 only be visible as "the streamed messages contain a bidi override the normal ones
 strip" — a security difference nobody would look for.
+
+That reasoning turned out to be the smaller half of the problem. The table had *five*
+copies by the time it was noticed, and they had already drifted apart: the injection
+screen knew about the bidi overrides and the Unicode tag characters, the other three
+did not, and none of them covered the Unicode isolate characters. Every path that
+screens untrusted text now imports this one.
 """
 
 from __future__ import annotations
@@ -13,8 +19,26 @@ import re
 
 #: Characters that are invisible to a human reader but are read by a model, and are
 #: used to smuggle instructions past a moderator looking at the same text.
+#:
+#: A copy that lags is a bypass. The injection screen, the memory vet and the tool-text
+#: scrubber each read their own table, so a character missing from the weakest one
+#: slips past all three and arrives in the prompt — where the model reads it, even
+#: though the regex, which sees an isolate as an ordinary character, does not.
+#:
+#: Written as ranges rather than as escaped literals on purpose: a literal list of
+#: invisible characters in source is itself unreadable, and impossible to review.
 INVISIBLE = dict.fromkeys(
-    map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"),
+    [
+        *range(0x200B, 0x2010),  # zero-width space .. right-to-left mark
+        *range(0x202A, 0x202F),  # bidi embedding / override, LRM, RLM
+        *range(0x2060, 0x2065),  # word joiner, invisible operators, invisible plus
+        *range(0x2066, 0x206A),  # LRI / RLI / FSI / PDI — the isolate characters
+        0x00AD,  # soft hyphen
+        0x061C,  # Arabic letter mark (bidi control)
+        0x180E,  # Mongolian vowel separator
+        0xFEFF,  # BOM / zero-width no-break space
+        *range(0xE0000, 0xE0080),  # Unicode tag characters
+    ],
     None,
 )
 

@@ -17,7 +17,7 @@
 | 高危（依赖） | 1（130 项 advisory / 6 个包） | 已清零 |
 | 中危（功能失效） | 1 | 已修复 |
 
-- 新增复审回归测试 **75 项**（`tests/test_wave4_plugin_review.py`）
+- 新增复审回归测试：`tests/test_wave4_plugin_review.py`（74 项）
 - 全量测试 **405 passed, 1 skipped**（跳过项为 Windows 符号链接用例）
 - `ruff check` 零告警
 - 依赖漏洞 **130 → 0**
@@ -252,7 +252,7 @@ RESULT: ALL FIXES HOLD
 
 ```powershell
 $env:PYTHONPATH="f:/soapbot/src"
-.\.venv\Scripts\python.exe -m pytest tests/test_wave4_plugin_review.py -q   # 75 passed
+.\.venv\Scripts\python.exe -m pytest tests/test_wave4_plugin_review.py -q   # 74 passed
 .\.venv\Scripts\python.exe -m pytest tests/ -q                              # 405 passed, 1 skipped
 .\.venv\Scripts\python.exe -m pip_audit --progress-spinner off              # No known vulnerabilities
 .\\.venv\Scripts\ruff.exe check src/ tests/                                 # All checks passed
