@@ -63,6 +63,11 @@ fmt:
 typecheck:
 	$(BIN)/python -m mypy src
 
+# Not `typecheck`: that prints 79 errors and always exits non-zero, which is why it was
+# never in `check`. This one fails only when the count grows, so it can block.
+mypy-baseline:
+	$(BIN)/python scripts/check_mypy_baseline.py
+
 version:
 	$(BIN)/python scripts/check_version_consistency.py
 
@@ -133,7 +138,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint version check-deps console-encoding deploy-check contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check test
+check: lint version check-deps console-encoding deploy-check contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check mypy-baseline test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:
