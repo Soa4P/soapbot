@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-09T20:08:04+08:00",
+  "updated_at": "2026-11-09T22:35:23+08:00",
   "current": null,
   "phases": [
     {
@@ -2201,6 +2201,122 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph32",
+      "index": "P32",
+      "name": "全栈盘点与三项结构优化",
+      "goal": "对全库做一次只读质量盘点，挑出风险低、可量化的缺陷修掉：查询扇出、事件循环上的同步 IO、没有分包的入口 chunk，以及一直只做 advisory 的类型检查。",
+      "tasks": [
+        {
+          "id": "ph32-t1",
+          "name": "分层计数从 N 次查询收敛为一次",
+          "status": "done",
+          "note": "memory_stats 原来 for layer in MemoryLayer: await count_memories(layer)，末了再单独查一次总数——一屏 4~5 次往返，且每次是独立事务，负载下「总数」与「各部分之和」能对不上。新增 MemoryStore.count_by_layer 用一条 GROUP BY，admin 侧一次取回；-1 仍表示「读不到」，与「零行」区分，页面不把读失败画成空层。测试同时断言行为（计数正确、空库返回空映射）与形状（handler 里不得再出现 count_memories）。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/store.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/api/admin.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph32-t2",
+          "name": "技能读写移出事件循环",
+          "status": "done",
+          "note": "GET /memory/skills 走 forge.load(scope)（glob + 逐个 read_text），POST 走 forge.save(skill)（mkdir + write_text），两者都在 async 处理函数里同步执行；一个 scope 有几百个 .md 时，遍历期间所有其它面板请求排队。改为 asyncio.to_thread——同文件 api/napcat.py 已有 8 处这种写法，只是没推广。测试断言 to_thread 形式存在且同步形式没有回来。",
+          "files": [
+            {
+              "path": "src/soapbot/api/admin.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph32-t3",
+          "name": "类型检查变成只降不升的棘轮",
+          "status": "done",
+          "note": "mypy 一直 continue-on-error：79 个错误在没人打开的日志里，第 80 个不会被拦。新增 scripts/check_mypy_baseline.py + mypy_baseline.txt，只比较总数（按文件比对会让每次函数搬迁都失败，反而教人抬数字）。跑一次 1.7 秒，已进 Makefile 的 check 与 CI backend job；types job 的 advisory 步骤改成同一个脚本，避免同一个门禁两套结论。实测输出 unchanged at 79 (31 files)。",
+          "files": [
+            {
+              "path": "scripts/check_mypy_baseline.py",
+              "status": "done"
+            },
+            {
+              "path": "scripts/mypy_baseline.txt",
+              "status": "done"
+            },
+            {
+              "path": "Makefile",
+              "status": "done"
+            },
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph32-t4",
+          "name": "面板入口分包",
+          "status": "done",
+          "note": "路由本来已是 () => import() 懒加载（子代理报告的「12 个视图未 code-split」是错的，已核实），缺的是框架与视图同处一个入口 chunk。vite.config.ts 加 manualChunks 把 vue/vue-router/pinia 拆到 vendor：实测 vendor 104.28 kB、index 143.69 kB（gzip 40.60 / 52.69），面板更新时只有视图 chunk 失效。未做进一步虚拟滚动与组件拆分，留待后续。",
+          "files": [
+            {
+              "path": "webui/vite.config.ts",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph32-t5",
+          "name": "清理未接线代码，保留有理由的未用函数",
+          "status": "done",
+          "note": "删 SceneMemory.drop_portrait（7 行，全仓 1 处命中即定义）、content_fingerprint（2 行，同时移除因此变空的 hashlib 导入）、charts/Sparkline.vue（134 行，0 处 import）。没有删 check_secret_resolvable：它的 docstring 明确写「Unused, and deliberately kept」，理由是替代做法会让 API 层长出第二套密钥解析——盘点把它报成死代码是误判，注释里写明的取舍不该被当垃圾清理，这条已写进 CHANGELOG 以免下次又被「优化」掉。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/scene.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/memory/store.py",
+              "status": "done"
+            },
+            {
+              "path": "webui/src/components/charts/Sparkline.vue",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph32-t6",
+          "name": "验证与基线",
+          "status": "done",
+          "note": "新增 tests/test_admin_query_efficiency.py 4 项（含两条形状断言）。改错复验三处均 rc=1：count_by_layer 换回 count_memories、两处 to_thread 各去掉一次。面板重建后 dist 变化导致 test_verify_deployment_script 的 matches_committed 一度为 False，提交后恢复——这条按预期记录，不是放宽断言。全量 1867 → 1871 passed / 12 skipped；四个文档与看板同步，验证矩阵补两行。",
+          "files": [
+            {
+              "path": "tests/test_admin_query_efficiency.py",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2296,7 +2412,7 @@
     }
   ],
   "verification": {
-    "pytest": "1867 passed, 12 skipped",
+    "pytest": "1871 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

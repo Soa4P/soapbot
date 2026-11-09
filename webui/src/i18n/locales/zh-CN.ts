@@ -790,7 +790,6 @@ export default {
   'chart.item': '项目',
   'chart.value': '数值',
   'chart.noData': '暂无数据',
-  'chart.latest': '{label}：最新 {value}{suffix}',
   'diff.configFile': '配置文件',
   'diff.addedLine': '新增行',
   'diff.removedLine': '删除行',

@@ -784,7 +784,6 @@ export default {
   'chart.item': 'Item',
   'chart.value': 'Value',
   'chart.noData': 'no data',
-  'chart.latest': '{label}: latest {value}{suffix}',
   'diff.configFile': 'config file',
   'diff.addedLine': 'added line',
   'diff.removedLine': 'removed line',
