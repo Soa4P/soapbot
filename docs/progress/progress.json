@@ -2288,7 +2288,7 @@
             },
             {
               "path": "webui/src/components/charts/Sparkline.vue",
-              "status": "deleted"
+              "status": "done"
             }
           ]
         },
