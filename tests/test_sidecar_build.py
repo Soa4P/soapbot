@@ -97,11 +97,26 @@ def test_a_missing_frontend_fails_before_pyinstaller_runs(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     """The guard must be cheap and explicit: a 46 MiB binary with a blank panel is worse
-    than a build that refuses to start."""
+    than a build that refuses to start.
+
+    The bundler check is forced to pass: whether PyInstaller happens to be installed in
+    the environment running the suite is not what this case is about. Measured the hard
+    way — without it the assertion read "PyInstaller is not installed" on CI, where the
+    backend job installs `.[dev]` only.
+    """
     module = _load_build()
+    monkeypatch.setattr(module, "_pyinstaller_available", lambda: True)
     monkeypatch.setattr(module, "ROOT", tmp_path)
     assert module.main() == 2
     assert "webui/dist" in capsys.readouterr().err
+
+
+def test_a_missing_bundler_names_the_extra(monkeypatch, capsys) -> None:
+    """A build that cannot run should say how to fix it, not traceback inside a subprocess."""
+    module = _load_build()
+    monkeypatch.setattr(module, "_pyinstaller_available", lambda: False)
+    assert module.main() == 2
+    assert ".[sidecar]" in capsys.readouterr().err
 
 
 def test_the_binary_and_work_directory_are_not_committed() -> None:
