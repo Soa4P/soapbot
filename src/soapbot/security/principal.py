@@ -37,6 +37,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from soapbot.core.text import INVISIBLE
+
 logger = logging.getLogger(__name__)
 
 
@@ -195,9 +197,8 @@ def normalize_id(raw: object) -> str:
     return text.lower()
 
 
-_ZW_MAP = dict.fromkeys(
-    map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
-)
+#: The one shared table; see :mod:`soapbot.core.text`.
+_ZW_MAP = INVISIBLE
 
 
 @dataclass(slots=True)

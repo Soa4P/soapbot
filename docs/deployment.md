@@ -16,14 +16,18 @@ systemd / 容器 / Windows 计划任务、反向代理、升级与回滚。
 ```bash
 make install        # 建虚拟环境 + 装开发依赖
 make run            # 先构建前端，再启动服务
-make check          # lint + 配色 + 可访问性 + 测试断层 + test（与 CI 阻断项同一条命令）
+make check          # CI backend 的全部本地可跑门禁 + test（差集只有两项，见下）
 make a11y           # 可访问性静态规则（按钮名称、点击目标可聚焦、img alt、对话框语义）
 make gaps           # 测试断层扫描：无人引用的模块、文档里与看板不一致的数字
 make typecheck      # mypy —— 当前基线非零，仅作参考，不阻断
 make doctor         # 部署姿态检查
 ```
 
-> **类型检查现状**：`mypy src` 目前报告 53 个错误，分布在 20 个文件，全部是既有问题。
+`make check` 覆盖 CI `backend` 任务里能在本机跑的全部门禁，只排除
+`check_secrets.py --committed`（要读待审提交的 git 历史）与 `pip-audit`（要联网）。
+`tests/test_gate_parity.py` 断言这个差集，两边漂移就会红。
+
+> **类型检查现状**：`mypy src` 目前报告 79 个错误，分布在 31 个文件，全部是既有问题。
 > 因此 CI 把它放在独立的 `types` job 里（`continue-on-error`），只报告不阻断。
 > 让它阻断会让首次推送就是红的，而让人们习惯红色徽章；按模块 `ignore_errors` 则会
 > 把该文件里的下一个真实错误一并藏掉。降到 0 之后应当改为阻断。
@@ -47,7 +51,7 @@ python scripts/bootstrap.py --dir D:\soapbot --port 6185
 
 | 平台 | 谁来托管进程 | `--autostart` 做什么 |
 |---|---|---|
-| Windows | 双击 `start-panel.bat`；或用 detached 进程后台起 | 注册计划任务 `soapbot-panel`（登录时启动） |
+| Windows | 双击 `start-panel.bat`；或用 detached 进程后台起 | 注册计划任务 `SoapbotBot`（SYSTEM，开机启动；与 `install.ps1` 同名同触发器） |
 | Linux | systemd unit（有 root 时还会建 `soapbot` 系统账号并把服务跑成它，而不是 root）/ 用户级 unit（无 root，会提示 `loginctl enable-linger`） | 等价于 `systemctl enable --now` |
 | 无 systemd | 明确告知：用 supervisor / openrc，或直接前台跑 | 不假装成功 |
 
@@ -113,9 +117,12 @@ docker compose -f deploy/docker-compose.yml up -d --build
 默认位置在 `/app`，第 12 页保存设置会直接失败——把它放在数据卷上，保存才能落盘并在重启
 后生效。`scripts/check_deploy.py` 会静态校验这一条。
 
-> **容器未经实测。** 本机无 `docker` 命令，`check_deploy.py` 只能证明配置文件里写了
-> `read_only: true`，不能证明容器起得来。9 条验收命令与预期输出见
-> [`docs/deploy-layer.md` §8](deploy-layer.md)，需要在有 Docker 的机器上执行。
+> **容器已实测**（2026-10-30，雨云 Ubuntu 24.04 真机）：`deploy_remote.py --verify`
+> 14 项全 PASS，`systemctl reboot` 后容器自行回到 `Up (healthy)`、复跑仍 14/14。证据与
+> 9 条验收命令见 [`docs/deploy-layer.md` §8.2](deploy-layer.md)。
+>
+> 注意区分两类证据：`check_deploy.py`（17 项：16 通过 + 1 告警）是静态检查，只证明配置文件里写了
+> `read_only: true`；真机验收证明的是容器起得来、重启能自愈。前者不能替代后者。
 
 ### 前端
 

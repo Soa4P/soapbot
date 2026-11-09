@@ -26,12 +26,12 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
 from soapbot import __version__
+from soapbot.core.proc_env import sanitize_env
 from soapbot.security.audit import get_audit_log
 from soapbot.security.injection import scrub_schema, scrub_tool_text
 
@@ -69,6 +69,13 @@ class McpServer:
 
     description: str = ""
 
+    #: Optional supply-chain pin. When set, the server's reported
+    #: ``serverInfo.version`` must match exactly at handshake or the connection is
+    #: refused. Empty means "record the version, do not enforce one": pinning every
+    #: server would break the common case where an operator upgrades a package and
+    #: expects the next start to work.
+    pinned_version: str = ""
+
 
 @dataclass(slots=True)
 class McpTool:
@@ -97,6 +104,10 @@ class McpClient:
         self.last_error = ""
         #: What the server answered to ``initialize``. Empty until a handshake succeeds.
         self.protocol_version = ""
+        #: Identity the server reported in ``serverInfo``. Kept even when no pin is
+        #: configured, so the running set of third-party implementations is observable.
+        self.implementation_name = ""
+        self.implementation_version = ""
         self._stderr_tail = b""
         self._stderr_task: asyncio.Task[None] | None = None
 
@@ -131,7 +142,12 @@ class McpClient:
         await self._stop_stderr()
         self._stderr_tail = b""
 
-        env = {**os.environ, **self.server.env}
+        # An MCP server is third-party code, so it gets the same allowlist a plugin
+        # gets: `SECURITY.md` grades MCP servers as untrusted, and handing them the
+        # host environment contradicted that grade — an MCP server could read the
+        # master key and every provider API key from `os.environ`. Only the variables
+        # the operator declared for this server (`self.server.env`) are forwarded.
+        env = sanitize_env(extra=self.server.env, prefix="")
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 executable,
@@ -152,27 +168,34 @@ class McpClient:
         # the server first, which is the call we are already inside.
         self._next_id += 1
         request_id = self._next_id
-        await self._send(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": "soapbot", "version": __version__},
-                },
-            }
-        )
         try:
+            await self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": PROTOCOL_VERSION,
+                        "capabilities": {},
+                        "clientInfo": {"name": "soapbot", "version": __version__},
+                    },
+                }
+            )
             result = await asyncio.wait_for(
                 self._await_response(request_id), timeout=self.server.timeout
             )
-        except McpError as exc:
-            await self._settle_stderr()
-            raise self._handshake_failure(exc) from exc
-        self._accept_protocol(result)
-        await self._notify("notifications/initialized", {})
+            self._accept_protocol(result)
+            await self._notify("notifications/initialized", {})
+        except (McpError, TimeoutError, OSError, ValueError, TypeError) as exc:
+            # Every failure here — a dead pipe, a timeout, a protocol disagreement or a
+            # version pin mismatch — must leave no live child, no stderr reader and no
+            # half-negotiated state. Previously only McpError from _await_response was
+            # handled, and even that path merely settled stderr without terminating the
+            # child; _accept_protocol and _notify sat outside the try entirely. Adding
+            # a pin check that can reject would otherwise leak a subprocess on every
+            # mismatch.
+            failure = await self._abort_handshake(exc)
+            raise failure from exc
         # Cleared on success, not only set on failure. Without this a server that went
         # down and came back keeps reporting the old error, so "reconnect" appears to
         # have done nothing and the operator restarts the whole process for nothing.
@@ -233,14 +256,48 @@ class McpClient:
             )
         return McpError(f"server {self.server.name} rejected the handshake: {cause}{said}")
 
-    def _accept_protocol(self, result: dict[str, Any]) -> None:
-        """Take the version the server answered with, not the one we asked for.
+    async def _abort_handshake(self, cause: BaseException) -> McpError:
+        """Turn any failed handshake into one error and a clean, empty client.
 
-        The spec has the server reply with a version *it* supports; the client decides
-        whether it can play along. It can — the three calls we make have not changed
-        shape in any published version — so an unknown answer is accepted and logged
-        rather than turned into a failed start. Refusing would take a working server
-        out of service on the strength of a string we do not recognise.
+        The child is already spawned and its stderr reader already running when this is
+        reached. Leaving either behind is worse than the failure being diagnosed: the
+        next call sees a live ``_proc`` with a closed pipe, and a server we just refused
+        keeps a process alive for the lifetime of the host.
+
+        Order matters. ``_handshake_failure`` reads ``_proc.returncode`` and the stderr
+        tail, so it has to run *before* :meth:`close` nulls ``_proc`` and stops the
+        reader. ``close`` then terminates the child, reaps the pipes and cancels the
+        reader in one place instead of duplicating that logic here.
+        """
+        await self._settle_stderr()
+        if isinstance(cause, McpError):
+            failure = self._handshake_failure(cause)
+        else:
+            failure = McpError(
+                f"server {self.server.name} failed the handshake: "
+                f"{type(cause).__name__}: {cause}"
+            )
+        await self.close()
+        self.protocol_version = ""
+        self.implementation_name = ""
+        self.implementation_version = ""
+        self.last_error = str(failure)
+        return failure
+
+    def _accept_protocol(self, result: dict[str, Any]) -> None:
+        """Negotiate the wire protocol and enforce the implementation pin.
+
+        The spec has the server reply with a protocol version *it* supports; the client
+        decides whether it can play along. It can — the three calls we make have not
+        changed shape in any published version — so an unknown answer is accepted and
+        logged rather than turned into a failed start.
+
+        ``serverInfo.version`` is a different question. It identifies the third-party
+        implementation that is about to execute, which is a supply-chain fact rather
+        than a wire-compatibility guess. When the operator pinned a version, a mismatch
+        raises :class:`McpError`; the caller's handshake try/except then cleans up the
+        child. Without a pin the version is still recorded and audited, so the set of
+        implementations that actually ran is knowable after the fact.
         """
         negotiated = str(result.get("protocolVersion") or "")
         self.protocol_version = negotiated or PROTOCOL_VERSION
@@ -257,6 +314,40 @@ class McpClient:
                 self.server.name,
                 negotiated,
                 PROTOCOL_VERSION,
+            )
+
+        info = result.get("serverInfo")
+        if isinstance(info, dict):
+            self.implementation_name = str(info.get("name") or "")
+            self.implementation_version = str(info.get("version") or "")
+        else:
+            self.implementation_name = ""
+            self.implementation_version = ""
+
+        pinned = self.server.pinned_version.strip()
+        issue = ""
+        if pinned and not self.implementation_version:
+            issue = "no serverInfo.version reported"
+        elif pinned and self.implementation_version != pinned:
+            issue = f"reports {self.implementation_version!r}, pinned {pinned!r}"
+
+        # Recorded for both outcomes: a refused server is exactly the event a later
+        # supply-chain review needs, and it cannot be reconstructed from status().
+        get_audit_log().record(
+            kind="mcp",
+            action="implementation",
+            outcome="deny" if issue else "allow",
+            detail=(
+                f"server={self.server.name} "
+                f"name={self.implementation_name or '-'} "
+                f"version={self.implementation_version or '-'} "
+                f"pinned={pinned or '-'} protocol={self.protocol_version} "
+                f"issue={issue or '-'}"
+            ),
+        )
+        if issue:
+            raise McpError(
+                f"server {self.server.name} failed the implementation pin: {issue}"
             )
 
     async def _stop_stderr(self) -> None:
@@ -420,13 +511,17 @@ def _spawn_signature(server: McpServer) -> tuple[Any, ...]:
     """The fields that decide what gets executed.
 
     ``description`` is deliberately absent: it is shown in the panel and nothing else,
-    so editing it is not a reason to kill a working child process.
+    so editing it is not a reason to kill a working child process. ``pinned_version``
+    is deliberately *present*: the pin is checked at handshake, so changing it on a
+    live client without reconnecting would leave the old, unvalidated process running
+    under a policy that was never applied to it.
     """
     return (
         server.command,
         tuple(sorted(server.env.items())),
         server.timeout,
         server.min_role,
+        server.pinned_version,
     )
 
 
@@ -508,6 +603,13 @@ class McpManager:
                     "min_role": server.min_role,
                     "tools": len(self._tools.get(name) or []),
                     "error": self._clients[name].last_error,
+                    # Supply-chain view: the policy (pin), the identity the server
+                    # claimed, and the wire protocol it negotiated. A version that was
+                    # never checked shows up as an empty implementation_version.
+                    "pinned_version": server.pinned_version,
+                    "protocol_version": self._clients[name].protocol_version,
+                    "implementation": self._clients[name].implementation_name,
+                    "implementation_version": self._clients[name].implementation_version,
                 }
                 for name, server in self._servers.items()
             ],

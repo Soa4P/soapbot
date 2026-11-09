@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Offline audit of the 18 security / error / logging boundaries.
+"""Offline audit of the 20 security / error / logging boundaries.
 
 Why a gate like this exists
 ---------------------------
@@ -12,7 +12,7 @@ The script reads source only. It starts no server, no container, no network
 connection, so it behaves the same on a laptop, in CI and before a release. Every
 result prints the evidence it relied on. A missing invariant exits non-zero.
 
-Each of the 18 contracts has a risk level, taken from the same grading used in the
+Each of the 20 contracts has a risk level, taken from the same grading used in the
 review that produced them. Levels are informational: *every* missing invariant fails
 the gate, including the low ones, because a low-risk regression that is allowed to
 land becomes the baseline for the next one.
@@ -21,6 +21,7 @@ land becomes the baseline for the next one.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,6 +103,146 @@ def _forbid_in(paths: list[Path], needle: str, code: str, level: str, detail: st
     return Result(
         code, level, not hits, detail, "; ".join(hits) if hits else f"absent in {len(paths)} files"
     )
+
+
+def _is_os_environ(node: ast.expr) -> bool:
+    """Whether ``node`` evaluates to the host environment mapping."""
+    if isinstance(node, ast.Attribute) and node.attr == "environ":
+        return isinstance(node.value, ast.Name) and node.value.id == "os"
+    if isinstance(node, ast.Call):
+        # ``os.environ.copy()`` and ``dict(os.environ)`` are the same leak spelled
+        # differently; catching only the literal unpacking invites the rewrite.
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "copy":
+            return _is_os_environ(node.func.value)
+        if isinstance(node.func, ast.Name) and node.func.id == "dict":
+            return bool(node.args) and _is_os_environ(node.args[0])
+    return False
+
+
+def _forbid_host_env(code: str, level: str, detail: str) -> Result:
+    """AST check: no third-party child is handed the host environment.
+
+    Deliberately not a substring scan. ``core/proc_env.py`` documents the defect by
+    quoting the line it replaced — ``{**os.environ, **server.env}`` — and a text gate
+    reports that explanation as a live occurrence. The gate would then fail on the very
+    file that fixes the bug, and the obvious way to make it green is to delete the
+    explanation, which is the opposite of what the gate is for. The AST sees the
+    unpacking; it does not see prose.
+    """
+    offenders: list[str] = []
+    for path in PY_FILES:
+        try:
+            tree = ast.parse(_text(path))
+        except SyntaxError:  # pragma: no cover - the lint gate owns syntax
+            continue
+        for node in ast.walk(tree):
+            where = ""
+            if isinstance(node, ast.Dict):
+                # ``zip(..., strict=False)``: a dict display with a ``**`` key has a
+                # ``None`` in ``keys`` and the same length in ``values``, but being
+                # explicit here keeps the intent readable.
+                if any(
+                    key is None and _is_os_environ(value)
+                    for key, value in zip(node.keys, node.values, strict=False)
+                ):
+                    where = "**os.environ"
+            elif (
+                isinstance(node, ast.keyword)
+                and node.arg == "env"
+                and _is_os_environ(node.value)
+            ):
+                where = "env=os.environ"
+            if where:
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno} {where}")
+    return Result(
+        code, level, not offenders, detail,
+        "; ".join(offenders) if offenders else f"absent in {len(PY_FILES)} files",
+    )
+
+
+#: The number of contracts the table must never fall below. A ratchet, not a target:
+#: the count may grow, it may not shrink. Same logic as ``blocked_versions.json`` —
+#: removing a contract is how a boundary quietly becomes a suggestion.
+MIN_CONTRACTS = 20
+
+#: Every prose location that states the contract count, with the needle shape that
+#: location uses. ``{n}`` is substituted with the number derived from the table, so
+#: this list never hard-codes a digit — the digit is an output of the gate, not an
+#: input to it. That is the whole point: ten hand-written numbers are why they drifted.
+COUNT_CLAIMS: tuple[tuple[Path, str], ...] = (
+    # The H1 and the section heading are separate claims on purpose. A needle of
+    # ``{n} 项防线契约`` alone matches the H1, so editing only the section heading
+    # leaves it green — the test suite caught exactly that when this was one entry.
+    (CONTRACT_DOC, "安全边界与错误日志：{n} 项防线契约"),
+    (CONTRACT_DOC, "## {n} 项防线契约"),
+    (DOCS / "guide.md", "{n} 项边界逐条证据"),
+    (DOCS / "operations.md", "{n} 项安全与错误日志契约"),
+    (DOCS / "reference-ecosystem.md", "{n} 项各有一条防线"),
+    (DOCS / "reference-ecosystem.md", "{n} 项逐条证据见"),
+    (DOCS / "security-model.md", "{n} 项契约、每条的判定与证据"),
+    (DOCS / "verification-matrix.md", "{n} 项安全与错误日志契约"),
+    (MAKEFILE, "{n} 项安全与错误日志边界审计"),
+    (CI, "The {n} contracts in docs/security-boundaries.md"),
+)
+
+
+def _contract_rows(text: str) -> list[int]:
+    """The ``#`` column of the contract table, in document order."""
+    return [int(m) for m in re.findall(r"^\|\s*(\d{2})\s*\|", text, re.MULTILINE)]
+
+
+def _contract_count_is_consistent(code: str, level: str, detail: str) -> Result:
+    """The prose must agree with the table, and the table may not shrink.
+
+    Three things, and all three are needed:
+
+      1. the row numbers run 01..n with no gap and no repeat — this catches "delete
+         row 12", which is how a contract disappears without anyone noticing;
+      2. ``n >= MIN_CONTRACTS`` — a ratchet, so "delete a row *and* update the prose"
+         is still a failure;
+      3. every ``COUNT_CLAIMS`` location contains the needle built from the derived
+         ``n`` — so the seven prose statements cannot drift from the table.
+
+    The check this replaces was ``_require(CONTRACT_DOC, "## 20 项防线契约")``, which
+    proves the characters exist but not that they are *right*: delete a table row and
+    leave the heading alone and it stays green. A number written in ten places needs a
+    gate that reads the number from one place.
+    """
+    text = _text(CONTRACT_DOC)
+    rows = _contract_rows(text)
+    if not rows:
+        return Result(code, level, False, detail, f"{CONTRACT_DOC.name}: no contract rows found")
+
+    n = len(rows)
+    problems: list[str] = []
+
+    expected = list(range(1, n + 1))
+    if rows != expected:
+        # Report the first divergence rather than the whole list: with 20 rows the
+        # full diff is noise, and the first gap is the one that was deleted.
+        for index, (got, want) in enumerate(zip(rows, expected, strict=False), 1):
+            if got != want:
+                problems.append(f"row {index} is {got:02d}, expected {want:02d}")
+                break
+        else:
+            problems.append(f"{n} rows but numbering ends at {rows[-1]:02d}")
+
+    if n < MIN_CONTRACTS:
+        problems.append(f"{n} contracts, ratchet floor is {MIN_CONTRACTS}")
+
+    missing: list[str] = []
+    for path, template in COUNT_CLAIMS:
+        needle = template.format(n=n)
+        if needle not in _text(path):
+            missing.append(f"{path.relative_to(ROOT)} lacks {needle!r}")
+    problems.extend(missing)
+
+    evidence = (
+        "; ".join(problems)
+        if problems
+        else f"{n} contracts, rows 01-{n:02d} contiguous, {len(COUNT_CLAIMS)} prose claims agree"
+    )
+    return Result(code, level, not problems, detail, evidence)
 
 
 def _no_silent_catch(code: str, level: str, detail: str) -> Result:
@@ -280,10 +421,40 @@ def checks() -> list[Result]:
     add(_require(AUDIT, "message_id", "s18", "low", "audit events carry message_id"))
     add(_require(AUDIT, "provider", "s18", "low", "audit events carry provider"))
 
+    # 19 — what a third-party child process may see
+    # An MCP server is code the operator did not write, and `SECURITY.md` grades it
+    # untrusted. Handing it the host environment contradicted that grade: it could read
+    # the master key and every provider API key straight out of `os.environ`. The plugin
+    # side already had an allowlist; the two now share one, so the lists cannot drift.
+    add(_forbid_host_env("s19", "critical",
+                         "no third-party child inherits the host environment"))
+    add(_require(SRC / "mcp" / "client.py", "sanitize_env(", "s19", "critical",
+                 "MCP child environment goes through the shared allowlist"))
+    add(_require(SRC / "core" / "proc_env.py", "SAFE_ENV_KEYS", "s19", "critical",
+                 "one allowlist defines what a third-party child may see"))
+
+    # 20 — one invisible-character table
+    # There were five copies and they had drifted: the injection screen knew about the
+    # bidi overrides and the Unicode tag characters, the other three did not, and none
+    # of them covered U+2066-U+2069. A character missing from the weakest copy passes
+    # the injection screen, the memory vet and the tool-text scrubber at once, and then
+    # reaches the prompt — where the model reads what the regex could not see.
+    add(_require(SRC / "core" / "text.py", "0x2066", "s20", "critical",
+                 "the shared table covers the Unicode isolate characters"))
+    for rel in (
+        "security/injection.py",
+        "ai/stages.py",
+        "core/stages.py",
+        "security/principal.py",
+    ):
+        add(_require(SRC / rel, "from soapbot.core.text import INVISIBLE", "s20", "critical",
+                     f"{rel} reads the shared invisible-character table"))
+
     # Wiring: the gate must run in CI and locally, or it decays into a script nobody calls.
     add(_require(CI, "scripts/check_security_boundaries.py", "wire", "medium", "CI runs this gate"))
     add(_require(MAKEFILE, "scripts/check_security_boundaries.py", "wire", "medium", "make check runs this gate"))
-    add(_require(CONTRACT_DOC, "## 18 项防线契约", "wire", "low", "the contract document exists"))
+    add(_contract_count_is_consistent("wire", "low",
+                                      "the prose contract count equals the table, and never shrinks"))
     return out
 
 

@@ -59,6 +59,7 @@ from typing import Any
 
 from soapbot.config import settings
 from soapbot.core.jsonguard import JsonTooDeepError, check_depth
+from soapbot.core.proc_env import SAFE_ENV_KEYS, SAFE_ENV_PREFIX, sanitize_env
 
 logger = logging.getLogger(__name__)
 
@@ -146,56 +147,13 @@ MAX_FRAME_BYTES = 4 * 1024 * 1024
 #:
 #: ``SOAPBOT_PLUGIN_*`` is the one prefix forwarded, so an operator can pass
 #: deliberate plugin configuration without exposing the host's own secrets.
-_SAFE_ENV_KEYS = frozenset(
-    {
-        # Required for the interpreter to start and for system libraries to resolve.
-        "PATH",
-        "SYSTEMROOT",  # Windows: winsock/dll loading fails without it
-        "SYSTEMDRIVE",
-        "WINDIR",
-        "COMSPEC",
-        "PATHEXT",
-        # Locale / encoding: without these a plugin writing Chinese text crashes on
-        # a POSIX box with a C locale, which reads as "the plugin is broken".
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "PYTHONIOENCODING",
-        "PYTHONUTF8",
-        # Temp + home: tmpfile() and ~ expansion need these to resolve. They are
-        # not secrets (the child can reach the same paths from Python anyway).
-        "TMPDIR",
-        "TEMP",
-        "TMP",
-        "HOME",
-        "USERPROFILE",
-        # Certificate store location; without it outbound TLS fails confusingly.
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "REQUESTS_CA_BUNDLE",
-    }
-)
-
-#: Prefix forwarded so operators can pass *plugin* config deliberately.
-_SAFE_ENV_PREFIX = "SOAPBOT_PLUGIN_"
-
-
-def sanitize_env(base: dict[str, str] | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Return the environment a plugin subprocess may see.
-
-    Keeps :data:`_SAFE_ENV_KEYS` and the ``SOAPBOT_PLUGIN_*`` prefix, drops
-    everything else. ``extra`` is applied last for values the host wants to inject
-    (resource caps, plugin config) — host code controls it, never the plugin.
-    """
-    src = os.environ if base is None else base
-    env = {
-        k: v
-        for k, v in src.items()
-        if k in _SAFE_ENV_KEYS or k.startswith(_SAFE_ENV_PREFIX)
-    }
-    if extra:
-        env.update({str(k): str(v) for k, v in extra.items()})
-    return env
+#: The allowlist and the sanitizer live in :mod:`soapbot.core.proc_env` so that MCP
+#: servers — which are untrusted by the same argument — get the same treatment instead
+#: of inheriting the whole host environment. The private aliases keep the names this
+#: module has always exported.
+_SAFE_ENV_KEYS = SAFE_ENV_KEYS
+_SAFE_ENV_PREFIX = SAFE_ENV_PREFIX
+sanitize_env = sanitize_env
 
 
 class IsolationError(RuntimeError):

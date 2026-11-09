@@ -7,9 +7,7 @@ soapbot.bilibili.wbi
 soapbot.core.bus
 soapbot.core.progressive
 soapbot.core.session
-soapbot.core.text
 soapbot.examples.plugins.admin.main
 soapbot.examples.plugins.echo.main
 soapbot.examples.plugins.help.main
 soapbot.examples.plugins.remind.main
-soapbot.memory.migrations

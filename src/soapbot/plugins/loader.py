@@ -57,6 +57,11 @@ import yaml
 
 from soapbot import __version__
 from soapbot.config import settings
+from soapbot.plugins.attestation import (
+    AttestationVerdict,
+    RuntimeAttestation,
+    build_attestation,
+)
 from soapbot.plugins.context import PluginContext
 from soapbot.plugins.integrity import compare_async as compare_integrity_async
 from soapbot.plugins.integrity import digest_tree
@@ -242,6 +247,10 @@ class PluginLoader:
 
         self.session_ledger = SessionLedger()
         self._loaded: dict[str, LoadedPlugin] = {}
+        #: Portable proof of the exact artifact + policy + execution combination that
+        #: was loaded. Rebuilt on every load (and therefore every reload), never copied
+        #: from the install-time scan.
+        self._attestations: dict[str, RuntimeAttestation] = {}
         # Approval decisions survive restarts through ``ApprovalStore``. ``None``
         # keeps the in-memory behaviour for tests and embedded use, but the
         # deployment path always supplies a store: an approval that vanishes on
@@ -547,6 +556,77 @@ class PluginLoader:
         )
         return "changed"
 
+    # ------------------------------------------------------------- attestation
+    def _attest(
+        self,
+        name: str,
+        directory: Path,
+        manifest: PluginManifest,
+        integrity: str,
+        *,
+        isolated: bool,
+    ) -> None:
+        """Bind the artifact, policy and execution into one portable record.
+
+        Called only after import and setup actually succeeded. An installation-time
+        digest says what was reviewed; this says what ran, under which policy, and gives
+        a later caller a way to re-check all three without trusting this process.
+        """
+        try:
+            grant = self.grant_for(manifest)
+            record = build_attestation(
+                plugin=name,
+                version=str(manifest.version),
+                directory=directory,
+                integrity_state=integrity,
+                capabilities=tuple(c.value for c in manifest.capabilities),
+                approved=tuple(c.value for c in grant.approved),
+                isolated=isolated,
+            )
+        except Exception as exc:
+            # Loading is not blocked, but there must be no silent "verified" state: a
+            # plugin with no record has no portable proof, and the audit says so.
+            self._attestations.pop(name, None)
+            self.audit.record(
+                kind="plugin",
+                action="attestation",
+                outcome="deny",
+                detail=f"build failed: {type(exc).__name__}",
+                plugin=name,
+            )
+            logger.error("attestation failed name=%s err=%s", name, type(exc).__name__)
+            return
+
+        self._attestations[name] = record
+        self.audit.record(
+            kind="plugin",
+            action="attestation",
+            outcome="allow",
+            detail=(
+                f"artifact={record.artifact_digest[:19]} "
+                f"policy={record.policy_version} record={record.record_digest[:19]} "
+                f"isolated={isolated} integrity={integrity}"
+            ),
+            plugin=name,
+        )
+
+    def attestation(self, name: str) -> RuntimeAttestation | None:
+        """The record for a load that completed, or ``None`` if there is none."""
+        return self._attestations.get(name)
+
+    def verify_attestation(self, name: str) -> AttestationVerdict | None:
+        """Re-verify the bound combination at runtime composition time.
+
+        ``None`` means the plugin is not currently loaded, so there is nothing whose
+        runtime combination could be verified. The caller decides whether that is
+        acceptable; the method never reports it as a pass.
+        """
+        record = self._attestations.get(name)
+        loaded = self._loaded.get(name)
+        if record is None or loaded is None:
+            return None
+        return record.verify(loaded.path)
+
     async def _blocked_reason(self, name: str, version: str) -> str:
         """Return why this exact release must not run, or ``""``.
 
@@ -695,7 +775,11 @@ class PluginLoader:
         # plugins still ran inside the host and the review's "layer 2" was a library
         # nobody used.
         if self.supervisor is not None:
-            return await self._load_isolated(name, directory, manifest, context, integrity)
+            loaded = await self._load_isolated(
+                name, directory, manifest, context, integrity
+            )
+            self._attest(name, directory, manifest, integrity, isolated=True)
+            return loaded
 
         try:
             module_names = self._import_plugin(manifest, directory)
@@ -754,6 +838,7 @@ class PluginLoader:
             integrity=integrity,
         )
         self._loaded[name] = loaded
+        self._attest(name, directory, manifest, integrity, isolated=False)
         self.audit.record(
             kind="plugin",
             action="load",

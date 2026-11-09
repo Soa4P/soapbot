@@ -17,6 +17,7 @@ from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.core.progressive import ProgressiveSender
 from soapbot.core.stages import _build_outgoing
+from soapbot.core.text import INVISIBLE
 from soapbot.i18n import t
 from soapbot.providers.router import ProviderCooldownError
 from soapbot.security.audit import get_audit_log
@@ -28,6 +29,7 @@ from soapbot.security.injection import (
     looks_like_injection,
     redact,
 )
+from soapbot.security.provenance import MODEL, Provenance, ToolArguments
 from soapbot.voice.stt import render_prompt
 
 logger = logging.getLogger(__name__)
@@ -478,6 +480,12 @@ class ModelStage(Stage):
             elif isinstance(raw_args, dict):
                 arguments = raw_args
 
+            # Model output crosses the trust boundary at this exact line. Tag it before
+            # it reaches the registry; the registry re-validates the tag and checks
+            # resource-selecting parameters at its own action boundary. Parsing above
+            # established structure only — it made no authorisation decision.
+            arguments = ToolArguments(arguments, provenance=Provenance(origin=MODEL))
+
             try:
                 output = await self.tools.invoke(
                     name,
@@ -509,9 +517,8 @@ class ModelStage(Stage):
 #: drifted would be the one that stops protecting anything.
 _LEAK_MARKERS = PROMPT_MARKERS
 
-_INVISIBLE = dict.fromkeys(
-    map(ord, "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None
-)
+#: The one shared table; see :mod:`soapbot.core.text`.
+_INVISIBLE = INVISIBLE
 
 
 def scrub_sentence(text: str) -> tuple[str, str]:

@@ -471,6 +471,11 @@ def build_runtime(
             ),
             descriptions=DescriptionCache(),
             history_provider=history_provider,
+            # Same store as RecallStage: the summary it writes here is the one
+            # MemoryStage injects as 【会话摘要】 on the next turn. Without these two,
+            # L1 has a reader and an injector but no writer, so it is always empty.
+            summary_loader=memory.latest_summary if memory is not None else None,
+            summary_saver=memory.save_summary if memory is not None else None,
         )
     else:
         logger.warning("no providers configured; model stage disabled")

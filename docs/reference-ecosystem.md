@@ -34,7 +34,7 @@ Node/TypeScript 或 Python 的 QQ 机器人生态，和 soapbot 的 FastAPI + Vu
 
 | # | 抉择 | 改了什么 | 为什么 | 不改什么 |
 |---|---|---|---|---|
-| 1 | 把边界写成可验证的契约 | `docs/security-boundaries.md` + `scripts/check_security_boundaries.py`，18 项各有一条防线；CI 双矩阵与 `make check` 都跑它 | 「已加固」是散文，改一次就可能退回去。负向不变量只能靠门禁守住 | 不引入 SAST 框架，不把检查做成需要联网的服务 |
+| 1 | 把边界写成可验证的契约 | `docs/security-boundaries.md` + `scripts/check_security_boundaries.py`，20 项各有一条防线；CI 双矩阵与 `make check` 都跑它 | 「已加固」是散文，改一次就可能退回去。负向不变量只能靠门禁守住 | 不引入 SAST 框架，不把检查做成需要联网的服务 |
 | 2 | 认证凭据移出脚本可读区 | `webui/src/api/client.ts` 去掉 localStorage 与 Bearer 注入，改 `credentials: 'include'`；`api/auth.py` 下发 HttpOnly + SameSite Cookie 并做 CSRF 双提交 | SnowLuma 的一次性初始密码思路启发的是「凭据不要长期留在可读处」，不是照搬它的密码表单 | 保留 Bearer 给 CLI 与脚本；不引入 OAuth / 会话服务器 |
 | 3 | 把「不做什么」写进 README | `README.md` 重写为四块，边界声明写清回环只读、CSP 不替代转义、正则上限不是硬超时 | SnowLumaDocs 和 NapCatQQ 都是这个写法：事实、命令、边界 | 不写功能清单，不写宣传语，不把 README 变成站点首页 |
 | 4 | 错误响应与日志分工 | `api/errors.py` 统一异常分层与状态码映射；`logging_setup.py` 用 `json.dumps` 并剥离控制字符；`core/log_context.py` 用 ContextVar 贯穿定位字段 | 一次跨站的调试经历：异常原文回到浏览器，完整诊断却没进日志。两边都错 | 不引入 structlog，不改现有 `ProviderError` / `IsolationError` 继承 |
@@ -49,5 +49,5 @@ SnowLuma 的多账号会话、MaiBot 的人格与插件事件、plugin-repo 的�
 NapCatQQ 的 native 注入、MoFox-Core 的 fork 分支——这些是各自产品的形态，不是
 边界治理。soapbot 这轮只动边界层、可观测层和文档结构，业务行为不变。
 
-18 项逐条证据见 [安全边界与错误日志](security-boundaries.md)；认证行为见
+20 项逐条证据见 [安全边界与错误日志](security-boundaries.md)；认证行为见
 [安全模型](security-model.md)；新增配置见 [配置](configuration.md)。

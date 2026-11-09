@@ -1,7 +1,9 @@
-"""Command line entry point: ``soapbot start`` / ``setup`` / ``token`` / ``doctor``.
+"""Command line entry point: ``soapbot start`` / ``setup`` / ``token`` / ``doctor`` /
+``migrate``.
 
-``setup`` lives in :mod:`soapbot.cli_setup`: this module stays a parser plus delegation,
-so the wizard can be tested without going through argv.
+``setup`` lives in :mod:`soapbot.cli_setup` and ``migrate`` in :mod:`soapbot.cli_migrate`:
+this module stays a parser plus delegation, so both can be tested without going through
+argv.
 """
 
 from __future__ import annotations
@@ -12,7 +14,14 @@ import sys
 from soapbot import __version__
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The parser, exposed so tests can ask which subcommands exist.
+
+    ``tests/test_cli_documented_commands.py`` needs the set of accepted subcommands to
+    compare against the ones the documentation tells operators to run. Building the
+    parser twice — once here and once in the test — would let the two drift, which is
+    the defect that test exists to catch.
+    """
     parser = argparse.ArgumentParser(prog="soapbot", description="QQ group chat AI bot")
     sub = parser.add_subparsers(dest="cmd")
 
@@ -83,6 +92,32 @@ def main(argv: list[str] | None = None) -> int:
         help="never prompt; fail if a required value is missing (for Ansible/CI)",
     )
 
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="apply pending database schema migrations (UPDATING.md step 5)",
+    )
+    p_migrate.add_argument(
+        "--status",
+        action="store_true",
+        help="print the current and target schema version, then exit (read-only)",
+    )
+    p_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list the steps that would run, without touching the database",
+    )
+    p_migrate.add_argument(
+        "--target",
+        type=int,
+        default=None,
+        help="stop at this schema version (default: what this build supports)",
+    )
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.cmd == "version" or args.cmd is None:
@@ -99,6 +134,11 @@ def main(argv: list[str] | None = None) -> int:
         from soapbot.cli_setup import run as run_setup
 
         return run_setup(args)
+
+    if args.cmd == "migrate":
+        from soapbot.cli_migrate import run as run_migrate
+
+        return run_migrate(args)
 
     if args.cmd == "start":
         import uvicorn
