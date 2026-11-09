@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-09T19:12:46+08:00",
+  "updated_at": "2026-11-09T20:08:04+08:00",
   "current": null,
   "phases": [
     {
@@ -2117,6 +2117,82 @@
           "name": "验证与基线",
           "status": "done",
           "note": "全量 1867 passed / 12 skipped（exit 0），check_deps 仍为 15 个运行时依赖、check_version_consistency / ruff / check_test_gaps --strict / check_doc_links 全绿。本轮三次推送分别是 77bf921（主改动）、b4f5dd8（sidecar extra）与本次测试修复；前一次的 ubuntu backend 与 windows backend 已分别在新依赖下跑通，说明依赖升级本身没有问题。",
+          "files": [
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph31",
+      "index": "P31",
+      "name": "PR 流程默认化与外部可见性",
+      "goal": "把「分支 → PR → 5 个检查 → 合并」写成默认流程并用它自己走一遍；补上 Release 发布链路、AI 助手说明与 README 的 badge 和索引。",
+      "tasks": [
+        {
+          "id": "ph31-t1",
+          "name": "把 PR 流程写成默认",
+          "status": "done",
+          "note": "CONTRIBUTING.md 新增「分支与合并」：五步命令、五道必需检查（backend ubuntu / backend windows / frontend / types / desktop）、为什么不允许直推（bypass 之后保护规则只剩注释；PR 把 diff 与结论放在一处；Windows 差异只有 CI 能跑出来）、发布走 tag。新增 .github/pull_request_template.md，把仓库已有的硬性规则（接线测试、文档与代码冲突时改文档、未验证要标注）变成 PR 上必须回答的四项。原因是 2026-11-09 那次直推绕过了分支保护，GitHub 提示 Bypassed rule violations。",
+          "files": [
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": ".github/pull_request_template.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph31-t2",
+          "name": "依赖更新写清怎么读",
+          "status": "done",
+          "note": "CONTRIBUTING.md 新增「依赖更新」：四个 ecosystem、group 的含义、为什么 major 不开 bot PR（github-actions 例外）、合并前看哪些检查、合并后本地跑全量，以及不动主环境复现升级兼容性的完整命令。2026-11-08 那次 Windows 红（#18，16 个包）被记为「根因是 .env 锁竞态，与依赖无关」，避免下次误判。",
+          "files": [
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph31-t3",
+          "name": "Release 发布链路",
+          "status": "done",
+          "note": "ci.yml 新增 release job：if startsWith(refs/tags/v)、needs [package, desktop-bundle]、runs-on ubuntu、permissions 只给 contents: write（scope 到 job 而不是整个 workflow），步骤为 download-artifact → 列出待发布文件 → gh release create --generate-notes，附 wheel 与未签名安装包。之前 Releases 页是空的，唯一的产物是 7 天过期的 upload-artifact。该 job 无法本地执行，只能校验 YAML 结构与 gh 参数，首次真实运行需要打 tag。",
+          "files": [
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph31-t4",
+          "name": "AI 助手说明与 README 可见性",
+          "status": "done",
+          "note": "新增 .github/copilot-instructions.md：项目定位、四条硬性规则（不假装修了、注释写为什么、新能力要接线测试、数字要同步）、五条不要做的事（不直推 master、不放宽断言、不在日志里放凭据、不提交运行时产物、不擅自加运行时依赖）、常用命令、平台差异。README 加 CI/Python/许可证三个 badge 与 13 行文档索引表；同时修掉一段已过时的桌面端描述——原文写「只负责打开面板，不启动后端」，而现在的实现是先探测、端口空才 spawn、退出 taskkill /T。",
+          "files": [
+            {
+              "path": ".github/copilot-instructions.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph31-t5",
+          "name": "验证与流程执行",
+          "status": "done",
+          "note": "全量 1867 passed / 12 skipped（exit 0）；check_doc_links 从 62 条升到 75 条链接、check_test_gaps --strict、check_deps、ruff 全绿；ci.yml 用 safe_load 校验为 7 个 job。本轮改动本身走新流程：开分支 → push → gh pr create → gh pr checks --watch → gh pr merge --squash，作为流程可用的第一个证据。",
           "files": [
             {
               "path": "docs/progress/progress.json",
