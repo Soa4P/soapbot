@@ -121,6 +121,41 @@ def check_file(path: Path) -> list[str]:
     return problems
 
 
+def check_native_confirm() -> list[str]:
+    """No native confirmation dialogs.
+
+    Three measured reasons, not style: it blocks the event loop for as long as it is
+    open; it renders outside the focus trap, so the keyboard is still on the page behind
+    it; and it can only show a string, which is why three different deletions on the
+    memory page all read as the same prompt. `ConfirmDialog` already covers every case
+    this application has.
+
+    Line-level and comment-aware: a mention inside a comment explains the rule, so it is
+    not a violation. An inline trailing comment would slip through, which is acceptable
+    for a rule whose real job is to catch a call statement.
+    """
+    problems: list[str] = []
+    for path in sorted(VIEWS.rglob("*")):
+        if path.suffix not in {".vue", ".ts"}:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "window.confirm" not in line:
+                continue
+            if line.strip().startswith(("//", "*", "/*", "<!--")):
+                continue
+            # `is_relative_to`: the rule is exercised against a tmp_path in tests, which
+            # is not under ROOT and would make a bare `relative_to` raise.
+            relative = (
+                path.relative_to(ROOT).as_posix()
+                if path.is_relative_to(ROOT)
+                else path.as_posix()
+            )
+            problems.append(
+                f"{relative}:{number} 用了 window.confirm，改为 ConfirmDialog"
+            )
+    return problems
+
+
 def main() -> int:
     # A Windows console is cp1252 and raises on the first Chinese character. Every
     # check_*.py here reconfigures instead of ASCII-ifying the report; this one forgot,
@@ -132,6 +167,7 @@ def main() -> int:
     problems: list[str] = []
     for path in files:
         problems += check_file(path)
+    problems += check_native_confirm()
 
     print(f"检查 {len(files)} 个组件")
     if problems:

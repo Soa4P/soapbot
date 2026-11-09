@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import { ApiError, api } from '@/api/client'
 import CommunityPlugins from '@/components/CommunityPlugins.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { t } from '@/i18n'
 import { useAsync } from '@/lib/useAsync'
 
@@ -12,6 +13,53 @@ const actionError = ref('')
 const busy = ref('')
 const approving = ref('')
 const selected = ref<string[]>([])
+
+/**
+ * The action awaiting confirmation, and which plugin it applies to.
+ *
+ * Both actions are destructive in different ways — revoke keeps the running instance and
+ * changes what happens on the next start; delete removes the directory. `window.confirm`
+ * could not express that difference, and it renders outside the focus trap.
+ */
+type PendingAction =
+  | { kind: 'revoke'; plugin: any }
+  | { kind: 'delete'; plugin: any }
+
+const pendingAction = ref<PendingAction | null>(null)
+
+const actionDialog = computed(() => {
+  const target = pendingAction.value
+  if (!target) return { open: false, title: '', detail: '' }
+  if (target.kind === 'revoke') {
+    // Whether the plugin is running right now changes what revoking means, so the note
+    // is chosen at open time rather than baked into one generic sentence.
+    const note = target.plugin.loaded
+      ? t('plugins.revokeNoteRunning')
+      : t('plugins.revokeNoteStopped')
+    return {
+      open: true,
+      title: t('plugins.revokeTitle'),
+      detail: `${t('plugins.revokeConfirm', { name: target.plugin.name })} ${note}`,
+    }
+  }
+  return {
+    open: true,
+    title: t('plugins.deleteTitle'),
+    detail: t('plugins.deleteConfirm', { name: target.plugin.name }),
+  }
+})
+
+function askAction(target: PendingAction): void {
+  pendingAction.value = target
+}
+
+async function confirmAction(): Promise<void> {
+  const target = pendingAction.value
+  if (!target) return
+  if (target.kind === 'revoke') await revokePlugin(target.plugin)
+  else await deletePlugin(target.plugin)
+  pendingAction.value = null
+}
 
 /**
  * Three tabs rather than one list, because the three groups carry different promises.
@@ -110,9 +158,7 @@ async function confirmApprove(name: string): Promise<void> {
  * keeps running now and simply will not start again. A silent button would let an
  * operator believe they had stopped something they had not, and vice versa.
  */
-async function revoke(plugin: any): Promise<void> {
-  const note = plugin.loaded ? t('plugins.revokeNoteRunning') : t('plugins.revokeNoteStopped')
-  if (!window.confirm(`${t('plugins.revokeConfirm', { name: plugin.name })}\n${note}`)) return
+async function revokePlugin(plugin: any): Promise<void> {
   actionError.value = ''
   busy.value = `revoke:${plugin.name}`
   try {
@@ -126,8 +172,7 @@ async function revoke(plugin: any): Promise<void> {
 }
 
 /** Permanently remove a plugin's files. Loaded plugins are unloaded server-side first. */
-async function remove(plugin: any): Promise<void> {
-  if (!window.confirm(t('plugins.deleteConfirm', { name: plugin.name }))) return
+async function deletePlugin(plugin: any): Promise<void> {
   actionError.value = ''
   busy.value = `delete:${plugin.name}`
   try {
@@ -287,7 +332,7 @@ async function remove(plugin: any): Promise<void> {
                     class="btn ghost"
                     :disabled="busy !== ''"
                     :title="t('plugins.revokeTitle')"
-                    @click="revoke(plugin)"
+                    @click="askAction({ kind: 'revoke', plugin })"
                   >
                     {{ t('plugins.revoke') }}
                   </button>
@@ -295,7 +340,7 @@ async function remove(plugin: any): Promise<void> {
                     class="btn ghost"
                     :disabled="busy !== ''"
                     :title="t('plugins.deleteTitle')"
-                    @click="remove(plugin)"
+                    @click="askAction({ kind: 'delete', plugin })"
                   >
                     {{ t('common.delete') }}
                   </button>
@@ -398,4 +443,15 @@ async function remove(plugin: any): Promise<void> {
   </section>
 
   <div v-if="listing.error.value" class="error-banner">{{ listing.error.value }}</div>
+
+  <ConfirmDialog
+    :open="actionDialog.open"
+    :title="actionDialog.title"
+    :detail="actionDialog.detail"
+    tone="danger"
+    :irreversible="pendingAction?.kind === 'delete'"
+    :busy="busy !== ''"
+    @confirm="confirmAction"
+    @cancel="pendingAction = null"
+  />
 </template>
