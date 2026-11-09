@@ -298,6 +298,66 @@ README 按四块重写（定位 / 启动 / 边界 / 门禁），安装细节迁�
   键值表（配置文件、累计计数、策略）的首列改为 `<th scope="row">`，
   加 caption 解决不了这类表的实际问题——读屏无法判断哪个值属于哪个标签。
 
+### 上下文连续性：滚动摘要不再每轮丢失
+
+原来错在哪：`ContextCompressor.compress()` 早就接受 `prior_summary` 并返回更新后的
+`summary`，`MemoryStore` 也有 `latest_summary` / `save_summary`，`MemoryStage` 会注入
+「【会话摘要】」——但 `AIEngine._prepare` 既不传也不存，装配处也没接线。结果是 L1 摘要
+表恒空、每轮从零重压缩、折叠掉的历史只活一个请求。
+
+现在 `AIEngine` 注入 `summary_loader` / `summary_saver` 两个 callable：压缩前读，
+在**模型调用之前**写（折叠已经把这些轮次从请求里移走，摘要是唯一副本）。读写失败只记
+日志、绝不抛——摘要是上下文的改进，不是回答的前置条件。
+
+### 特权操作的安全边界
+
+原来错在哪：出站 URL 只做 deny-list（拦私网），任何公网主机都放行；记忆检索只按
+`scope` 过滤，把过滤器当成了授权边界；`revoke-all` 撤销全部后立刻重签一枚 72h 完整
+会话，使撤销只停留在审计日志里；工具参数从模型 JSON 直接进注册表，没有来源标记；
+插件加载只有字节摘要，没有能带走的执行凭据；MCP 只协商线协议，不记录第三方实现的
+版本。
+
+现在六道确定性边界，每道都配了改错复验（去掉规则则测试必须失败）：
+
+| 能力 | 落点 | 拒绝时的行为 |
+|---|---|---|
+| 出站目标预允许列表 | `plugins/sandbox.py` | 未列入的主机在 deny-list 之前被拒；空列表 fail-closed |
+| 记忆 handoff 反单调准入 | `memory/handoff.py` | 受众被放宽、数据-only 来源、低置信度记录不进 prompt；残余不安全率是实测值 |
+| 撤销达到闭合终态 | `api/auth.py`、`security/tokens.py` | 不签发会话；轮换一次性引导凭据并验证终态，任一不成立返回 500 |
+| 参数级信息流溯源 | `security/provenance.py` | 来源标记放在 dict 属性上，模型 JSON 无法伪造；资源参数须过宿主注入的校验 |
+| 可移植运行时证明 | `plugins/attestation.py` | 工件哈希 + 策略指纹 + 执行证据；签名边界如实标为空，未声称已签名 |
+| MCP 实现版本 pin | `mcp/client.py`、`mcp/config.py` | 版本不匹配拒绝并清理子进程；不 pin 也记录身份与协议版本 |
+
+### Windows 双端与桌面端
+
+原来错在哪：三条 Windows 入口注册三个不同的计划任务名（`SoapbotBot` /
+`SoapbotPanel` / `soapbot-panel`），触发器和令牌策略还相反；桌面端只是一个连接 6185 的
+Tauri 托盘壳，不携带后端、不产安装包，CI 在 Ubuntu 上只做 `cargo check`。
+
+现在：
+
+- 两条安装路径注册**同一个** `SoapbotBot`（SYSTEM、开机启动），令牌只给
+  `data\init_token.txt` 的路径；`start-panel.bat` 作为前台本地路径显式豁免并写进测试。
+- 后端可冻结成 46.3 MiB onefile（`desktop/sidecar/build.py`），壳先探测 6185、端口空才
+  spawn、退出用 `taskkill /T` 杀整棵进程树（`desktop/src-tauri/src/main.rs`）。
+- NSIS 安装包本地实测 47.48 MiB，`installer.nsi` 把后端写进 `$INSTDIR\binaries\`。
+- CI 新增按需的 `desktop-bundle`（Windows runner），首次真实运行 9m2s、产物 46.9 MiB。
+- **签名未做**：`docs/desktop-signing.md` 写明未签名的具体代价（SmartScreen 两次点击、
+  杀软误报、企业 AppLocker 可能直拦）与两条开源通道，没有写成「已支持」。
+
+### 发布与协作流程
+
+原来错在哪：`master` 有分支保护，但仓库里没有任何地方写这件事，一次直推绕过了它
+（GitHub 回 «Bypassed rule violations»）；Releases 页是空的，唯一产物是 7 天过期的
+artifact；AI 助手拿不到仓库的硬性规则。
+
+现在 `CONTRIBUTING.md` 写出五步流程与五道必需检查——名单读自
+`branches/master/protection`（`backend` 两个平台、`frontend`、`desktop`、`package`），并
+说明单人维护时 `gh pr merge --admin` 只跳过 review，与直推不是一回事。
+`.github/pull_request_template.md` 把接线测试、文档优先、未验证要标注变成 PR 必答项；
+`.github/copilot-instructions.md` 给 AI 助手同一套规则；`ci.yml` 新增 tag 触发的
+`release` job，把 wheel 与安装包挂到 GitHub Release。
+
 ## [0.1.0] - 2026-10-28
 
 首个可 clone、可构建、可部署的版本。
