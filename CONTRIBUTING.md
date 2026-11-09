@@ -48,6 +48,61 @@ make check
 cd webui && npm run typecheck && npm run build
 ```
 
+## 分支与合并：走 PR，不直推 master
+
+`master` 有分支保护：必须通过 pull request，且 5 个必需状态检查全绿才能合并。
+2026-11-09 有一次直推绕过它（GitHub 允许管理员 bypass），事后看，那条保护只是被跳过
+而不是被遵守——「已保护」于是变成一句注释。所以流程写在这里，作为默认而不是建议：
+
+```bash
+git switch -c feat/short-description          # 1. 开分支，不碰 master
+# …改动、make check…
+git push -u origin feat/short-description      # 2. 推分支
+gh pr create --fill --base master              # 3. 开 PR
+gh pr checks --watch                           # 4. 等 5 个检查全绿
+gh pr merge --squash --delete-branch           # 5. 合并并删分支
+```
+
+五道必需检查（读自 `branches/master/protection`，不是凭印象）是
+`backend (ubuntu-latest, 3.12)`、`backend (windows-latest, 3.12)`、`frontend`、
+`desktop`、`package`。`types` 是咨询性类型检查、`desktop-bundle` 按需触发，两者都不在
+必需列表里。
+
+### 单人维护时的 review 要求
+
+保护规则还要求 1 个批准。仓库只有一个人时 GitHub 不允许自己批自己，PR 会停在
+`REVIEW_REQUIRED`，`gh pr merge` 被拒：
+
+```
+X Pull request #N is not mergeable: the base branch policy prohibits the merge.
+```
+
+这时用管理员的 `--admin`：
+
+```bash
+gh pr merge <N> --admin --squash --delete-branch
+```
+
+`--admin` 只跳过 review 这一项：PR 存在、5 个检查全绿、diff 与检查结果都留在 PR 里。
+它和直推 `master` 不是一回事——直推把 PR 和检查一起跳过了。等有第二个维护者时，
+`required_approving_review_count` 保持为 1，`--admin` 就不该再用。
+
+为什么不允许直推：
+
+- bypass 一次之后，规则的存在与不存在没有区别，下一个人也只能靠自觉；
+- PR 把 diff、检查结果和讨论放在同一处，回滚时能找到「为什么」；
+- Windows 的差异只有 CI 的 `windows-latest` 能跑出来，本地绿不等于能合并。
+
+发布走 tag，不手工上传：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`.github/workflows/ci.yml` 的 `release` job 会把 wheel 与未签名安装包挂到 GitHub
+Release 上。
+
 ## 代码约定
 
 ### 注释写「为什么」，不写「是什么」
@@ -112,6 +167,37 @@ Pipeline.observe 的回调签名是 Awaitable[None]，首版传入同步函数�
 await None 抛错被 pipeline 当作 observer 错误吞掉，于是所有耗时静默丢失，
 而端点仍返回 200 与空列表。
 ```
+
+## 依赖更新
+
+四个 ecosystem（pip、`webui/` 的 npm、`desktop/src-tauri` 的 cargo、github-actions）每周
+检查一次，配置在 `.github/dependabot.yml`，每条规则的理由写在文件注释里。
+
+读一个 Dependabot PR 的顺序：
+
+1. **看 group**。`python-minor-and-patch` 与 `panel-minor-and-patch` 把 minor/patch 打成
+   一个 PR，一次 CI 覆盖全部；`cargo` 与 `github-actions` 各自独立。
+2. **major 不会自动来**。`ignore: version-update:semver-major`：major 需要人先读
+   changelog，所以它应该是 issue，不是 bot PR。`github-actions` 例外，它的 major 通常
+   只是运行时升级、输入不变。
+3. **合并看 CI**。`backend` 两个平台 + `frontend` + `types` + `desktop` 全绿。
+   2026-11-08 的 `#18`（16 个包）在 Windows 上红过一次，根因是 `.env` 旁路锁的字节
+   竞态，与依赖无关；修完之后同一组包在两个平台都通过。
+4. **合并后本地跑一次全量**。CI 跑的是同一套，但本地能立刻看到新增的 warning。
+
+想确认「升级后是否兼容」而不动主环境：
+
+```bash
+python -m venv /tmp/pin-check
+/tmp/pin-check/bin/pip install -r requirements.txt
+# 再装测试依赖，版本取自 pyproject.toml 的 dev extra
+/tmp/pin-check/bin/pip install "pytest==9.2.0" "pytest-asyncio==1.4.1.post1" \
+    "pytest-timeout==2.4.0" "respx==0.23.1"
+PYTHONPATH=src /tmp/pin-check/bin/python -m pytest -q
+```
+
+`requirements.txt` 与 `pyproject.toml` 的一致性由 `make check-deps` 保证，两者不一致
+CI 会红。
 
 ## 报告问题
 
