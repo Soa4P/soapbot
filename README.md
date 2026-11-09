@@ -1,5 +1,9 @@
 # soapbot
 
+[![ci](https://github.com/Soa4P/soapbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Soa4P/soapbot/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 QQ 群里的 AI 机器人。Python 3.12 / FastAPI / Vue3。第三方插件跑在独立进程里，
 能力一项一项批准。
 
@@ -122,8 +126,10 @@ ipc-audit、boundary-audit、desktop-check、pytest。只有两项不在其中�
 源码、打印证据行，失败就退出非零。
 
 桌面壳在 [desktop/](desktop/)，构建需要 Rust 与 WebView2，`make desktop` 出安装包。
-它只负责打开面板，不启动后端：进程生命周期归计划任务或 systemd，两个监管者抢
-6185 端口是没人想调的故障。
+它先探测 6185：已经有服务在跑（计划任务或 systemd 托管）就只连接、不插手；端口空且
+找到自带的后端才自己拉起，退出时连同子进程一起关掉。两个监管者抢一个端口是它明确
+避免的事，所以顺序是「先探测、再决定」。安装包未签名，SmartScreen 会提示一次，见
+[桌面端签名](docs/desktop-signing.md)。
 
 ## AI 审查
 
@@ -142,6 +148,22 @@ base commit、只通过 `gh pr diff` 读文本，从不执行 PR 里的代码。
 默认 `deepseek-chat`）。没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成
 审查过、没问题。
 
-部署、备份、巡检、故障排查和升级在 [docs/operations.md](docs/operations.md)。
+## 文档
+
+| 想知道什么 | 看哪里 |
+| --- | --- |
+| 三种装法、Windows 与 Linux 的差别、卸载 | [docs/deploy-quickstart.md](docs/deploy-quickstart.md) |
+| 十家模型厂商怎么填、表里没有的怎么加 | [docs/model-providers.md](docs/model-providers.md) |
+| 桌面端安装包与签名 | [docs/desktop-signing.md](docs/desktop-signing.md) |
+| 12 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
+| 配置项与环境变量 | [docs/configuration.md](docs/configuration.md) |
+| 部署形态、容器加固、远程验收 | [docs/deploy-layer.md](docs/deploy-layer.md) |
+| 备份、巡检、排障、升级 | [docs/operations.md](docs/operations.md) |
+| 架构与阶段顺序 | [docs/architecture.md](docs/architecture.md) |
+| 安全模型与信任边界 | [docs/security-model.md](docs/security-model.md) |
+| 插件沙箱与隔离 | [docs/plugin-isolation.md](docs/plugin-isolation.md) |
+| 记忆分层与压缩 | [docs/memory-layers.md](docs/memory-layers.md) |
+| 每一项能力的验证证据 | [docs/verification-matrix.md](docs/verification-matrix.md) |
+| 参与开发、门禁、PR 流程 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 MIT，见 [LICENSE](LICENSE)。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
