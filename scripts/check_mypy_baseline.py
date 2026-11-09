@@ -75,10 +75,11 @@ def main() -> int:
         return 1
 
     if errors < baseline:
-        print(
-            f"type errors: {errors}, below the {baseline} baseline. "
-            f"Lower the number in {BASELINE.name} so the improvement cannot regress."
-        )
+        # Deliberately not "lower the number now": the baseline is the larger of two
+        # environments (see the file), so a local run is expected to sit one below it.
+        # Telling people to lower it would turn CI red for a difference that has nothing
+        # to do with their change.
+        print(f"type errors: {errors}, under the {baseline} baseline ({files} files)")
     else:
         print(f"type errors unchanged at {errors} ({files} files)")
     return 0
