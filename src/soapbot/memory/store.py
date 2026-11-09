@@ -22,7 +22,6 @@ Neither channel alone is sufficient:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import time
@@ -655,6 +654,21 @@ class MemoryStore:
                 stmt = stmt.where(MemoryRow.layer == str(layer))
             return int((await session.execute(stmt)).scalar_one())
 
+    async def count_by_layer(self) -> dict[str, int]:
+        """Row counts for every layer in one query.
+
+        The panel asks for all layers on one screen. Looping ``count_memories(layer)``
+        there cost four to five round trips, and each one could observe a *different*
+        snapshot — so the total and the sum of its parts could disagree under load.
+        One ``GROUP BY`` answers both questions from a single read.
+        """
+        async with self.db.session_factory()() as session:
+            stmt = select(MemoryRow.layer, func.count(MemoryRow.id)).group_by(
+                MemoryRow.layer
+            )
+            rows = (await session.execute(stmt)).all()
+        return {str(layer): int(count) for layer, count in rows}
+
     async def list_memories(
         self,
         *,
@@ -955,5 +969,4 @@ class KnowledgeBase:
             return len(ids)
 
 
-def content_fingerprint(text_value: str) -> str:
-    return hashlib.sha256(text_value.encode("utf-8")).hexdigest()[:16]
+

@@ -358,6 +358,30 @@ artifact；AI 助手拿不到仓库的硬性规则。
 `.github/copilot-instructions.md` 给 AI 助手同一套规则；`ci.yml` 新增 tag 触发的
 `release` job，把 wheel 与安装包挂到 GitHub Release。
 
+### 类型检查棘轮、查询效率与分包
+
+`mypy` 一直以 `continue-on-error` 运行：79 个错误躺在没人打开的日志里，第 80 个也不会
+被拦——和当初 `pip-audit` 的毛病一样，能失败才算门禁。新增
+`scripts/check_mypy_baseline.py`：基线写在同一目录的 `mypy_baseline.txt`，只允许降不允许
+升，不要求修那 79 个，只拒绝新增。一次约 1.7 秒，已进 `make check` 与 CI 的 `backend`
+job（`tests/test_gate_parity.py` 保证两边一致）。
+
+三处结构问题：
+
+- `memory_stats` 对每个 layer 单独 `COUNT`，一屏 4–5 次往返，且每次可能读到不同快照，
+  于是「总数」和「各部分之和」在负载下能对不上。改为一次 `GROUP BY`
+  （`MemoryStore.count_by_layer`）；`-1` 仍表示「这一屏读不到」，与「零行」区分开。
+- 技能列表的目录遍历和保存时的 `mkdir + write_text` 原来直接在事件循环上跑。改用
+  `asyncio.to_thread`——同文件里 `api/napcat.py` 早就是这个写法，只是没推广。
+- 面板没有 vendor 分包：`vue`/`vue-router`/`pinia` 与视图代码打进同一个入口 chunk。
+  加 `manualChunks` 后实测 `vendor` 104.28 kB、`index` 143.69 kB（gzip 40.60 / 52.69），
+  面板更新时只有视图 chunk 失效。
+
+删掉 3 项未接线代码：`SceneMemory.drop_portrait`、`content_fingerprint`、
+`charts/Sparkline.vue`（134 行，从未被 import）。`check_secret_resolvable` **没有删**：
+它的注释明确写着「Unused, and deliberately kept」，理由是替代做法会在 API 层长出第二套
+密钥解析——注释里写明的取舍不该被当成死代码清理。
+
 ## [0.1.0] - 2026-10-28
 
 首个可 clone、可构建、可部署的版本。

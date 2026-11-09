@@ -23,6 +23,18 @@ export default defineConfig({
     // comment. They cost nothing to omit on a bundle that ships to operators.
     sourcemap: false,
     chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // The views are already lazy chunks (`router/index.ts` imports each by string),
+        // but nothing separated the framework from them, so every view chunk carried
+        // its own copy of the runtime's import graph and a panel release invalidated
+        // the lot. Grouping vue/router/pinia means a release re-downloads only the
+        // views that changed.
+        manualChunks: {
+          vendor: ['vue', 'vue-router', 'pinia'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

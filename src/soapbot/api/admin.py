@@ -48,6 +48,7 @@ not reaching into ``config.api_key`` at all rather than by remembering to mask i
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -652,13 +653,18 @@ async def memory_stats(_: dict = Depends(require_api_auth)) -> dict:
     if runtime.memory is None:
         return {"layers": {}, "total": 0}
 
-    layers: dict[str, int] = {}
-    for layer in MemoryLayer:
-        try:
-            layers[str(layer)] = await runtime.memory.count_memories(layer)
-        except Exception:  # pragma: no cover - a single layer must not fail the page
-            layers[str(layer)] = -1
-    total = await runtime.memory.count_memories()
+    # One `GROUP BY` instead of one `COUNT` per layer. The loop cost four to five round
+    # trips for a single screen, and each one could observe a different snapshot, so the
+    # total and the sum of its parts could disagree under load. `-1` still means "this
+    # screen could not read the counts", not "zero rows" — the panel renders the two
+    # differently, and collapsing them would make a broken read look like an empty layer.
+    try:
+        counts = await runtime.memory.count_by_layer()
+        layers = {str(layer): counts.get(str(layer), 0) for layer in MemoryLayer}
+    except Exception:  # pragma: no cover - a count must not fail the page
+        logger.warning("memory layer counts failed", exc_info=True)
+        layers = {str(layer): -1 for layer in MemoryLayer}
+    total = sum(count for count in layers.values() if count >= 0)
     return {"layers": layers, "total": total}
 
 
@@ -1112,7 +1118,10 @@ async def memory_skills(
     _require_scene_access(auth, request, action="skill_read")
     _checked_scope(scope, request)
     forge = _forge_or_503()
-    skills = forge.load(scope)
+    # `load` walks the directory and reads every `.md` synchronously. Inline, that walk
+    # held the event loop for its whole duration; on a scope with a few hundred skills
+    # every other panel request queued behind it.
+    skills = await asyncio.to_thread(forge.load, scope)
     return {
         "scope": scope,
         "skills": [
@@ -1241,7 +1250,8 @@ async def memory_skill_generate(
         raise HTTPException(status_code=404, detail=t("api.skill_no_evidence", locale))
 
     skill = forge.build(body.scope, match)
-    path = forge.save(skill)
+    # Same reason as the read above: mkdir + write_text on the request's own thread.
+    path = await asyncio.to_thread(forge.save, skill)
     return {
         "ok": True,
         "scope": body.scope,

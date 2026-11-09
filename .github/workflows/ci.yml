@@ -111,6 +111,13 @@ jobs:
       - name: Lint
         run: python -m ruff check src tests
 
+      - name: Type check (ratchet)
+        # `make check` runs the same script, so a contributor sees this before pushing.
+        # The check used to live in `types` as advisory; here it blocks, because "the
+        # count may not grow" is a rule that can actually be enforced — unlike "fix all
+        # 79", which nobody is being asked to do in this change.
+        run: python scripts/check_mypy_baseline.py
+
       - name: Contrast
         # `make check` runs this; CI must run the same set or the two gates disagree
         # and the local one becomes decorative.
@@ -188,11 +195,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Type check (advisory)
-        # Without this the job is red on the 79-error baseline and the word
-        # "advisory" above becomes a lie. The run still prints the count.
-        continue-on-error: true
-        run: python -m mypy src
+      - name: Type check (ratchet)
+        # Same script as the `backend` job, deliberately: this job used to run mypy as
+        # advisory while backend ran nothing, so the only type signal was a number in a
+        # log. Keeping both jobs on the same guard means a red result here points at the
+        # same rule a contributor can run locally.
+        run: python scripts/check_mypy_baseline.py
 
   frontend:
     timeout-minutes: 20
