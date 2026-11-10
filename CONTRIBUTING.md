@@ -59,15 +59,44 @@ cd webui && npm run typecheck && npm run build
 git switch -c feat/short-description          # 1. 开分支，不碰 master
 # …改动、make check…
 git push -u origin feat/short-description      # 2. 推分支
-gh pr create --fill --base master              # 3. 开 PR
-gh pr checks --watch                           # 4. 等 5 个检查全绿
+gh pr create --base master                     # 3. 开 PR（让 gh 载入模板）
+gh pr checks --watch                           # 4. 等必需检查全绿
 gh pr merge --squash --delete-branch           # 5. 合并并删分支
 ```
+
+**不要用 `--fill`**：它用 commit message 填 body，直接覆盖
+`.github/pull_request_template.md`。模板里「影响面」「数字基线」「AI 审查」「回滚」
+这几节是给下一个人看的，`--fill` 会让它们从来不出现——模板改了等于没改。不传 `--body`
+时 `gh` 才会打开编辑器并带上模板。
 
 五道必需检查（读自 `branches/master/protection`，不是凭印象）是
 `backend (ubuntu-latest, 3.12)`、`backend (windows-latest, 3.12)`、`frontend`、
 `desktop`、`package`。`types` 是咨询性类型检查、`desktop-bundle` 按需触发，两者都不在
 必需列表里。
+
+AI 审查的 `review` job 在 `AI_REVIEW_MODE=observe`（默认）下只评论、只打标签，不影响
+合并；切成 `block` 后 verdict 不是 `safe`、或评论是降级结论时它会让 job 失败，从而真正
+阻断合并。那个开关是**仓库变量**，不是代码——改它不需要 PR，也不需要重新跑测试。
+
+它的结论写在 PR 评论里（固定带 verdict 与 risk）：`safe` 之外都要人读一遍。评论说
+「模型返回空内容」时，说明这一轮审查**没有发生**，别把评论的存在当成审查通过。
+
+`review` **当前不在必需检查里**（`branches/master/protection` 只有那 5 个），所以
+`block` 模式下 job 变红也只是红叉，`--admin` 仍能合。要真阻断就把 `review` 加进去：
+
+```bash
+gh api -X PUT repos/:owner/:repo/branches/master/protection/required_status_checks \
+  -F 'strict=true' \
+  -f 'contexts[]=backend (ubuntu-latest, 3.12)' \
+  -f 'contexts[]=backend (windows-latest, 3.12)' \
+  -f 'contexts[]=frontend' -f 'contexts[]=desktop' -f 'contexts[]=package' \
+  -f 'contexts[]=review'
+```
+
+这个 PUT 是**整体替换**：漏掉任何一个已有 context 就等于悄悄取消那项检查，所以先读、
+再写、写完回读。回滚是同一份列表去掉 `review`。另有一条代价要先知道：`pull_request_target`
+工作流一旦 `startup_failure`（0 秒失败、无日志），`review` 这个必需检查就永远不会上报，
+该 PR 会被卡死——先确认工作流在真实 PR 上正常跑过，再把它设成必需。
 
 ### 单人维护时的 review 要求
 

@@ -137,8 +137,8 @@ ipc-audit、boundary-audit、desktop-check、pytest。只有两项不在其中�
 ## AI 审查
 
 PR 会多一条由 `scripts/ai_review.py` 生成的评论，判 `safe` / `needs_review` /
-`malicious` 并给出理由。它**只评论、只打标签，不批准也不合并** —— 合并决定始终由
-上面那组确定性门禁和维护者做出。
+`malicious` 并给出理由。它**不批准也不合并** —— 合并决定始终由上面那组确定性门禁和
+维护者做出。
 
 判断不了的时候它说「判断不了」：模型超时、非 200、返回非法 JSON、或 diff 超过上限
 被截断，一律降级为 `needs_review`。截断过的 diff **不会**被判成 `safe`，因为那等于
@@ -147,9 +147,27 @@ PR 会多一条由 `scripts/ai_review.py` 生成的评论，判 `safe` / `needs_
 工作流用 `pull_request_target`（fork PR 才拿得到 secret），因此把 checkout 钉在
 base commit、只通过 `gh pr diff` 读文本，从不执行 PR 里的代码。
 
+两种模式由仓库变量 `AI_REVIEW_MODE` 控制：
+
+| 值 | 行为 |
+| --- | --- |
+| `observe`（默认） | 只评论、只打标签，job 恒通过；结论是建议 |
+| `block` | verdict 不是 `safe`、或评论是降级结论时让 job 失败；`review` 加入必需检查后即阻断合并 |
+
+`block` 下判定步骤排在评论与标签**之后**：先让人看到原因，再让 job 变红。
+
+预算：单次 8000 tokens。`deepseek-flash` 是 reasoning 模型，`completion_tokens` 含
+隐藏推理；3000 时每次都被推理吃光、`content` 为空，评论固定写「未能完成」而 job 却是
+绿的（PR #24、#25）。因此「`finish_reason=length` 且内容为空」会用 16000 重试一次，
+HTTP 错误、超时、非法 JSON 不重试——那些重试只会重复同一个错误。两次都空时评论写明
+用过的两档预算，方便判断是改模型还是继续加预算。
+
 配置：仓库 secret `DEEPSEEK_API_KEY`（必需）；variable `AI_REVIEW_MODEL`（可选，
-默认 `deepseek-chat`）。没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成
-审查过、没问题。
+默认 `deepseek-chat`，本仓库设为 `deepseek-flash`）、`AI_REVIEW_MODE`（可选，默认
+`observe`）。没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成审查过、没问题。
+
+工作流按设计 checkout `base.sha`，所以**改脚本的那个 PR 跑的还是旧脚本**——修复的
+效果要在合并后的下一个 PR 上才看得到。
 
 ## 文档
 

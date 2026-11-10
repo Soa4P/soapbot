@@ -88,3 +88,34 @@ jobs:
           gh label create "$label" --repo "$GITHUB_REPOSITORY" \
             --color "$color" --description "AI review verdict" --force >/dev/null 2>&1 || true
           gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$label"
+
+      - name: Enforce review mode
+        # Last step on purpose. In `block` mode this fails the job, and a failed step
+        # stops the ones after it — putting it before Comment/Label would leave a red X
+        # with no explanation on the PR, which is worse than the observe-only default.
+        env:
+          MODE: ${{ vars.AI_REVIEW_MODE || 'observe' }}
+          VERDICT: ${{ steps.review.outputs.verdict }}
+          DEGRADED: ${{ steps.review.outputs.degraded }}
+        run: |
+          echo "mode=$MODE verdict=$VERDICT degraded=$DEGRADED"
+          # `case` rather than `if [ "$MODE" != block ]`: an unknown value (a typo like
+          # "Block", a trailing space) would fall into the observe branch and quietly do
+          # nothing — the same class of bug as the variable nobody read.
+          case "$MODE" in
+            observe)
+              echo "observe mode: the verdict is advisory and does not fail the job"
+              exit 0
+              ;;
+            block)
+              ;;
+            *)
+              echo "::error::未知的 AI_REVIEW_MODE=$MODE；只接受 observe 或 block"
+              exit 1
+              ;;
+          esac
+          if [ "$DEGRADED" = "true" ] || [ "$VERDICT" != "safe" ]; then
+            echo "::error::AI review blocks this PR: verdict=$VERDICT degraded=$DEGRADED"
+            exit 1
+          fi
+          echo "block mode: verdict=$VERDICT, nothing to block"
