@@ -100,8 +100,10 @@ gh api repos/:owner/:repo/branches/master/protection/required_status_checks \
   --jq '.contexts'                                     # 3. 回读，必须 6 个
 ```
 
-必须是 `PATCH` 不是 `PUT`：`PUT` 在这个端点上返回 404（`gh api -X PUT` 会先读一次，
-读不到就 404），这也是为什么上一步要单独读。回滚是同一份列表去掉 `review`，用 `PATCH`。
+必须是 `PATCH` 不是 `PUT`：2026-11-10 实测 `gh api -X PUT` 在这个端点上返回 404，
+`PATCH` 成功，**原因未查明**（不写成「因为它会先读一次」——那是推测，不是证据）。
+不管原因是什么，下面的做法都成立：先单独读、再整体写、写完回读。回滚是同一份列表
+去掉 `review`，用 `PATCH`。
 
 一条代价要先知道：`pull_request_target` 工作流一旦 `startup_failure`（0 秒失败、无日志），
 `review` 这个必需检查就永远不会上报，该 PR 会被卡死，只能改工作流或临时调整保护规则来解。
@@ -123,7 +125,7 @@ X Pull request #N is not mergeable: the base branch policy prohibits the merge.
 gh pr merge <N> --admin --squash --delete-branch
 ```
 
-`--admin` 只跳过 review 这一项：PR 存在、5 个检查全绿、diff 与检查结果都留在 PR 里。
+`--admin` 只跳过人工 approve 这一项：PR 存在、6 个必需检查全绿、diff 与检查结果都留在 PR 里。
 它和直推 `master` 不是一回事——直推把 PR 和检查一起跳过了。等有第二个维护者时，
 `required_approving_review_count` 保持为 1，`--admin` 就不该再用。
 
