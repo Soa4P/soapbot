@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T10:06:33+08:00",
+  "updated_at": "2026-11-10T11:11:25+08:00",
   "current": null,
   "phases": [
     {
@@ -2561,6 +2561,86 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph36",
+      "index": "P36",
+      "name": "记忆与 RAG 向量检索批量化",
+      "goal": "在不改变 brute-force 余弦这个既有设计决策的前提下，减少每次 recall 的全表 ORM 物化与逐行 numpy 调用。",
+      "tasks": [
+        {
+          "id": "ph36-t1",
+          "name": "抽出共享批量打分模块",
+          "status": "done",
+          "note": "新增 memory/vectors.py：一次矩阵乘替代 N 次 np.dot，NaN/inf/零范数/维度/blob 长度校验与稳定排序集中到一处。两个调用点原先防护不一致，KnowledgeBase 完全没有有限性检查，一个坏向量就能让 RRF 排名任意化，现在自动获得防护。numpy 只在 rank_by_cosine 内按需导入：顶层导入会让所有 import memory.store 的短命子进程白付加载成本，与 memory.db.vector_to_blob 的既有做法一致。db.py 注释补上批量化说明，brute-force 决策不变。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/vectors.py",
+              "status": "done"
+            },
+            {
+              "path": "src/soapbot/memory/db.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph36-t2",
+          "name": "两个召回通道改为两阶段列裁剪",
+          "status": "done",
+          "note": "MemoryStore._vector_search 与 KnowledgeBase.search 原来 select 整行 ORM 对象（含永远读不到的 content/keywords 文本），逐行算余弦后再取 top-N。现在第一阶段只取 (id, blob, dim)，排序后按 id 回查展示列，两处都只物化获胜的 K 行。RRF 融合、稳定排序与余弦 <= 0 的截断语义保持，top-24 结果与旧实现逐项一致。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/store.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph36-t3",
+          "name": "区分坏向量与不相关行",
+          "status": "done",
+          "note": "原实现把余弦 <= 0 的正常不相关行也算进 dropped 并打 warning；3000 行随机语料一次 recall 能刷 1472 行日志，真正的坏向量反而被淹没。现在 dropped 只计不可评分的行，不相关行单独计 non_positive 且不触发告警，基准里日志噪音归零。",
+          "files": [
+            {
+              "path": "src/soapbot/memory/vectors.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph36-t4",
+          "name": "回归测试、实测与基线同步",
+          "status": "done",
+          "note": "新增 tests/test_vector_ranking.py（10 项）：以改动前的逐行循环为 oracle 比对分数与顺序、并列保持扫描顺序、坏行与不相关行分开计数、非有限 query 与 limit 边界、两处接线静态断言、两阶段查询确实回取完整字段。临时基准（3000 行 / 128 维 / limit=24 / 5 轮，同库同数据）median 39.7ms → 19.6ms（2.03x），top-24 逐项一致。既有向量/记忆/数据库测试 71 项全绿。全量 1892 → 1902 passed / 12 skipped（exit 0）；ruff、mypy 棘轮（77 / 基线 80）、check_doc_links、check_console_encoding、check_deps 全绿。",
+          "files": [
+            {
+              "path": "tests/test_vector_ranking.py",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2656,7 +2736,7 @@
     }
   ],
   "verification": {
-    "pytest": "1892 passed, 12 skipped",
+    "pytest": "1902 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

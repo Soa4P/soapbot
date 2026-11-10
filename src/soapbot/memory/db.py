@@ -7,7 +7,9 @@ Design decisions worth stating:
   extra service.
 * **Vectors as BLOB + numpy cosine.** For a single group bot the corpus is
   thousands of rows, not millions. Brute-force cosine in numpy is faster than
-  the overhead of any vector DB, and it removes a dependency.
+  the overhead of any vector DB, and it removes a dependency. The scan is
+  batched in ``memory/vectors.py``: callers read only ``(id, blob, dim)``, do
+  one matrix multiply, then fetch display columns for the top-N ids.
 * **Append-only message archive.** Conversation history is never mutated; the
   compressed view is derived. That is what makes "回溯" (recall) actually work:
   the original turns are still there even after compression folded them.
