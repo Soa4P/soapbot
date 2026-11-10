@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T20:15:00+08:00",
+  "updated_at": "2026-11-10T21:40:00+08:00",
   "current": null,
   "phases": [
     {
@@ -2765,6 +2765,78 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph39",
+      "index": "P39",
+      "name": "把「修好了」变成有证据的结论：端到端观察、block 实测、review 入必需检查",
+      "goal": "ph38 只能证明测试绿，不能证明审查真的会说人话。这一轮用合并后的第一个 PR 做端到端观察，用一次真实降级验证 block 会让 job 变红且评论仍先发出，最后把 review 纳入必需检查并回读——让「已修复」由运行日志支撑，而不是由断言支撑。",
+      "tasks": [
+        {
+          "id": "ph39-t1",
+          "name": "合并后在真实 PR 上观察 ai-review 输出",
+          "status": "done",
+          "note": "工作流按设计 checkout base.sha，所以改脚本的 PR 跑的还是旧脚本——修复的端到端证据只能来自合并后的下一个 PR。PR #26 合并后开 PR #27，第一次拿到真实结论：评论标题「## ✅ 未发现问题」、风险等级 low、模型 deepseek-flash，正文是「该 PR 只改了文档…无外传或隐蔽行为」，且没有触发 16000 那档重试（说明 8000 已够，之前 3000 是被 reasoning 吃光）。同次 run 42760564100 的 Enforce 输出了 mode=observe verdict=safe degraded=false 并 exit 0 —— 死变量 AI_REVIEW_MODE 第一次被真正读取。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph39-t2",
+          "name": "用真实降级验证 block 会让 job 变红，且评论先于判定发出",
+          "status": "done",
+          "note": "做法：把仓库变量 AI_REVIEW_MODE 设为 block，同时把 AI_REVIEW_MODEL 故意设成不存在的名字触发真实降级，然后对 PR #27 推一个空提交。run 42761052441 的结果：Enforce 打印 mode=block verdict=needs_review degraded=true 与 ::error::AI review blocks this PR 后 exit 1，job 变红；而 PR 上仍然出现了评论（写明 HTTP 400 与被支持的模型名）。这两件事同时成立才说明「判定放在评论之后」的设计生效——否则用户只会看到一个没有原因的红叉。同时旁证 HTTP 错误没有被重试（只发了一次请求）。实验后变量立即复位为 deepseek-flash / observe。",
+          "files": [
+            {
+              "path": ".github/workflows/ai-review.yml",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ai_review_workflow.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph39-t3",
+          "name": "review 纳入必需检查并回读；顺带发现 PUT 与 PATCH 的差别",
+          "status": "done",
+          "note": "先读：branches/master/protection/required_status_checks 有 5 个 context。gh api -X PUT 返回 404（该端点要先读再写，PUT 的隐式读取读不到）；改用 -X PATCH + --input 一份完整 JSON 才成功。回读确认 6 个 context（backend 两个平台、frontend、desktop、package、review）齐全且 strict=true，没有顶掉任何既有检查。CONTRIBUTING.md 里原来写的 PUT 命令按实测改成 PATCH，并补上「先读、再写、回读」三步与「startup_failure 会让必需检查永不上报、PR 卡死」这条代价（2026-11-09 的 run 42654474652 就是实例）。全仓把「五个必需检查」改为六个（CONTRIBUTING、delivery-readiness-v2）。",
+          "files": [
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph39-t4",
+          "name": "把工作流 run: 块真的执行一遍",
+          "status": "done",
+          "note": "原门禁只断言 YAML 文本里有 block 分支，那证明不了退出码对。补 9 条用例：用真实 bash 执行 Enforce 的 run: 块，参数化断言 8 种 mode/verdict/degraded 组合的退出码（observe 恒 0、block 下 needs_review/malicious/degraded 为 1、Block 与空串这类拼写错误也为 1），外加一条断言失败时必然先打印 mode=/verdict=/degraded= 与 ::error::。bash 用 shutil.which 找不到时回落到 Git for Windows 的安装路径，避免在正是要改工作流的开发机上静默 skip。Windows 上需显式 encoding='utf-8'，否则解码异常只变成 warning、断言可能对着乱码通过。test_ai_review_workflow.py 7 → 16 项，全量 1932 → 1941。",
+          "files": [
+            {
+              "path": "tests/test_ai_review_workflow.py",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2860,7 +2932,7 @@
     }
   ],
   "verification": {
-    "pytest": "1932 passed, 12 skipped",
+    "pytest": "1941 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
