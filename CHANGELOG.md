@@ -10,6 +10,34 @@
 
 ## [Unreleased]
 
+### 记忆与 RAG 向量检索批量化
+
+原来错在哪：两个召回通道（`MemoryStore._vector_search` 与 `KnowledgeBase.search`）都把
+所有带向量的行用 `select(MemoryRow)` / `select(KnowledgeRow)` 取成完整 ORM 对象——包括
+永远不会被读到的 `content` / `keywords` 文本——再在 Python 循环里逐行做
+`np.frombuffer` + `np.linalg.norm` + `np.dot`。3000 行就是 3000 次 Python→C 往返，每次
+recall 都要付一遍。更麻烦的是两处防护不一致：`MemoryStore` 查 NaN/inf，
+`KnowledgeBase` 完全没查，一个坏向量就能让 RRF 排名变成任意顺序；而 `MemoryStore` 把
+「余弦 ≤ 0 的正常不相关行」也算进 `dropped` 打 warning，随机语料一次 recall 能刷上千
+行日志，真正的坏向量反而被淹没。
+
+现在：`memory/vectors.py` 把打分收敛成一次矩阵乘，两个调用点改成两阶段查询——先只取
+`(id, blob, dim)`，算出 top-N 后再按 id 回查展示列；NaN/inf/零范数/维度/blob 长度校验
+与稳定排序集中在一处，`KnowledgeBase` 因此自动获得此前缺失的防护。`dropped` 只计坏行，
+不相关的正常行单独计 `non_positive`，不再触发告警。`db.py` 里「brute-force 余弦胜过
+向量库」的设计决策没有变：仍是全量扫描、同样的余弦、同样的 RRF 排名。
+
+实测（临时基准，3000 行 / 128 维 / limit=24 / 5 轮，同库同数据与旧写法对比）：
+median 39.7ms → 19.6ms（约 2x），top-24 结果逐项一致，日志噪音归零。新增
+`tests/test_vector_ranking.py`（10 项）：以旧循环为 oracle 逐项比对分数与顺序、并列保持
+扫描顺序、坏行与不相关行分开计数、非有限 query、limit 边界、两处接线静态断言，以及
+两阶段查询确实回取了完整字段。
+
+一个未归因、但不隐藏的观察：本机本轮三次全量耗时稳定在 680–702s，明显高于上一轮的
+236s。加 `--durations=15` 复核后，最慢 15 项合计约 110s 且均不在检索路径，新增 10 项
+单独 0.51s，去掉顶层 numpy 导入后总耗时也没有变化；判断是宿主层面的整体变慢，未声称
+由本次改动造成，也没有据此放宽任何断言或超时。
+
 ### 类型检查门禁的当前态描述对齐
 
 原来错在哪：`check_mypy_baseline.py` 早已接进 `make check` 和 CI 的 `backend` /
