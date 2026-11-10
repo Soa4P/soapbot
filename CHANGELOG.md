@@ -10,6 +10,30 @@
 
 ## [Unreleased]
 
+### 必需检查的数量只剩一种说法
+
+原来错在哪：`review` 在 2026-11-10 成为第六个必需检查，同一个事实随即在仓库里分裂成三种
+写法——`CONTRIBUTING.md` 开头写「6 个必需状态检查」，同一文件里 `--admin` 那段又写「5 个
+检查全绿」；`.github/copilot-instructions.md` 告诉 AI 助手「等 5 个必需检查」；`CHANGELOG`
+把它描述成「五道必需检查」。第三处是历史条目，写的是当时的事实；前两处描述的是今天，却是
+错的，而它们恰好是人和 AI 助手判断「能不能合」的依据。
+
+现有门禁一条都看不见：`scripts/check_test_gaps.py` 只扫 `README.md` 与 `docs/**` 里的
+`N passed`，`tests/test_doc_test_counts.py` 扫同一批文件里的按文件计数；`CHANGELOG.md` 与
+`.github/*.md` 从来不在扫描范围内——这是既有盲区，不是这一轮新引入的。
+
+现在：三处改成六个并把 `review` 点名（AI 助手的规则里多一句「它变红同样合不了」），
+`CHANGELOG` 的历史段改为不写具体数字、只写「名单读自 `branches/master/protection`，`review`
+在后续一轮加入」。新增 `tests/test_required_checks_doc.py`（6 项）：`REQUIRED_CHECKS` 六项
+是 `gh api` 只读回读的快照，`required_check_doc_problems()` 检查两份当前态文档是否逐项点到、
+数量是否写成 6；反向用例用构造文本证明删掉 `review`、写回「5 个」、或干脆一行都不写数量都会
+失败。`CHANGELOG.md` 有意排除在外——把「当时只有五道」改写成不含数字的措辞以迎合门禁，方向
+是反的，和上一轮给轮次记录加豁免是同一个理由；那条用例同时断言规则确实会拒绝这种历史写法，
+否则「被排除」与「本来就通不过」无法区分。
+
+顺带把 `CONTRIBUTING.md` 里「`PUT` 会先读一次，读不到就 404」降级为「实测返回 404，原因
+未查明」：前半句是推测，不是证据。可复验的部分（`PATCH` 可用、整体替换、写完回读）保留。
+
 ### AI 审查不再「每次都在、每次都说不出话」
 
 原来错在哪：`review` job 一直是绿的，评论却固定是同一段降级文案。PR #24 与 #25 的评论
@@ -39,17 +63,22 @@
 见；模板改了也可能不生效，因为 `CONTRIBUTING.md` 教的是 `gh pr create --fill`，而
 `--fill` 用 commit message 填 body、直接覆盖模板。
 
-现在：`tests/test_ai_review_workflow.py`（7 项）解析 YAML，钉住 checkout 必须是
+现在：`tests/test_ai_review_workflow.py`（16 项）。前 7 项解析 YAML，钉住 checkout 必须是
 `pull_request.base.sha`、持有密钥的 job 里不得出现 `pip install`/`npm install`/`npm ci`、
 `AI_REVIEW_MODE` 被读取且 observe 是默认、`Enforce` 排在 Comment/Label 之后且为最后一步、
-未知模式值（`MODE=Block` 这类拼写）也 fail-closed 而不是静默落进 observe。
+未知模式值（`MODE=Block` 这类拼写）也 fail-closed 而不是静默落进 observe。后 9 项不是
+「再读一遍 YAML」——读 YAML 只能证明文本里有 `block` 这个词，证明不了退出码对。它们用
+真实 bash 执行 `Enforce` 的 `run:` 块本身，参数化断言 8 种 mode/verdict/degraded 组合的
+退出码（observe 恒 0；block 下 needs_review/malicious/degraded 为 1；`Block` 与空串这类
+拼写错误也为 1），外加一条断言失败时必然先打印 `mode=/verdict=/degraded=` 与 `::error::`。
 `tests/test_pr_template.py`（12 项）钉住模板九个小节（改了什么/为什么/影响面/验证/数字
 基线/AI 审查/安全影响/回滚/检查），逐节删除都会失败，并禁止 `--fill` 回归。
 
-一个必须写明的限制：本轮 PR 自己的 `ai-review` 仍会降级。工作流按设计 checkout
-`base.sha`，跑的是 master 上的旧脚本——这正是安全模型要的，也意味着修复的端到端证据
-只能来自合并后的下一个 PR。`docs/verification-matrix.md` 把这条记为**未验证**，而不是
-「已修复」。
+一个曾经成立、现在已被现实推翻的限制：这一轮的 PR 自己的 `ai-review` 跑的是 master 上的
+旧脚本（工作流按设计 checkout `base.sha`，这正是安全模型要的），所以当时把端到端证据记为
+**未验证**。合并后的第一个 PR（#27）推翻了这个结论：它的评论第一次给出真实结论
+（`未发现问题`、risk `low`），8000 那一档就够，没有用到 16000 重试。`checkout base.sha`
+这条约束本身仍然成立——改脚本的 PR 仍然跑旧脚本，只有合并后的下一个 PR 才是验收对象。
 
 ### 数字门禁不再把轮次记录钉到今天
 
@@ -479,9 +508,10 @@ Tauri 托盘壳，不携带后端、不产安装包，CI 在 Ubuntu 上只做 `c
 （GitHub 回 «Bypassed rule violations»）；Releases 页是空的，唯一产物是 7 天过期的
 artifact；AI 助手拿不到仓库的硬性规则。
 
-现在 `CONTRIBUTING.md` 写出五步流程与五道必需检查——名单读自
-`branches/master/protection`（`backend` 两个平台、`frontend`、`desktop`、`package`），并
-说明单人维护时 `gh pr merge --admin` 只跳过 review，与直推不是一回事。
+现在 `CONTRIBUTING.md` 写出五步流程与必需检查名单——名单读自
+`branches/master/protection`（`backend` 两个平台、`frontend`、`desktop`、`package`；
+`review` 在后续一轮加入，当前为六道），并说明单人维护时 `gh pr merge --admin` 只跳过
+人工 approve，与直推不是一回事。
 `.github/pull_request_template.md` 把接线测试、文档优先、未验证要标注变成 PR 必答项；
 `.github/copilot-instructions.md` 给 AI 助手同一套规则；`ci.yml` 新增 tag 触发的
 `release` job，把 wheel 与安装包挂到 GitHub Release。
