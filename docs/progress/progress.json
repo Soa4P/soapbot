@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T21:40:00+08:00",
+  "updated_at": "2026-11-10T14:05:18+08:00",
   "current": null,
   "phases": [
     {
@@ -2837,6 +2837,78 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph40",
+      "index": "P40",
+      "name": "同一件事只留一种说法：必需检查数量收敛 + 文档一致性门禁",
+      "goal": "ph39 把 review 写进分支保护，但仓库里立刻出现互相矛盾的说法：CONTRIBUTING 开头写 6 个、--admin 段写 5 个，copilot-instructions 告诉 AI 助手「等 5 个」，CHANGELOG 写「五道」。既有门禁看不见——check_test_gaps.py 与 test_doc_test_counts.py 只扫 README 与 docs/** 里的 N passed，CHANGELOG 与 .github/*.md 一条都不在范围内。这一轮把副本改成唯一说法，并用 required_check_doc_problems() 把「说错了」变成会失败的门禁。",
+      "tasks": [
+        {
+          "id": "ph40-t1",
+          "name": "把必需检查数量收敛成六个，并把 review 点名",
+          "status": "done",
+          "note": "CONTRIBUTING.md：--admin 段「5 个检查全绿」改为「6 个必需检查全绿」，并把它讲清是「只跳过人工 approve」而不是跳过检查。.github/copilot-instructions.md：「等 5 个必需检查」改为六个并列出名单，补一句「review 是 AI 审查，不是可选建议——它变红同样合不了」。这一行是 AI 助手判断要不要等检查的依据，写错等于让它以为审查可以不等。顺带把 CONTRIBUTING.md 里「PUT 会先读一次，读不到就 404」降级为「实测返回 404，原因未查明」——那是推测不是证据，只保留可复验的事实（PATCH 可用、整体替换、写完回读）。",
+          "files": [
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": ".github/copilot-instructions.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph40-t2",
+          "name": "CHANGELOG 里被现实推翻的两段按实测改写",
+          "status": "done",
+          "note": "①「tests/test_ai_review_workflow.py（7 项）」→16 项，并说明后 9 项不是「再读一遍 YAML」（读 YAML 只证明文本里有 block 这个词，证明不了退出码对），而是用真实 bash 执行 Enforce 的 run: 块、参数化断言 8 种组合的退出码。②「本轮自己的 ai-review 仍会降级、记为未验证」整段被 PR #27 推翻：合并后第一个 PR 的评论第一次给出真实结论（未发现问题 / risk low），8000 那一档就够、没用到 16000。改成「曾经成立、现在已被推翻」，同时保留 checkout base.sha 这条仍然成立的约束。③ 发布与协作流程段的「五道必需检查」去掉具体数字，改为「名单读自 branches/master/protection」，并注明 review 在后续一轮加入、当前为六道。只动 [Unreleased] 段，0.1.0 及更早的历史条目一个字不动。",
+          "files": [
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph40-t3",
+          "name": "新增 tests/test_required_checks_doc.py，并证明规则真的会失败",
+          "status": "done",
+          "note": "形态沿用仓库已有的 template_problems() / workflow_problems()：纯函数 required_check_doc_problems(text) -> list[str]，返回问题清单而不是直接断言，失败消息带文件名。REQUIRED_CHECKS 六项快照自 gh api 只读回读（strict=true，未写入）。6 项用例：① 真实 CONTRIBUTING 与 copilot-instructions 逐项一致；② 构造文本删掉 review 报错——不就地改真实文件，因为 CONTRIBUTING 里还有 required_approving_review_count，删 `review` 会留下子串，测试会在一个不再点名的名单上通过；③ 构造文本写回「5 个」报错；④ 快照本身必须 6 项且无重复、含 review——否则把 review 从常量里删掉后所有文档问题都消失，门禁变成什么都不证明；⑤ 一行都不写数量的文本也报错（删掉整句是过这种门禁最便宜的方式）；⑥ CHANGELOG 被有意排除，且同一用例证明规则确实会拒绝「那一轮只有五道」这种历史写法——否则「被排除」与「本来就通不过」无法区分。CHANGELOG 排除的理由与前一轮 check_test_gaps 的轮次豁免同源：把「当时只有五道」改写成不含数字的措辞以迎合门禁，方向是反的。STATED_COUNT 覆盖 6 个必需 / 六道必需 / 5 个检查 等本仓库真实出现过的写法，实测 CONTRIBUTING 命中 3 处、copilot-instructions 命中 1 处，全部为 6。另做了一次「指回改前版本」的复验：把 `git show HEAD:CONTRIBUTING.md` 与原 `copilot-instructions.md` 喂给同一个函数，前者报「写着 5 个必需检查，实际是 6 个」，后者报缺 `frontend`/`desktop`/`package`/`review` 并报「5 个」——证明这条门禁挡住的正是本轮真实发生的漂移，不是对着已经正确的文件空转。",
+          "files": [
+            {
+              "path": "tests/test_required_checks_doc.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph40-t4",
+          "name": "同步四处基线并复跑门禁",
+          "status": "done",
+          "note": "6 项新用例把全量 1941 推到 1947。verification-matrix.md（头部 + 依赖升级行）、delivery-readiness-v2.md（两处）、architecture.md（目录树）、progress.json 的 verification.pytest 全部同步。依赖升级行原来写死 `1941 passed`，把全量从 1941 推到 1947 后它就成了失真数字——改成「当轮 1941 → 1947 passed / 12 skipped」，按 ROUND_CHANGE 规则被识别为轮次记录（--strict 打印 2 条豁免行，含本行与 ph35 那条）。verification-matrix.md 的能力行补上 test_required_checks_doc.py（6 项）与它挡住的真实漂移（review 加入后回读发现三处旧数量）。结果：1947 passed / 12 skipped、ruff All checks passed、check_test_gaps --strict 严格模式通过、check_doc_links 79 链接 / 33 文件。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2932,7 +3004,7 @@
     }
   ],
   "verification": {
-    "pytest": "1941 passed, 12 skipped",
+    "pytest": "1947 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

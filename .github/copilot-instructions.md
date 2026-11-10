@@ -28,7 +28,9 @@ Python 3.12，依赖全部 pin 到 patch 版本。面板构建产物随仓库提
 
 ## 不要做的事
 
-- **不要直推 `master`。** 分支 + PR，等 5 个必需检查。见 `CONTRIBUTING.md`。
+- **不要直推 `master`。** 分支 + PR，等 6 个必需检查（`backend` 两个平台、`frontend`、
+  `desktop`、`package`、`review`）。其中 `review` 是 AI 审查，不是可选建议——它变红同样
+  合不了。名单以 `CONTRIBUTING.md` 为准。
 - **不要放宽断言来让测试变绿。** 如果测试固化了一个错误行为，改测试并写清为什么
   （例如 `tests/test_install_scripts.py` 曾断言过 `docker compose up -d` 这个坏命令）。
 - **不要在 `detail` 或日志里放凭据。** 审计层会脱敏，但不要依赖它。
