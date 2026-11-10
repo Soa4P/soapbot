@@ -166,6 +166,13 @@ Write-Ok "healthy"
 Write-Host ''
 Write-Host "soapbot is running." -ForegroundColor Green
 Write-Host "  panel : http://127.0.0.1:$Port"
-Write-Host "  token : $dataDir\init_token.txt   (open it on this machine; it is not printed here)"
+Write-Host ''
+Write-Host '  FIRST LOGIN - one-time token (ON THIS SERVER, not on your own PC):' -ForegroundColor Yellow
+Write-Host "    $dataDir\init_token.txt"
+Write-Host '  Open it here, on the server:'
+Write-Host "    notepad `"$dataDir\init_token.txt`""
+Write-Host '  Already logged in? The file is deleted and a restart will NOT create'
+Write-Host '  another one. Recovery: docs\deploy-quickstart.md, section "first login".'
+Write-Host ''
 Write-Host "  restart: schtasks /End /TN $TaskName && schtasks /Run /TN $TaskName"
 Write-Host "  logs  : $Dir\panel.log"

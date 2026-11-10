@@ -122,13 +122,21 @@ if ($Start) {
     }
 }
 
+$tokenPath = Join-Path $Dir 'data\init_token.txt'
 Write-Host ''
 Write-Host '===================================================================='
 Write-Host "  panel  : http://${HostAddress}:$Port"
+Write-Host ''
 # Not printed, for the same reason as scripts/install.ps1: a token echoed into a console
-# transcript outlives the token, and this one is single-use. The path is enough on the
-# machine that just ran the script.
-Write-Host "  token  : $(Join-Path $Dir 'data\init_token.txt')   (open it on this machine; it is not printed here)"
+# transcript outlives the token, and this one is single-use. Say WHERE (on this server,
+# not the operator's laptop) and give a command that can be pasted verbatim.
+Write-Host '  FIRST LOGIN - one-time token (ON THIS SERVER, not on your own PC):' -ForegroundColor Yellow
+Write-Host "    $tokenPath"
+Write-Host '  Open it here, on the server:'
+Write-Host "    notepad `"$tokenPath`""
+Write-Host '  Already logged in? The file is deleted and a restart will NOT create'
+Write-Host '  another one. Recovery: docs\deploy-quickstart.md, section "first login".'
+Write-Host ''
 Write-Host "  data   : $(Join-Path $Dir 'data')"
 Write-Host '  restart: schtasks /End /TN SoapbotBot && schtasks /Run /TN SoapbotBot'
 Write-Host '  next   : install NapCat (napcat.napneko.icu), log the bot QQ in, then'

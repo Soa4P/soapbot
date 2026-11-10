@@ -20,7 +20,8 @@ help:
 	@echo "make test       运行全部后端测试"
 	@echo "make lint       静态检查（ruff）"
 	@echo "make fmt        自动格式化 + 修可修问题"
-	@echo "make typecheck  mypy（当前基线非零，非阻断）"
+	@echo "make typecheck  mypy 原始输出（存量错误非零，仅查看）"
+	@echo "make mypy-baseline 类型错误总数只降不升（阻断，含在 check 内）"
 	@echo "make contrast   WCAG 对比度校验（含在 check 内）"
 	@echo "make a11y       可访问性静态检查（含在 check 内）"
 	@echo "make gaps       测试断层扫描：孤儿模块与过期数字（含在 check 内）"
@@ -63,8 +64,9 @@ fmt:
 typecheck:
 	$(BIN)/python -m mypy src
 
-# Not `typecheck`: that prints 79 errors and always exits non-zero, which is why it was
-# never in `check`. This one fails only when the count grows, so it can block.
+# Not `typecheck`: raw mypy exits non-zero on the existing backlog, so it can never be
+# in `check`. This one fails only when the count grows past the pinned baseline, so it
+# can block without asking anyone to fix the backlog first.
 mypy-baseline:
 	$(BIN)/python scripts/check_mypy_baseline.py
 
