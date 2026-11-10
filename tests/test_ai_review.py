@@ -181,3 +181,91 @@ def test_missing_api_key_reports_rather_than_passing(tmp_path, monkeypatch, caps
 
     assert "DEEPSEEK_API_KEY" in comment.read_text(encoding="utf-8")
     assert "verdict=needs_review" in output.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- retry budget
+
+
+def _empty(module, max_tokens: int):
+    return module.EmptyCompletionError(
+        finish_reason="length",
+        reasoning_tokens=max_tokens,
+        completion_tokens=max_tokens,
+        max_tokens=max_tokens,
+    )
+
+
+def test_an_exhausted_budget_is_retried_once_with_a_bigger_budget() -> None:
+    """The whole point of the fix: one more call, with more room to think."""
+    module = _module()
+    payload = json.dumps({"verdict": "safe", "risk": "low", "summary": "ok", "concerns": []})
+    with mock.patch.object(
+        module, "call_model", side_effect=[_empty(module, module.MAX_TOKENS), payload]
+    ) as call:
+        result = module.review("diff", _meta(), api_key="k", model="m", base_url="u")
+
+    assert result["verdict"] == "safe"
+    assert result["degraded"] is False
+    assert call.call_count == 2, "只允许重试一次"
+    budgets = [item.kwargs["max_tokens"] for item in call.call_args_list]
+    assert budgets == [module.MAX_TOKENS, module.RETRY_MAX_TOKENS]
+    assert module.RETRY_MAX_TOKENS > module.MAX_TOKENS
+
+
+def test_both_attempts_exhausted_report_which_budgets_were_tried() -> None:
+    """The next person must see the numbers, not 「空内容」 again."""
+    module = _module()
+    with mock.patch.object(
+        module,
+        "call_model",
+        side_effect=[
+            _empty(module, module.MAX_TOKENS),
+            _empty(module, module.RETRY_MAX_TOKENS),
+        ],
+    ):
+        result = module.review("diff", _meta(), api_key="k", model="m", base_url="u")
+
+    assert result["verdict"] == "needs_review"
+    assert result["degraded"] is True
+    assert str(module.MAX_TOKENS) in result["summary"]
+    assert str(module.RETRY_MAX_TOKENS) in result["summary"]
+
+
+def test_an_http_error_is_not_retried() -> None:
+    """Retrying 401 spends another request and returns the same 401."""
+    module = _module()
+    with mock.patch.object(
+        module, "call_model", side_effect=module.ReviewError("模型返回 HTTP 401")
+    ) as call:
+        result = module.review("diff", _meta(), api_key="k", model="m", base_url="u")
+
+    assert result["verdict"] == "needs_review"
+    assert call.call_count == 1
+
+
+def test_empty_content_for_a_non_budget_reason_is_not_retried() -> None:
+    """A content filter is not fixed by a bigger budget."""
+    module = _module()
+    with mock.patch.object(
+        module,
+        "call_model",
+        side_effect=module.ReviewError("模型返回空内容（finish_reason=content_filter）"),
+    ) as call:
+        result = module.review("diff", _meta(), api_key="k", model="m", base_url="u")
+
+    assert result["verdict"] == "needs_review"
+    assert call.call_count == 1
+
+
+def test_a_successful_retry_does_not_bypass_the_truncation_rule() -> None:
+    """Retrying changes the budget, not the rules about what a verdict may claim."""
+    module = _module()
+    module.MAX_DIFF_LINES = 2
+    payload = json.dumps({"verdict": "safe", "risk": "low", "summary": "ok"})
+    with mock.patch.object(
+        module, "call_model", side_effect=[_empty(module, module.MAX_TOKENS), payload]
+    ):
+        result = module.review("a\nb\nc\nd", _meta(), api_key="k", model="m", base_url="u")
+
+    assert result["verdict"] == "needs_review"
+    assert result["truncated"] is True
