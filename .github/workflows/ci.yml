@@ -114,8 +114,8 @@ jobs:
       - name: Type check (ratchet)
         # `make check` runs the same script, so a contributor sees this before pushing.
         # The check used to live in `types` as advisory; here it blocks, because "the
-        # count may not grow" is a rule that can actually be enforced — unlike "fix all
-        # 79", which nobody is being asked to do in this change.
+        # count may not grow" is a rule that can actually be enforced — unlike "fix the
+        # whole backlog", which nobody is being asked to do in this change.
         run: python scripts/check_mypy_baseline.py
 
       - name: Contrast
@@ -143,12 +143,6 @@ jobs:
         # disagrees with the board. Deliberately not coverage — see the script header.
         run: python scripts/check_test_gaps.py --strict
 
-      # mypy is deliberately *not* a gate here. The baseline is 79 errors across 31
-      # files, and none of them are new: making the job fail would mean the first
-      # push to this repository is red, which teaches everyone to ignore the badge.
-      # Silencing them wholesale (ignore_errors per module) would be worse — it
-      # hides the next real error in the same file. The `types` job below reports
-      # the number and keeps it visible without blocking.
       - name: Test
         # No `data/` directory exists in a fresh checkout. That is the point: the
         # suite must pass without it, which is exactly what used to fail.

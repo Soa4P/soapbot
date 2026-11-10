@@ -10,6 +10,45 @@
 
 ## [Unreleased]
 
+### 类型检查门禁的当前态描述对齐
+
+原来错在哪：`check_mypy_baseline.py` 早已接进 `make check` 和 CI 的 `backend` /
+`types` 两个 job，是**阻断**门禁，基线也因本地与 CI 差一个错误而从 79 抬到 80；但
+`deployment.md` 仍写着「`types` job 里只报告不阻断、降到 0 再改阻断」，`CONTRIBUTING.md`
+写「基线 79、尚未作为阻断项」，`operations.md` 的门禁清单整条漏掉它，
+`verification-matrix.md` 的复现命令还是原始 mypy 加旧基线。最矛盾的是 `ci.yml`：同一个
+`backend` job 上面是阻断的 `Type check (ratchet)`，下面的注释却写着
+「mypy is deliberately *not* a gate here ... 79 errors across 31 files」。
+
+现在：这些当前态描述统一改为「棘轮只比较总数、基线取本地与 CI 中较大的 80、两个 job
+都阻断」；Makefile 的 help 区分「查看用的 typecheck」与「进 check 的 mypy-baseline」，
+注释不再写死错误数；CI 里那段自相矛盾的注释删掉。带轮次语境的历史记录（本文件旧条目、
+`progress.json` 的 ph32 note、门禁脚本的 Why-this-exists 段）按既有边界保持原样。
+
+新增 `tests/test_type_gate_docs.py`：把基线值、`make check` 与 CI 两个 job 的接线、以及
+四份当前态文档里的过时短语一起变成可失败门禁，逐条反向复验。
+
+### 首次登录令牌指引：从「给个路径」改成「能照着做」
+
+原来错在哪：文档只写 `data/init_token.txt` 或写死 `C:\soapbot\data\init_token.txt`，
+`deployment.md` 甚至写着「打印取令牌的命令」却根本没给命令；两个服务化脚本收尾只留
+一句英文 `open it on this machine; it is not printed here`，云服务器用户分不清指的是
+哪台机器；`start-panel.bat` 反而把令牌值 `type` 出来，这条差异只用「有意保留」一笔
+带过。最要紧的是全库没有写「兑换后文件即删除、重启不会重新发放」，于是重启后找不到
+文件被当成故障，反复重启也不会变出新令牌。
+
+现在：`docs/deploy-quickstart.md` 的「第一次登录」以 `GET /api/auth/status` 开头，用
+服务自己算出的 `bootstrap_path` 与 `bootstrap_state` 区分 available / redeemed，再给
+`Get-Content`、一次性兑换、以及 `token --reset` 加 `schtasks` 重启的完整可复制命令；
+README / guide / deployment / operations 都指向它，operations 另加「重启后找不到
+`init_token.txt`」排障条目。两个服务化脚本改成明确写出 `ON THIS SERVER` 并给出可直接
+粘贴的 `notepad "<完整路径>"`，同时说明已兑换后重启不会重发；脚本保持纯 ASCII，避免
+Windows PowerShell 5.1 按 ANSI 解析造成中文乱码。`start-panel.bat` 保留打印值，但在
+同一屏解释两条路径为何不同、文件不在时意味着什么。
+
+新增 `tests/test_bootstrap_token_docs.py`：把「指引可操作」变成可失败门禁，逐条删掉
+状态自查、读取命令、恢复命令、脚本提示或文档指针都会红。
+
 ### 安全边界与错误日志治理
 
 运营者提出 18 项风险。逐条核实后：6 项已经解决或不适用（`shell=True`、pickle /

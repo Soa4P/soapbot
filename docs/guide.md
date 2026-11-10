@@ -75,13 +75,19 @@ Windows 仓库里的 `open-remote-panel.bat` 做同一件事。
 ```bash
 curl -X POST http://127.0.0.1:6185/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"init_token": "<data/init_token.txt 里的值>"}' \
+  -d '{"init_token": "把 init_token.txt 里那一串粘到这里"}' \
   -c cookies.txt
 ```
 
-引导令牌存在 `data/init_token.txt`（权限 0600）。没用掉之前重启服务不会改变它；
-用掉之后文件被删除，磁盘上不留凭据。再要一枚，在服务器本机执行
-`python -m soapbot.cli token --reset`，重启后生效。
+**令牌文件在哪、怎么读、重启后找不到怎么办**，见
+[部署 · 第一次登录](deploy-quickstart.md)：那里有 Windows 云服务器上可直接复制的
+PowerShell 命令，以及用 `/api/auth/status` 查真实路径和状态的方法。三条要点：
+
+- 没用过时重启不会换值；登录成功一次后文件**立刻删除**，留下 `init_token.redeemed`，
+  重启**不会**自动重新发放。
+- 文件不存在或登录返回 401 时，在服务器本机执行
+  `python -m soapbot.cli token --reset`，它会打印一枚新令牌，然后**必须重启服务**。
+- 服务化安装只给路径；本机 `start-panel.bat` 会在启动窗口直接显示令牌值。
 
 登录响应里的 `access_token` 是给脚本和 CLI 用的，面板忽略它。登出会撤销 token
 并清除 Cookie；cookie 会话的写操作要带 `X-CSRF-Token`，值取 `soapbot_csrf`。
