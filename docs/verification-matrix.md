@@ -123,3 +123,13 @@ python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --backup  
 # 部署姿态（含本轮新增的上游检查）
 python -m soapbot.cli doctor
 ```
+
+### AI 审查的端到端复验
+
+这条只能在合并后验：工作流 checkout `base.sha`，所以改脚本的那个 PR 跑的还是旧脚本。
+复验步骤是「开下一个 PR → 读它自己的 `ai-review` 评论」：
+
+```bash
+gh pr view <N> --json comments --jq '.comments[-1].body'   # 必须是真实结论，不是「返回空内容」
+gh run view <run-id> --log | Select-String "mode=|verdict="  # Enforce review mode 的实际判定
+```
