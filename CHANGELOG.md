@@ -10,6 +10,52 @@
 
 ## [Unreleased]
 
+### 两条「已经写好」的契约，其实都没生效
+
+原来错在哪：两处都是上一轮自己写的，两处都没测到自己写的那句话。
+
+**一、`review()` 承诺不抛异常，实际会抛。** `_extract_json()` 把 `json.loads` 的结果原样返回，
+于是 `"[]"`、`"[1, 2]"`、`"\"safe\""`、`"null"`、`"42"` 这些**能解析但不是对象**的响应一路走到
+`normalise()`，在 `payload.get(...)` 上抛 `AttributeError`。用改动前的脚本喂这六种载荷，六次全部
+`RAISED AttributeError`；照常调 `main()` 则是 `comment.md` 与 `GITHUB_OUTPUT` 一个都没写出来。
+后果不只是「少一条评论」：`ai-review.yml` 的步骤顺序是 `Ask the model` → `Comment` → `Label` →
+`Enforce`，第一步崩掉后面全跳过，PR 上只剩一个没有解释的红叉；而 `review` 是必需检查，这个红叉
+直接卡住合并。`Enforce` 被刻意放到最后就是为了避免这种情形，结果被一个模型很容易产出的返回形状
+绕过去了。`README.md` 当时写着「返回非法 JSON 一律降级」——`[]` 是合法 JSON，这句话不成立。
+
+**二、文档门禁查的是「这个词在全文出现过」。** 从 `CONTRIBUTING.md` 的真实名单里删掉
+`desktop`／`frontend`／`package`／`review` 四项，门禁仍然报 `NO PROBLEM`：`review` 在同一文件
+出现六次，`desktop` 在 225 行还有一次。只有 `package` 被抓到，因为它全文只出现一次。也就是说
+上一轮「门禁能挡住漂移」只对「整行删掉」成立，对「清单里少一项」不成立——而后者才是真实事故的
+形状。同一文件 225 行还躺着第三份更旧的名单：「`backend` 两个平台 + `frontend` + `types` +
+`desktop` 全绿」，既把咨询性的 `types` 当成合并条件，又漏掉 `package` 与 `review`；它不含数量词，
+旧规则根本看不到它（`[]`）。
+
+现在：
+
+- `_extract_json()` 解析成功后校验必须是对象，失败抛 `ReviewError`，消息区分「不是 JSON」与
+  「是 JSON 但不是对象」——两者修法不同，前者是加 token 预算，后者是让 prompt 说清返回对象。
+  `normalise()` 同样加了守卫，供直接调用方使用。任意形状的响应现在都是 `needs_review`，
+  `comment.md` 与 `GITHUB_OUTPUT` 照常写出。
+- `concerns` 不再是「可迭代就当列表」：`for item in "no concerns found"` 会迭代字符，产出 17 条
+  单字符关注点，渲染成一串噪音。抽出的 `_normalise_concerns()` 把字符串当成一条保留（那是人写的
+  抱怨，只是不合 schema），dict 当一条，上限仍是 20。
+- `main()` 在 `review()` 外面留了最后一道网：意外异常也降级成 `needs_review`，并把异常类型写进
+  评论。理由和上面一样——这个步骤红掉等于 PR 上只有一个不说话的红叉；写下 `KeyError` 至少让日志
+  指得回真正的 bug。
+- 门禁改成三条段落级规则：①必须有某一段同时写下数量和完整名单，失败时点名缺哪一项；②每处写下的
+  数量都必须是 6；③含「全绿」的句子若点名了 job，就必须正好是那五个 job 名，多一个 `types` 也报。
+  `CONTRIBUTING.md` 225 行据此改写：点名六个必需检查，`types` 单独一句「红了也要修，但咨询性、
+  不拦合并」。
+- 用例：`tests/test_ai_review.py` 19 → 24 项，`tests/test_required_checks_doc.py` 6 → 9 项。
+  两处都补的是「改坏必须红」的用例——`git show HEAD:` 喂同样输入可复现旧行为（6 种载荷全抛、
+  6 个删除项漏 4 项、225 行原句返回 `[]`），这是新用例有效的证据，而不再是「跑过了」。
+
+实现被两件事打回，值得记下来：门禁的句子切分原本把换行也当边界，而 225 行恰好在 `desktop` 后
+换行，含「全绿」的半句只剩三个名字，误报「漏了 `package`、`review`」；改成先把续行拼回逻辑行
+再按句号切。token 原本直接与 job 短名比较，写完整 context 的文档（`` `backend (ubuntu-latest, 3.12)` ``）
+匹配不上；改成取 `(` 之前的部分归一。两处都是「规则写对了但切分错了」，靠真实文档才暴露。
+
 ### 必需检查的数量只剩一种说法
 
 原来错在哪：`review` 在 2026-11-10 成为第六个必需检查，同一个事实随即在仓库里分裂成三种
@@ -24,7 +70,8 @@
 
 现在：三处改成六个并把 `review` 点名（AI 助手的规则里多一句「它变红同样合不了」），
 `CHANGELOG` 的历史段改为不写具体数字、只写「名单读自 `branches/master/protection`，`review`
-在后续一轮加入」。新增 `tests/test_required_checks_doc.py`（6 项）：`REQUIRED_CHECKS` 六项
+在后续一轮加入」。新增 `tests/test_required_checks_doc.py`（6 项，下一轮补到 9 项——那一轮发现
+这 6 项只查「词是否出现在全文」，见本节上方）：`REQUIRED_CHECKS` 六项
 是 `gh api` 只读回读的快照，`required_check_doc_problems()` 检查两份当前态文档是否逐项点到、
 数量是否写成 6；反向用例用构造文本证明删掉 `review`、写回「5 个」、或干脆一行都不写数量都会
 失败。`CHANGELOG.md` 有意排除在外——把「当时只有五道」改写成不含数字的措辞以迎合门禁，方向
