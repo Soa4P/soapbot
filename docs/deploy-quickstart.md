@@ -77,13 +77,82 @@ Docker Hub 超时），与 Windows 无关。
 
 ## 装完之后
 
-打开 `http://127.0.0.1:6185`。第一次登录要一枚一次性令牌：
+打开 `http://127.0.0.1:6185`。第一次登录要一枚**一次性令牌**。
 
-- Windows：`C:\soapbot\data\init_token.txt`
-- Linux：`/opt/soapbot/data/init_token.txt`
-- Docker：`docker compose -f deploy/docker-compose.yml exec soapbot cat /data/init_token.txt`
+### 第一次登录：令牌在哪、找不到怎么办
 
-脚本不会把令牌打进终端——它会留在终端记录里，而令牌是一次性的。
+**先别急着翻文件。** 先问服务自己：令牌现在是什么状态、文件到底在哪。在**服务器本机**
+打开 PowerShell：
+
+```powershell
+curl.exe -s http://127.0.0.1:6185/api/auth/status
+```
+
+看返回里的两个字段：
+
+| 字段 | 值 | 含义 | 下一步 |
+| --- | --- | --- | --- |
+| `bootstrap_state` | `available` | 还没用过，文件在磁盘上 | 照 `bootstrap_path` 读值 |
+| `bootstrap_state` | `redeemed` | 已经登录过，文件当时就删了 | 看下面「重新获取一枚」 |
+| `bootstrap_state` | `uninitialised` | 认证模块没初始化 | 先看 `/api/health` 和 `panel.log` |
+| `bootstrap_path` | 如 `C:\soapbot\data\init_token.txt` | 服务**实际**在用的完整路径 | 直接复制这个路径 |
+
+`bootstrap_path` 是服务按自己的数据目录算出来的，不用猜装在哪：装的时候用了
+`-Dir D:\soapbot`，或改过 `SOAPBOT_DATA_DIR`，下面写死的 `C:\soapbot` 就不再适用，
+一律以它为准。
+
+**读令牌**（RDP 或远程 PowerShell，在服务器上执行，**不是在你自己的电脑上**）：
+
+```powershell
+Get-Content C:\soapbot\data\init_token.txt
+```
+
+把输出的那一串字符复制进面板登录框。登录成功一次后，这个文件**立刻被删除**，同目录
+留下 `init_token.redeemed` 作为「已经用过」的标记，磁盘上不再留凭据。
+
+> 本机双击 `start-panel.bat` 时，启动窗口会直接把令牌显示出来；那是前台本机路径，
+> 没有别的地方可读。服务化安装（`install.ps1` / `windows-bootstrap.ps1 -Start`）只给
+> 路径、不把值打进终端，因为终端记录比令牌活得久。两条路径行为不同是有意的，不是
+> 有一边坏了。
+
+**重启会不会把令牌弄丢？不会。**
+
+- 还没用过：文件留在磁盘上，重启后还是同一个值。
+- 已经用过：文件本来就不在了，重启**不会**自动再发一枚，也不会重新开放登录。
+
+所以「重启之后找不到 `init_token.txt`」不是故障，通常说明它早就被兑换掉了；反复重启
+不会变出新令牌。
+
+**重新获取一枚**（文件不存在 / 登录返回 401 / `bootstrap_state` 是 `redeemed`）：
+
+在服务器本机进入安装目录，执行：
+
+```powershell
+cd C:\soapbot
+.\.venv\Scripts\python.exe -m soapbot.cli token --reset
+```
+
+这条命令会**直接打印一枚新令牌**，立刻复制；它同时重建 `data\init_token.txt` 并清掉
+`data\init_token.redeemed`。正在运行的服务还拿着旧的内存状态，**必须重启**才会接受
+新令牌：
+
+```powershell
+schtasks /End /TN SoapbotBot
+schtasks /Run /TN SoapbotBot
+```
+
+重启后回到上面「读令牌」那一步，`Get-Content` 应能读到刚才那枚新值。用 `-Dir` 装到
+别处时，把两条命令里的 `C:\soapbot` 换成实际目录。
+
+另外两种装法：
+
+- Linux：`cat /opt/soapbot/data/init_token.txt`；重发一枚用
+  `cd /opt/soapbot && .venv/bin/python -m soapbot.cli token --reset`，再
+  `sudo systemctl restart soapbot`。
+- Docker：`docker compose -f deploy/docker-compose.yml exec soapbot cat /data/init_token.txt`。
+
+如果自己在 `.env` 里设了 `SOAPBOT_INIT_TOKEN`，服务不会写文件，用你设的那个值登录，
+上面「读令牌」一步不适用。
 
 ### 验证装好了
 
@@ -148,10 +217,11 @@ CI 里有一个 `desktop-bundle` job（Windows runner）做同样的事，**只�
 [桌面端签名](desktop-signing.md)。
 
 两条 Windows 路径（`install.ps1` 与 `windows-bootstrap.ps1 -Start`）现在注册**同一个**
-计划任务 `SoapbotBot`（SYSTEM、开机启动），触发器与设置也一致；令牌策略统一为只给
-`data\init_token.txt` 的路径，不把一次性令牌打进终端。`start-panel.bat` 是前台本地路径，
-会把令牌 `type` 出来——它没有服务化，也没有别的地方能拿到，这条差异是有意保留的。
-卸载或重启前不必再猜任务名，命令见本文末尾「卸载」。
+计划任务 `SoapbotBot`（SYSTEM、开机启动），触发器与设置也一致。服务化安装结束时只给出
+令牌文件的完整路径和打开它的命令，不把值打进终端；本机前台的 `start-panel.bat` 会直接
+显示令牌值，因为它没有别的地方可读。「怎么读、重启后找不到怎么办」见本文开头的
+「第一次登录：令牌在哪、找不到怎么办」一节。卸载或重启前不必再猜任务名，命令见
+本文末尾「卸载」。
 
 ## 出问题
 

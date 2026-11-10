@@ -27,10 +27,13 @@ make doctor         # 部署姿态检查
 `check_secrets.py --committed`（要读待审提交的 git 历史）与 `pip-audit`（要联网）。
 `tests/test_gate_parity.py` 断言这个差集，两边漂移就会红。
 
-> **类型检查现状**：`mypy src` 目前报告 79 个错误，分布在 31 个文件，全部是既有问题。
-> 因此 CI 把它放在独立的 `types` job 里（`continue-on-error`），只报告不阻断。
-> 让它阻断会让首次推送就是红的，而让人们习惯红色徽章；按模块 `ignore_errors` 则会
-> 把该文件里的下一个真实错误一并藏掉。降到 0 之后应当改为阻断。
+> **类型检查现状**：存量错误用棘轮（ratchet）管住，不要求一次修完。
+> `scripts/check_mypy_baseline.py` 只比较错误总数，超过 `scripts/mypy_baseline.txt`
+> 里的基线就失败；基线按「本地与 CI 里较大的那个」取 80（本地冷启动实测 79 个错误 /
+> 31 个文件，CI 80 / 32，差异未定位）。它同时是 `make check` 的一个 target 与 CI
+> `backend` / `types` 两个 job 里的**阻断**步骤；`types` 早已不是只报告的 advisory job。
+> 按模块 `ignore_errors` 没有被采用：那会把同一文件里的下一个真实错误一并藏掉。
+> 要把基线调低，必须真的修掉一批错误，并在本地与 CI 两个环境都复核。
 
 不用 `make` 也可以，见[快速开始](#快速开始)。
 
@@ -45,7 +48,9 @@ python scripts/bootstrap.py --dir D:\soapbot --port 6185
 
 六个步骤两端一致：创建 venv → `pip install -e .` → 确认面板产物存在（缺 Node 时会明说）
 → 把数据目录/配置目录写成**绝对路径**写进 `.env` → 交给平台自己的进程管理者 →
-轮询 `/api/health` 到通过 → 打印面板地址、取令牌的命令、下一步去第 07 页。幂等：再跑一次等于升级。
+轮询 `/api/health` 到通过 → 打印面板地址与令牌文件的完整路径、下一步去第 07 页。
+「怎么把这枚令牌读出来、重启后找不到文件怎么办」见
+[部署 · 第一次登录](deploy-quickstart.md)。幂等：再跑一次等于升级。
 
 两端唯一真正不同的地方在最后一步：
 

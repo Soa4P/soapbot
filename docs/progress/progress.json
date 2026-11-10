@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T00:10:24+08:00",
+  "updated_at": "2026-11-10T10:06:33+08:00",
   "current": null,
   "phases": [
     {
@@ -2385,6 +2385,182 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph34",
+      "index": "P34",
+      "name": "首次登录令牌指引与可失败门禁",
+      "goal": "让 Windows 云服务器用户能真正找到并读懂一次性令牌，尤其是重启后文件不见的场景。",
+      "tasks": [
+        {
+          "id": "ph34-t1",
+          "name": "把第一次登录写成可照做的流程",
+          "status": "done",
+          "note": "原来只给 data/init_token.txt 或写死默认安装目录，deployment.md 甚至写着「取令牌的命令」却根本没给命令；用户重启后找不到文件，会以为重启弄丢了令牌，反复重启也不会有新值。现在 deploy-quickstart.md 以 GET /api/auth/status 开头，用服务自己算出的 bootstrap_path / bootstrap_state 区分 available 与 redeemed，再给 Get-Content、一次性兑换、token --reset 加 schtasks 重启的完整可复制命令；明确写出「没用过时重启不换值、用过后文件即删并留 init_token.redeemed、重启不会重新发放」，并覆盖 -Dir、SOAPBOT_DATA_DIR 与 SOAPBOT_INIT_TOKEN 三种路径变化。",
+          "files": [
+            {
+              "path": "docs/deploy-quickstart.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph34-t2",
+          "name": "服务化脚本与前台脚本的收尾提示",
+          "status": "done",
+          "note": "两个服务化脚本原来只留一句英文 open it on this machine; it is not printed here，云服务器用户分不清指哪台机器。现在明确写 ON THIS SERVER、给出可直接粘贴的 notepad 完整路径命令、说明已兑换后重启不会重发，并指向中文文档；start-panel.bat 保留打印令牌值（前台本机路径没有别的地方可读），但在同一屏解释两条路径为何不同、文件不在时意味着什么。脚本保持纯 ASCII：仓库所有 ps1 都无 BOM，Windows PowerShell 5.1 会按 ANSI 解析，写中文反而变乱码。",
+          "files": [
+            {
+              "path": "scripts/install.ps1",
+              "status": "done"
+            },
+            {
+              "path": "deploy/windows-bootstrap.ps1",
+              "status": "done"
+            },
+            {
+              "path": "start-panel.bat",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph34-t3",
+          "name": "四处文档指针与排障条目",
+          "status": "done",
+          "note": "README / guide / deployment 都指向新的「第一次登录」小节，guide 里 curl 示例的占位符改成明确说明并去掉 Windows 上无意义的 0600 表述；operations 新增「重启后找不到 init_token.txt」条目，给出状态自查、bootstrap_path 与重发命令；CHANGELOG 按「原来错在哪、现在边界在哪」补一节。",
+          "files": [
+            {
+              "path": "README.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/guide.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/operations.md",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph34-t4",
+          "name": "指引可操作性变成可失败门禁",
+          "status": "done",
+          "note": "新增 tests/test_bootstrap_token_docs.py（10 项）：主指引必须含状态自查、真实路径、读取命令、重启语义、恢复命令与自定义目录说明；四个文档都要有指针；两个服务化脚本要说清是哪台机器、给出可粘贴命令、不含旧含糊提示且不把令牌值带进终端。8 条参数化反向用例逐条删掉一个要素，门禁必须报出对应问题；另有一条专门拒绝旧提示回归。踩到并修正一个误判：windows-bootstrap.ps1 本来就有 Get-Content $envFile（安装时读 .env），把「读令牌」的判断收窄到同行出现 init_token。全量 1874 → 1884 passed / 12 skipped（234.65s，exit 0）；ruff、check_doc_links（79 链接 / 33 文件）、check_test_gaps --strict、check_console_encoding 全绿。",
+          "files": [
+            {
+              "path": "tests/test_bootstrap_token_docs.py",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph35",
+      "index": "P35",
+      "name": "类型检查门禁的当前态描述对齐",
+      "goal": "让文档与注释描述的类型检查接线、基线与阻断性和代码一致。",
+      "tasks": [
+        {
+          "id": "ph35-t1",
+          "name": "四份当前态文档改写",
+          "status": "done",
+          "note": "check_mypy_baseline.py 早已是 make check 与 CI 的 backend / types 两个 job 的阻断门禁，基线因本地与 CI 差一个错误从 79 抬到 80；但 deployment.md 仍写着 types job 只报告不阻断、降到 0 再改阻断，CONTRIBUTING.md 写「基线 79、尚未作为阻断项」，operations.md 的门禁清单整条漏掉它，verification-matrix.md 的复现命令还是原始 mypy 加旧基线。现在四份统一为「棘轮只比较总数、基线取本地与 CI 中较大的 80、两个 job 都阻断」，各自写出真正执行的脚本名与当前基线。",
+          "files": [
+            {
+              "path": "docs/deployment.md",
+              "status": "done"
+            },
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/operations.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph35-t2",
+          "name": "Makefile 与 CI 注释对齐",
+          "status": "done",
+          "note": "ci.yml 同一个 backend job 上面是阻断的 Type check (ratchet)，下面却留着「mypy is deliberately *not* a gate here ... 79 errors across 31 files」，自相矛盾；Makefile 的 help 只说 typecheck 非阻断、没提 mypy-baseline，注释还写死 79 errors。现在删掉矛盾注释、help 拆成两行区分「查看」与「阻断」、注释改成不写死数字，check 行保留 mypy-baseline。带轮次语境的历史记录（CHANGELOG 旧条目、ph32 note、门禁脚本的 Why-this-exists 段）按既有边界不动；只把其中一句现在时的「fix the 79」改成「fix the backlog」。",
+          "files": [
+            {
+              "path": ".github/workflows/ci.yml",
+              "status": "done"
+            },
+            {
+              "path": "Makefile",
+              "status": "done"
+            },
+            {
+              "path": "scripts/check_mypy_baseline.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph35-t3",
+          "name": "描述与接线变成可失败门禁",
+          "status": "done",
+          "note": "新增 tests/test_type_gate_docs.py（8 项）：基线值直接从 mypy_baseline.txt 读出；四份当前态文档不得残留 continue-on-error / 只报告不阻断 / 尚未作为阻断项 / 基线 79 等过时短语，且必须写出脚本名与当前基线；Makefile 的 check 行必须含 mypy-baseline；ci.yml 必须至少两个 job 跑棘轮脚本且不得出现旧注释。test_gate_parity.py 只比 Makefile 与 CI、看不见文档句子，这条补的正是那个盲区。7 条参数化反向用例逐条改坏一处：基线抬到 81、删掉一个 CI job、把 Makefile 门禁摘掉、文档里删脚本名或注入旧短语与旧 CI 注释，全部触发断言失败。",
+          "files": [
+            {
+              "path": "tests/test_type_gate_docs.py",
+              "status": "done"
+            },
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph35-t4",
+          "name": "全量复验与基线同步",
+          "status": "done",
+          "note": "全量 1884 → 1892 passed / 12 skipped（236.72s，exit 0）；check_mypy_baseline.py 实跑 79, under the 80 baseline (31 files)；ruff、check_doc_links（79 链接 / 33 文件）、check_console_encoding、check_test_gaps --strict、定向 51 项全绿。同步 verification-matrix.md、delivery-readiness-v2.md、architecture.md 与看板 verification.pytest。",
+          "files": [
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2480,7 +2656,7 @@
     }
   ],
   "verification": {
-    "pytest": "1874 passed, 12 skipped",
+    "pytest": "1892 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

@@ -60,10 +60,12 @@
 | MCP 实现版本 pin 与握手清理 | `mcp/client.py`、`mcp/config.py` | `tests/test_mcp_version_pin.py`（10 项：配置读取与裁剪、空 pin、超长报错、纯逻辑校验、匹配时记录身份、不匹配被拒且无残留子进程、缺 serverInfo 被拒、未 pin 仍记录、status 暴露供应链视图、改 pin 触发重连） | 改错复验四处均返回 1：去掉握手清理报出「残留活进程」、去掉 pin 校验报 DID NOT RAISE、去掉签名中的 pin、去掉配置解析；既有 MCP 测试 63 项未受影响 | **自动** |
 | Windows 服务名与令牌策略 | `scripts/install.ps1`、`deploy/windows-bootstrap.ps1`、`desktop/src-tauri/src/main.rs`、`desktop/ui/index.html` | `tests/test_windows_service_contract.py`（7 项：两个安装器注册同名任务、都设开机启动、桌面壳与离线页同名、文档同名且无旧名、服务化脚本不打印令牌、前台脚本是显式豁免、解析器反向用例） | 改错复验四处均返回 1：任务名改回 `SoapbotPanel`、触发器改 `AtLogOn`、把 `cli token` 加回、文档写回 `soapbot-panel` | **自动** |
 | 桌面 sidecar 可构建且自钉目录 | `desktop/sidecar/entry.py`、`desktop/sidecar/build.py`、`desktop/src-tauri/src/main.rs` | `tests/test_sidecar_build.py`（12 项：入口先钉四个目录再 import、双击默认 start、两条 `--add-data`、动态导入覆盖、onefile、缺前端时拒绝构建、缺 bundler 时给出安装提示、产物被忽略、真实壳通过受控 spawn 规则、裸 spawn 被拒、调用点归因到函数、产物 staging 到 Tauri） | 本机 Windows 实际打包 46.3 MiB 并 staging 进 `src-tauri/binaries/`；启动后 `/api/health` 200、`/` 200、数据目录出现 `init_token.txt` 与 `config/`；`cargo check --locked` 与 5 项 `cargo test` 通过；实测踩到 onefile 子进程孤儿、SQLAlchemy dialect、`bundle.resources` 在 `cargo check` 阶段就校验路径三个坑 | **自动 + 实测** |
-| 依赖升级兼容性 | `pyproject.toml`、`requirements.txt` | 隔离 venv 安装远程 pin（pydantic 2.14.3、SQLAlchemy 2.1.8、uvicorn 0.54.0、numpy 2.5.4、pytest 9.2.0 等 16 项）后跑全量 | `1874 passed, 12 skipped`，与旧 pin 的本机结果逐项一致；`pip install --dry-run` 先行确认无版本冲突；主 `.venv` 未改动 | **实测** |
+| 依赖升级兼容性 | `pyproject.toml`、`requirements.txt` | 隔离 venv 安装远程 pin（pydantic 2.14.3、SQLAlchemy 2.1.8、uvicorn 0.54.0、numpy 2.5.4、pytest 9.2.0 等 16 项）后跑全量 | `1892 passed, 12 skipped`，与旧 pin 的本机结果逐项一致；`pip install --dry-run` 先行确认无版本冲突；主 `.venv` 未改动 | **实测** |
 | 管理端查询与线程边界 | `memory/store.py`、`api/admin.py`、`webui/vite.config.ts` | `tests/test_admin_query_efficiency.py`（4 项：一次查询返回分层计数、空库返回空映射、`memory_stats` 不再逐层查询、技能读写走 `to_thread`） | 改错复验三处均返回 1：把 `count_by_layer` 换回 `count_memories`、去掉两处 `to_thread`；面板构建实测 `vendor` 104.28 kB / `index` 143.69 kB | **自动 + 实测** |
-| 类型检查只降不升 | `scripts/check_mypy_baseline.py`、`scripts/mypy_baseline.txt` | `tests/test_gate_parity.py`（7 项，保证 `make check` 与 CI 的 `backend` 跑同一套门禁） | 实跑 `unchanged at 79 (31 files)`；`continue-on-error` 已从 `types` job 移除 | **自动** |
+| 类型检查只降不升 | `scripts/check_mypy_baseline.py`、`scripts/mypy_baseline.txt` | `tests/test_gate_parity.py`（7 项，保证 `make check` 与 CI 的 `backend` 跑同一套门禁） | 本地冷启动实测 79 个错误 / 31 文件、CI 80 / 32，基线取较大的 80；`types` job 已改为同一个阻断脚本，`backend` 也跑它 | **自动** |
 | 破坏性操作统一确认 | `webui/src/views/MemoryView.vue`、`PluginsView.vue`、`scripts/check_a11y.py` | `tests/test_a11y_gates.py`（3 项：真实调用被报、注释不误报、仓库当前干净）+ `npm run typecheck` / `lint` / `check:i18n` / `build` | 5 处 `window.confirm` 全部改为 `ConfirmDialog`（记忆 / 文档 / 技能 / 撤销审批 / 删除插件）；请求中禁用、失败不关闭；构建实测 `vendor` 104.28 kB、`index` 143.67 kB | **自动 + 实测** |
+| 首次登录令牌指引可操作 | `docs/deploy-quickstart.md`、`README.md`、`docs/guide.md`、`docs/deployment.md`、`docs/operations.md`、`scripts/install.ps1`、`deploy/windows-bootstrap.ps1`、`start-panel.bat` | `tests/test_bootstrap_token_docs.py`（10 项：主指引含状态自查、真实路径、读取命令、重启语义、恢复命令与自定义目录说明；四处文档都有指针；两个服务化脚本说清是哪台机器、给出可粘贴命令且不把值带进终端；逐条删掉任一要素都变红；旧含糊提示被拒） | 改错复验 8 处均触发断言失败；`check_doc_links.py` 79 链接 / 33 文件、`check_test_gaps.py --strict`、`check_console_encoding.py` 全绿 | **自动** |
+| 类型检查门禁的当前态描述 | `docs/deployment.md`、`CONTRIBUTING.md`、`docs/verification-matrix.md`、`docs/operations.md`、`Makefile`、`.github/workflows/ci.yml` | `tests/test_type_gate_docs.py`（8 项：基线值取自 `mypy_baseline.txt`、四份文档不得残留过时短语且必须写出脚本名与当前基线、`make check` 含 `mypy-baseline`、CI 两个 job 都跑棘轮脚本；7 条参数化反向用例逐条改坏一处） | 改错复验 7 处均触发断言失败；`check_mypy_baseline.py` 实跑 `79, under the 80 baseline (31 files)`；全量 1884 → 1892 passed / 12 skipped | **自动** |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 
@@ -100,12 +102,12 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：1874 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：1892 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁
 python -m ruff check src tests scripts
-python -m mypy src            # 基线 79，不得增加
+python scripts/check_mypy_baseline.py   # 基线 80，只降不升（阻断）
 cd webui && npm run typecheck && npm run build
 python scripts/check_contrast.py
 python scripts/check_deploy.py

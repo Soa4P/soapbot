@@ -10,7 +10,7 @@ A total is the right granularity. A per-file baseline is more precise and turns 
 refactor that moves a function into a failure, which trains people to raise the number
 instead of reading it. One number answers one question: is the debt growing?
 
-This guard does not ask anyone to fix the 79. Fixing them is a separate, deliberate job
+This guard does not ask anyone to fix the backlog. Fixing it is a separate, deliberate job
 — most are ``Any`` leaking from third-party stubs plus a handful of real signature
 mismatches. It only refuses new ones.
 """
