@@ -10,6 +10,26 @@
 
 ## [Unreleased]
 
+### 数字门禁不再把轮次记录钉到今天
+
+原来错在哪：`check_test_gaps.py` 的 `stale_totals()` 逐行扫 `N passed`，而
+`verification-matrix.md`（被列为 `LIVE_DOCUMENTS`，因为它的头部数字确实是当前态）里同时
+记着每轮的增量，例如「全量 1884 → 1892 passed / 12 skipped」。看板一前进到 1902，这条
+上一轮的记录就变红；上一轮只能把句子改写成不含 `passed` 的措辞来绕过门禁——为了让
+检查通过而去改历史记录，方向是反的。
+
+现在：`ROUND_CHANGE` 只豁免「整数 → 整数 + `passed` / `项通过`」这一种明确的轮次变化
+写法。裸的当前态声明（`1902 passed, 12 skipped`）没有箭头、基准数据
+（`39.7ms → 19.6ms`）两边带单位，都继续被检查；`round_report_lines()` 把每条被豁免的
+行以 `文件:行号` 打印出来，避免规则静默失配。`stale_totals(root)` 支持注入目录，错误
+路径也不再用 `Path.relative_to`（在 `tmp_path` 下会抛异常而不是报问题）。上一轮被迫改掉
+的 ph35 轮次行已恢复成自然写法，成为真实覆盖点。
+
+新增 `tests/test_gate_round_reports.py`（6 项）：历史行豁免生效、当前态总数与跳过数失真
+仍报、裸旧数字与基准箭头不被豁免、真实文档里至少匹配到一条轮次记录。另在真实文件上做
+了端到端改错复验：把 `architecture.md` 的 `1902 项通过` 临时改成 `1901`，`--strict`
+返回 1 并精确指出 `docs/architecture.md:234`，随后字节级还原、diff 为空。
+
 ### 记忆与 RAG 向量检索批量化
 
 原来错在哪：两个召回通道（`MemoryStore._vector_search` 与 `KnowledgeBase.search`）都把
