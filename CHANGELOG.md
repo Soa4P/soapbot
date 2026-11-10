@@ -10,6 +10,47 @@
 
 ## [Unreleased]
 
+### AI 审查不再「每次都在、每次都说不出话」
+
+原来错在哪：`review` job 一直是绿的，评论却固定是同一段降级文案。PR #24 与 #25 的评论
+逐字相同：`finish_reason=length, reasoning_tokens=3000, completion_tokens=3000`。
+`deepseek-flash` 是 reasoning 模型，`completion_tokens` 包含隐藏推理，脚本里硬编码的
+`max_tokens: 3000` 全被推理吃光，`content` 为空；`review()` 按 fail-closed 降级成
+`needs_review`。于是「job 通过」和「审查发生」变成了两件事，而 PR 页面只看得出前者。
+
+现在：单次预算提到 8000；只在「`finish_reason=length` 且内容为空」时用 16000 重试一次。
+这是唯一值得重试的失败——HTTP 401/403/429、超时、响应体不是 JSON、JSON 字段非法，重试
+只会重复同一个错误并多花一分钟。两次都空时评论写明「已用 8000 与 16000 两次预算，均被
+推理耗尽」，附 `reasoning_tokens`，下次是改模型还是继续加预算有数据可依。判断不了一律
+仍是 `needs_review`，重试不会让结论变成 `safe`。
+
+### `AI_REVIEW_MODE` 从死变量变成真开关
+
+原来错在哪：仓库变量 `AI_REVIEW_MODE=observe` 存在，但 `ai-review.yml` 从未引用它。
+一个没人读的开关比没有开关更糟——它让人以为改了就生效。
+
+现在：`observe`（默认）只评论、只打标签，job 恒通过；`block` 在 verdict 非 `safe` 或
+评论是降级结论时让 job 失败。判定步骤 `Enforce review mode` 是**最后一个** step：放在
+评论之前的话，block 模式下 job 一失败就没有评论，PR 上只剩一个没有原因的红叉。
+
+### 工作流与 PR 模板变成可校验项
+
+原来错在哪：2026-11-09 有一次 `startup_failure`（0 秒、无日志），`make check` 完全看不
+见；模板改了也可能不生效，因为 `CONTRIBUTING.md` 教的是 `gh pr create --fill`，而
+`--fill` 用 commit message 填 body、直接覆盖模板。
+
+现在：`tests/test_ai_review_workflow.py`（7 项）解析 YAML，钉住 checkout 必须是
+`pull_request.base.sha`、持有密钥的 job 里不得出现 `pip install`/`npm install`/`npm ci`、
+`AI_REVIEW_MODE` 被读取且 observe 是默认、`Enforce` 排在 Comment/Label 之后且为最后一步、
+未知模式值（`MODE=Block` 这类拼写）也 fail-closed 而不是静默落进 observe。
+`tests/test_pr_template.py`（12 项）钉住模板九个小节（改了什么/为什么/影响面/验证/数字
+基线/AI 审查/安全影响/回滚/检查），逐节删除都会失败，并禁止 `--fill` 回归。
+
+一个必须写明的限制：本轮 PR 自己的 `ai-review` 仍会降级。工作流按设计 checkout
+`base.sha`，跑的是 master 上的旧脚本——这正是安全模型要的，也意味着修复的端到端证据
+只能来自合并后的下一个 PR。`docs/verification-matrix.md` 把这条记为**未验证**，而不是
+「已修复」。
+
 ### 数字门禁不再把轮次记录钉到今天
 
 原来错在哪：`check_test_gaps.py` 的 `stale_totals()` 逐行扫 `N passed`，而
