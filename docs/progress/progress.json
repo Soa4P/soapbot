@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T11:11:25+08:00",
+  "updated_at": "2026-11-10T12:04:49+08:00",
   "current": null,
   "phases": [
     {
@@ -2641,6 +2641,70 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph37",
+      "index": "P37",
+      "name": "数字门禁的轮次记录豁免",
+      "goal": "让 check_test_gaps.py 只校验当前态数字，不再把带轮次语境的历史记录钉到今天的看板值。",
+      "tasks": [
+        {
+          "id": "ph37-t1",
+          "name": "行级豁免与可审查清单",
+          "status": "done",
+          "note": "原来 stale_totals() 逐行扫 N passed，而 verification-matrix.md 既含当前态数字也含每轮增量；看板从 1892 前进到 1902 时，ph35 的「全量 1884 → 1892 passed / 12 skipped」就变红，上一轮只能改措辞绕过。现在 ROUND_CHANGE 只豁免「整数 → 整数 + passed/项通过」这一种明确写法：裸当前态声明没有箭头、基准数据两边带单位，都继续检查。round_report_lines() 以文件:行号打印每条豁免，防止规则静默失配。stale_totals(root) 支持注入目录，错误路径改用相对字符串，避免在 tmp_path 下 Path.relative_to 抛异常而不是报问题。",
+          "files": [
+            {
+              "path": "scripts/check_test_gaps.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph37-t2",
+          "name": "恢复历史行并补回归测试",
+          "status": "done",
+          "note": "把上一轮被迫改写的 ph35 轮次行恢复成自然写法「全量 1884 → 1892 passed / 12 skipped」，作为真实覆盖点；门禁平时打印识别到 1 条豁免行（docs/verification-matrix.md:68）。新增 tests/test_gate_round_reports.py（6 项）：历史行豁免生效、当前态总数与跳过数失真仍报、裸旧数字无箭头不豁免、基准箭头带单位不豁免、真实文档至少匹配一条轮次记录、真实仓库 stale_totals 为空。",
+          "files": [
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_gate_round_reports.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph37-t3",
+          "name": "端到端改错复验与基线同步",
+          "status": "done",
+          "note": "在真实文件上做改错复验：字节级把 architecture.md 的当前态数字 1902 项通过临时改成 1901，check_test_gaps.py --strict 返回 1 并精确指出 docs/architecture.md:234 写着 1901 passed、看板是 1902，同时豁免仍只有 1 条；随后 finally 原样还原，git diff 为空。全量 1902 → 1908 passed / 12 skipped（exit 0，692.47s）；ruff、mypy 棘轮（77 / 基线 80）、check_doc_links、check_console_encoding、check_deps、check_test_gaps --strict 全绿。",
+          "files": [
+            {
+              "path": "CHANGELOG.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2736,7 +2800,7 @@
     }
   ],
   "verification": {
-    "pytest": "1902 passed, 12 skipped",
+    "pytest": "1908 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
