@@ -60,7 +60,7 @@
 | MCP 实现版本 pin 与握手清理 | `mcp/client.py`、`mcp/config.py` | `tests/test_mcp_version_pin.py`（10 项：配置读取与裁剪、空 pin、超长报错、纯逻辑校验、匹配时记录身份、不匹配被拒且无残留子进程、缺 serverInfo 被拒、未 pin 仍记录、status 暴露供应链视图、改 pin 触发重连） | 改错复验四处均返回 1：去掉握手清理报出「残留活进程」、去掉 pin 校验报 DID NOT RAISE、去掉签名中的 pin、去掉配置解析；既有 MCP 测试 63 项未受影响 | **自动** |
 | Windows 服务名与令牌策略 | `scripts/install.ps1`、`deploy/windows-bootstrap.ps1`、`desktop/src-tauri/src/main.rs`、`desktop/ui/index.html` | `tests/test_windows_service_contract.py`（7 项：两个安装器注册同名任务、都设开机启动、桌面壳与离线页同名、文档同名且无旧名、服务化脚本不打印令牌、前台脚本是显式豁免、解析器反向用例） | 改错复验四处均返回 1：任务名改回 `SoapbotPanel`、触发器改 `AtLogOn`、把 `cli token` 加回、文档写回 `soapbot-panel` | **自动** |
 | 桌面 sidecar 可构建且自钉目录 | `desktop/sidecar/entry.py`、`desktop/sidecar/build.py`、`desktop/src-tauri/src/main.rs` | `tests/test_sidecar_build.py`（12 项：入口先钉四个目录再 import、双击默认 start、两条 `--add-data`、动态导入覆盖、onefile、缺前端时拒绝构建、缺 bundler 时给出安装提示、产物被忽略、真实壳通过受控 spawn 规则、裸 spawn 被拒、调用点归因到函数、产物 staging 到 Tauri） | 本机 Windows 实际打包 46.3 MiB 并 staging 进 `src-tauri/binaries/`；启动后 `/api/health` 200、`/` 200、数据目录出现 `init_token.txt` 与 `config/`；`cargo check --locked` 与 5 项 `cargo test` 通过；实测踩到 onefile 子进程孤儿、SQLAlchemy dialect、`bundle.resources` 在 `cargo check` 阶段就校验路径三个坑 | **自动 + 实测** |
-| 依赖升级兼容性 | `pyproject.toml`、`requirements.txt` | 隔离 venv 安装远程 pin（pydantic 2.14.3、SQLAlchemy 2.1.8、uvicorn 0.54.0、numpy 2.5.4、pytest 9.2.0 等 16 项）后跑全量 | `1932 passed, 12 skipped`，与旧 pin 的本机结果逐项一致；`pip install --dry-run` 先行确认无版本冲突；主 `.venv` 未改动 | **实测** |
+| 依赖升级兼容性 | `pyproject.toml`、`requirements.txt` | 隔离 venv 安装远程 pin（pydantic 2.14.3、SQLAlchemy 2.1.8、uvicorn 0.54.0、numpy 2.5.4、pytest 9.2.0 等 16 项）后跑全量 | `1941 passed, 12 skipped`，与旧 pin 的本机结果逐项一致；`pip install --dry-run` 先行确认无版本冲突；主 `.venv` 未改动 | **实测** |
 | 管理端查询与线程边界 | `memory/store.py`、`api/admin.py`、`webui/vite.config.ts` | `tests/test_admin_query_efficiency.py`（4 项：一次查询返回分层计数、空库返回空映射、`memory_stats` 不再逐层查询、技能读写走 `to_thread`） | 改错复验三处均返回 1：把 `count_by_layer` 换回 `count_memories`、去掉两处 `to_thread`；面板构建实测 `vendor` 104.28 kB / `index` 143.69 kB | **自动 + 实测** |
 | 类型检查只降不升 | `scripts/check_mypy_baseline.py`、`scripts/mypy_baseline.txt` | `tests/test_gate_parity.py`（7 项，保证 `make check` 与 CI 的 `backend` 跑同一套门禁） | 本地冷启动实测 79 个错误 / 31 文件、CI 80 / 32，基线取较大的 80；`types` job 已改为同一个阻断脚本，`backend` 也跑它 | **自动** |
 | 破坏性操作统一确认 | `webui/src/views/MemoryView.vue`、`PluginsView.vue`、`scripts/check_a11y.py` | `tests/test_a11y_gates.py`（3 项：真实调用被报、注释不误报、仓库当前干净）+ `npm run typecheck` / `lint` / `check:i18n` / `build` | 5 处 `window.confirm` 全部改为 `ConfirmDialog`（记忆 / 文档 / 技能 / 撤销审批 / 删除插件）；请求中禁用、失败不关闭；构建实测 `vendor` 104.28 kB、`index` 143.67 kB | **自动 + 实测** |
@@ -68,8 +68,8 @@
 | 类型检查门禁的当前态描述 | `docs/deployment.md`、`CONTRIBUTING.md`、`docs/verification-matrix.md`、`docs/operations.md`、`Makefile`、`.github/workflows/ci.yml` | `tests/test_type_gate_docs.py`（8 项：基线值取自 `mypy_baseline.txt`、四份文档不得残留过时短语且必须写出脚本名与当前基线、`make check` 含 `mypy-baseline`、CI 两个 job 都跑棘轮脚本；7 条参数化反向用例逐条改坏一处） | 改错复验 7 处均触发断言失败；`check_mypy_baseline.py` 实跑 `79, under the 80 baseline (31 files)`；全量 1884 → 1892 passed / 12 skipped | **自动** |
 | 向量检索批量化与两阶段取数 | `memory/vectors.py`、`memory/store.py`、`memory/db.py` | `tests/test_vector_ranking.py`（10 项：以改动前逐行循环为 oracle 比对分数与顺序、并列保持扫描顺序、坏行与不相关行分开计数、非有限 query、limit 边界、两处接线静态断言、两阶段查询回取完整字段） | 3000 行 / 128 维 / limit=24 / 5 轮同库基准：median 39.7ms → 19.6ms（2.03x），top-24 逐项一致，日志噪音归零；既有向量/记忆/数据库测试 71 项全绿 | **自动 + 实测** |
 | 数字门禁的轮次记录豁免 | `scripts/check_test_gaps.py`、`docs/verification-matrix.md` | `tests/test_gate_round_reports.py`（6 项：历史增量行豁免、当前态总数与跳过数失真仍报、裸旧数字与基准箭头不豁免、真实文档至少匹配一条轮次记录） | 端到端改错复验：把 `architecture.md` 当前态数字改错一位，`--strict` 返回 1 并指出 `docs/architecture.md:234`，字节级还原后 diff 为空；平时打印 1 条豁免行及行号 | **自动 + 实测** |
-| AI 审查不再空转（预算与重试分类） | `scripts/ai_review.py` | `tests/test_ai_review.py`（19 项，新增 5 项：空内容用更大预算重试一次、两次都空则降级且 summary 写明两档预算、HTTP 401 只调用一次、非预算原因的空内容不重试、重试成功不放宽截断规则） | PR #24、#25 的评论逐字相同（`finish_reason=length, reasoning_tokens=3000, completion_tokens=3000`）证明 `max_tokens=3000` 被推理吃光。**本轮 PR 自身的 `ai-review` 仍会降级**：工作流按设计 checkout `base.sha`，跑的是 master 上的旧脚本；端到端证据只能来自合并后的下一个 PR | **仅自动**（端到端**未验证**：需要合并后在下一个 PR 上观察真实 verdict 与 `reasoning_tokens`） |
-| AI 审查模式开关与工作流 / 模板门禁 | `.github/workflows/ai-review.yml`、`.github/pull_request_template.md`、`CONTRIBUTING.md` | `tests/test_ai_review_workflow.py`（7 项：checkout 钉 `base.sha`、无 `pip`/`npm` 安装、`AI_REVIEW_MODE` 被读取且 observe 为默认、Enforce 在 Comment/Label 之后且为最后一步、含 block 分支、未知模式值 fail-closed）、`tests/test_pr_template.py`（12 项：九节齐全、逐节删除都报错、`--fill` 被禁、block 模式写进协作文档） | `gh api branches/master/protection` 读出现有 5 项必需检查（无 `review`）；`review` 是否纳入必需检查见下方「未验证」 | **仅自动**（分支保护写入**未验证**） |
+| AI 审查不再空转（预算与重试分类） | `scripts/ai_review.py` | `tests/test_ai_review.py`（19 项，新增 5 项：空内容用更大预算重试一次、两次都空则降级且 summary 写明两档预算、HTTP 401 只调用一次、非预算原因的空内容不重试、重试成功不放宽截断规则） | 故障证据：PR #24、#25 的评论逐字相同（`finish_reason=length, reasoning_tokens=3000, completion_tokens=3000`）。修复证据：`max_tokens=8000` 上线后，PR #27 的评论第一次给出真实结论——`## ✅ 未发现问题`、`风险等级：low`、`模型：deepseek-flash`，正文是「该 PR 只改了文档…无外传或隐蔽行为」，且**没有触发 16000 重试**（8000 已够用）；同次运行的 `Enforce review mode` 打印 `mode=observe verdict=safe degraded=false`（run 42760564100） | **自动 + 实测** |
+| AI 审查模式开关与工作流 / 模板门禁 | `.github/workflows/ai-review.yml`、`.github/pull_request_template.md`、`CONTRIBUTING.md` | `tests/test_ai_review_workflow.py`（16 项：checkout 钉 `base.sha`、无 `pip`/`npm` 安装、`AI_REVIEW_MODE` 被读取且 observe 为默认、Enforce 在 Comment/Label 之后且为最后一步、含 block 分支、未知模式值 fail-closed；另有 9 条参数化用例在真实 bash 里执行 `run:` 块，断言 8 种 mode/verdict/degraded 组合的退出码，以及失败时必然先打印 `mode=/verdict=/degraded=` 与 `::error::`）、`tests/test_pr_template.py`（12 项：九节齐全、逐节删除都报错、`--fill` 被禁、block 模式写进协作文档） | 两档真实运行都验过：① `observe`（run 42760564100）打印 `mode=observe verdict=safe degraded=false` 后 exit 0，job 绿；② `block` + 故意把 `AI_REVIEW_MODEL` 设成不存在的名字（run 42761052441）打印 `mode=block verdict=needs_review degraded=true`、`::error::AI review blocks this PR` 后 exit 1，job 红，**而 PR #27 上仍出现了评论**（写明 HTTP 400 与被支持的模型名）——证明「先评论、后判定」的顺序在真实失败下成立。两次实验后变量已复位为 `deepseek-flash` / `observe`。③ 分支保护：`review` 已通过 `PATCH /branches/master/protection/required_status_checks` 写入并回读——6 个 context（原 5 个 + `review`）齐全、`strict=true`，写入前后各读一次，确认没有顶掉任何既有检查 | **自动 + 实测** |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 
@@ -106,7 +106,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：1932 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：1941 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁
@@ -122,4 +122,14 @@ python scripts/deploy_remote.py --host <IP> --port 443 --key <私钥> --backup  
 
 # 部署姿态（含本轮新增的上游检查）
 python -m soapbot.cli doctor
+```
+
+### AI 审查的端到端复验
+
+这条只能在合并后验：工作流 checkout `base.sha`，所以改脚本的那个 PR 跑的还是旧脚本。
+复验步骤是「开下一个 PR → 读它自己的 `ai-review` 评论」：
+
+```bash
+gh pr view <N> --json comments --jq '.comments[-1].body'   # 必须是真实结论，不是「返回空内容」
+gh run view <run-id> --log | Select-String "mode=|verdict="  # Enforce review mode 的实际判定
 ```

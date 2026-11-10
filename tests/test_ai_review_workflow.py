@@ -18,6 +18,9 @@ placed before the comment — which would hide the reason for a red job.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -133,3 +136,84 @@ def test_a_typo_in_the_mode_variable_fails_closed() -> None:
 
     found = workflow_problems(workflow)
     assert any("未知模式" in problem for problem in found), found
+
+
+# ---------------------------------------------------------------- the script itself
+
+BASH = shutil.which("bash") or next(
+    # Git for Windows is not always on PATH — the IDE's shell had it, CI's ubuntu runner
+    # has /bin/bash. Probing the install locations keeps this test real on a dev box
+    # instead of silently skipping exactly where the workflow is being edited.
+    (
+        candidate
+        for candidate in (
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+            "/bin/bash",
+        )
+        if Path(candidate).is_file()
+    ),
+    None,
+)
+
+
+def _run_enforce(mode: str, verdict: str, degraded: str) -> subprocess.CompletedProcess:
+    """Execute the real ``run:`` block, not a paraphrase of it.
+
+    Reading the YAML only proves the text contains "block"; running it proves the shell
+    reaches the right exit code. Those are different failures, and only the second one
+    stops a merge.
+    """
+    enforce = next(
+        step for step in _workflow()["jobs"]["review"]["steps"] if step.get("name") == ENFORCE
+    )
+    env = {**os.environ, "MODE": mode, "VERDICT": verdict, "DEGRADED": degraded}
+    return subprocess.run(
+        [BASH, "-e", "-c", str(enforce["run"])],
+        capture_output=True,
+        text=True,
+        # The step's output is UTF-8 (it is bash on a Linux runner); decoding with the
+        # Windows ANSI code page raises UnicodeDecodeError inside the reader thread,
+        # which surfaces as a pytest warning rather than a failure — a quiet way for
+        # the assertion to pass on garbage.
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="需要 bash；CI 的 ubuntu runner 与本地 Git Bash 都有")
+@pytest.mark.parametrize(
+    ("mode", "verdict", "degraded", "code"),
+    [
+        ("observe", "needs_review", "true", 0),
+        ("observe", "malicious", "false", 0),
+        ("block", "safe", "false", 0),
+        ("block", "needs_review", "false", 1),
+        ("block", "malicious", "false", 1),
+        ("block", "safe", "true", 1),
+        ("Block", "safe", "false", 1),
+        ("", "safe", "false", 1),
+    ],
+)
+def test_the_enforce_step_exits_as_documented(
+    mode: str, verdict: str, degraded: str, code: int
+) -> None:
+    result = _run_enforce(mode, verdict, degraded)
+
+    assert result.returncode == code, (
+        f"mode={mode!r} verdict={verdict} degraded={degraded} 应为 {code}，"
+        f"实际 {result.returncode}\n{result.stdout}{result.stderr}"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="需要 bash")
+def test_the_enforce_step_always_prints_its_reasoning() -> None:
+    """A red X with no log is the failure mode this step was placed last to avoid."""
+    result = _run_enforce("block", "needs_review", "true")
+
+    assert "mode=block" in result.stdout
+    assert "verdict=needs_review" in result.stdout
+    assert "degraded=true" in result.stdout
+    assert "::error::" in result.stdout
