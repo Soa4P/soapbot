@@ -40,6 +40,7 @@ from soapbot.memory.db import (
     SummaryRow,
     vector_to_blob,
 )
+from soapbot.memory.vectors import VectorCandidate, rank_by_cosine
 
 logger = logging.getLogger(__name__)
 
@@ -526,57 +527,46 @@ class MemoryStore:
             return []
         qvec = vectors[0]
 
+        # Phase 1: only the columns the scan needs. Loading full ORM objects for
+        # every embedded row paid for content/keywords text that at most ``limit``
+        # of them will ever contribute to the prompt.
         async with self.db.session_factory()() as session:
-            stmt = select(MemoryRow).where(MemoryRow.embedding.is_not(None))
+            stmt = select(
+                MemoryRow.id, MemoryRow.embedding, MemoryRow.embedding_dim
+            ).where(MemoryRow.embedding.is_not(None))
             if scope:
                 stmt = stmt.where(MemoryRow.scope.in_([scope, ""]))
             if layers:
                 stmt = stmt.where(MemoryRow.layer.in_([str(layer) for layer in layers]))
-            rows = (await session.execute(stmt)).scalars().all()
+            candidates = [
+                VectorCandidate(row[0], row[1], row[2])
+                for row in (await session.execute(stmt)).all()
+            ]
 
-        import numpy as np
-
-        q = np.asarray(qvec, dtype=np.float32)
-        # A vector from a provider is external input. ``nan`` and ``inf`` propagate
-        # through the norm and the dot product, and a single NaN makes every comparison
-        # false — so ``cosine <= 0`` never fires, NaN sorts unpredictably and the whole
-        # ranking becomes meaningless rather than empty. Checked once here and once per
-        # row below, because either side can be the poisoned one.
-        if not np.all(np.isfinite(q)):
+        ranking = rank_by_cosine(candidates, qvec, limit=limit)
+        if not ranking.query_usable:
             logger.warning("query embedding is not finite; falling back to keyword recall")
             return []
-        qn = np.linalg.norm(q)
-        if qn == 0 or not np.isfinite(qn):
-            return []
-
-        scored: list[tuple[float, MemoryRow]] = []
-        dropped = 0
-        for r in rows:
-            if not r.embedding or r.embedding_dim != len(qvec):
-                continue
-            v = np.frombuffer(r.embedding, dtype=np.float32)
-            if not np.all(np.isfinite(v)):
-                dropped += 1
-                continue
-            vn = np.linalg.norm(v)
-            if vn == 0 or not np.isfinite(vn):
-                dropped += 1
-                continue
-            cosine = float(np.dot(q, v) / (qn * vn))
-            if not np.isfinite(cosine) or cosine <= 0:
-                dropped += 1
-                continue
-            scored.append((cosine, r))
-
-        if dropped:
+        if ranking.dropped:
             # Reported rather than silent: a row with a broken vector keeps taking up
             # space and never matches anything, which looks like "memory does not work"
             # and is impossible to diagnose from the outside.
             logger.warning(
-                "skipped %d memory row(s) with unusable embeddings scope=%s", dropped, scope
+                "skipped %d memory row(s) with unusable embeddings scope=%s",
+                ranking.dropped,
+                scope,
             )
+        if not ranking.hits:
+            return []
 
-        scored.sort(key=lambda x: x[0], reverse=True)
+        # Phase 2: fetch display columns for the winners only. The second round trip
+        # is cheaper than carrying every row's text through the scoring loop.
+        top_ids = [row_id for _, row_id in ranking.hits]
+        async with self.db.session_factory()() as session:
+            rows = (
+                await session.execute(select(MemoryRow).where(MemoryRow.id.in_(top_ids)))
+            ).scalars().all()
+        by_id = {row.id: row for row in rows}
         return [
             MemoryItem(
                 id=r.id,
@@ -587,7 +577,8 @@ class MemoryStore:
                 importance=r.importance,
                 created_at=r.created_at,
             )
-            for _, r in scored[:limit]
+            for _, row_id in ranking.hits
+            if (r := by_id.get(row_id)) is not None
         ]
 
     async def _keyword_search(
@@ -902,32 +893,53 @@ class KnowledgeBase:
         if self._embedder is not None:
             try:
                 qvec = (await self._embedder.embed([query]))[0]
-                import numpy as np
-
-                q = np.asarray(qvec, dtype=np.float32)
-                qn = np.linalg.norm(q)
                 async with self.db.session_factory()() as session:
-                    rows = (
-                        await session.execute(
-                            select(KnowledgeRow).where(KnowledgeRow.embedding.is_not(None))
-                        )
-                    ).scalars().all()
-                scored: list[tuple[float, KnowledgeRow]] = []
-                for r in rows:
-                    if not r.embedding or r.embedding_dim != len(qvec):
-                        continue
-                    v = np.frombuffer(r.embedding, dtype=np.float32)
-                    vn = np.linalg.norm(v)
-                    if vn == 0 or qn == 0:
-                        continue
-                    scored.append((float(np.dot(q, v) / (qn * vn)), r))
-                scored.sort(key=lambda x: x[0], reverse=True)
-                for i, (_, r) in enumerate(scored[: limit * 2]):
-                    entry = results.setdefault(
-                        r.id,
-                        {"id": r.id, "title": r.title, "content": r.content, "score": 0.0},
+                    candidates = [
+                        VectorCandidate(row[0], row[1], row[2])
+                        for row in (
+                            await session.execute(
+                                select(
+                                    KnowledgeRow.id,
+                                    KnowledgeRow.embedding,
+                                    KnowledgeRow.embedding_dim,
+                                ).where(KnowledgeRow.embedding.is_not(None))
+                            )
+                        ).all()
+                    ]
+                ranking = rank_by_cosine(candidates, qvec, limit=limit * 2)
+                if not ranking.query_usable:
+                    logger.warning(
+                        "knowledge query embedding is not finite; keyword-only recall"
                     )
-                    entry["score"] += 1.0 / (RRF_K + i + 1)
+                elif ranking.dropped:
+                    logger.warning(
+                        "skipped %d knowledge chunk(s) with unusable embeddings",
+                        ranking.dropped,
+                    )
+                if ranking.hits:
+                    # Only the winning chunks need their text. The old loop loaded
+                    # every chunk's title/content as full ORM objects to rank them.
+                    top_ids = [row_id for _, row_id in ranking.hits]
+                    async with self.db.session_factory()() as session:
+                        payload = (
+                            await session.execute(
+                                select(
+                                    KnowledgeRow.id,
+                                    KnowledgeRow.title,
+                                    KnowledgeRow.content,
+                                ).where(KnowledgeRow.id.in_(top_ids))
+                            )
+                        ).all()
+                    by_id = {row[0]: (row[1], row[2]) for row in payload}
+                    for i, (_, row_id) in enumerate(ranking.hits):
+                        if row_id not in by_id:
+                            continue
+                        title, content = by_id[row_id]
+                        entry = results.setdefault(
+                            row_id,
+                            {"id": row_id, "title": title, "content": content, "score": 0.0},
+                        )
+                        entry["score"] += 1.0 / (RRF_K + i + 1)
             except Exception as exc:
                 logger.warning("knowledge vector search failed: %s", exc)
 
