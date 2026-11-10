@@ -166,38 +166,69 @@ def build_prompt(diff: str, meta: dict, truncated: bool, dropped: str = "") -> s
 
 
 def _extract_json(text: str) -> dict:
-    """Tolerate a model that wraps JSON in prose or a fenced block."""
+    """Tolerate a model that wraps JSON in prose or a fenced block.
+
+    The return type is part of the contract, not a hint: ``"[]"`` and ``"null"`` parse
+    successfully, so a bare ``json.loads`` handed back a list and ``None`` and the first
+    ``.get`` blew up with AttributeError. That escaped ``review()`` (which promises never
+    to raise), killed the step before ``Comment``/``Label`` ran, and left the PR with a
+    red X and no explanation — with ``review`` now a required check, that is a merge
+    blocked by a model output shape.
+    """
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    payload = None
+    parsed = False
     try:
-        return json.loads(text)
+        payload = json.loads(text)
+        parsed = True
     except json.JSONDecodeError:
         pass
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            pass
-    # Include a short prefix: "not JSON" alone was unattributable from a CI log, and the
-    # difference between prose, a truncated object and a fenced block matters when
-    # deciding whether to change the prompt or the token budget.
-    raise ReviewError(f"模型没有返回可解析的 JSON（开头：{text[:80]!r}）")
+    if not parsed:
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                payload = json.loads(text[start : end + 1])
+                parsed = True
+            except json.JSONDecodeError:
+                pass
+    if not parsed:
+        # Include a short prefix: "not JSON" alone was unattributable from a CI log, and
+        # the difference between prose, a truncated object and a fenced block matters
+        # when deciding whether to change the prompt or the token budget.
+        raise ReviewError(f"模型没有返回可解析的 JSON（开头：{text[:80]!r}）")
+    if not isinstance(payload, dict):
+        # Distinguishable from "not JSON" on purpose: the fix differs (say "return a JSON
+        # object" in the prompt, versus raise the token budget).
+        raise ReviewError(
+            f"模型返回了 {type(payload).__name__} 而不是 JSON 对象（开头：{text[:80]!r}）"
+        )
+    return payload
 
 
-def normalise(payload: dict) -> dict:
-    """Coerce a parsed payload into the documented shape, or fail closed."""
-    verdict = str(payload.get("verdict", "")).strip().lower()
-    risk = str(payload.get("risk", "")).strip().lower()
-    if verdict not in VERDICTS:
-        raise ReviewError(f"模型返回了未知 verdict: {verdict!r}")
-    if risk not in RISKS:
-        risk = "medium"
+def _normalise_concerns(raw: object) -> list[dict]:
+    """Bound ``concerns`` to a list of ``{file, why}`` however the model shaped it.
+
+    The failure this replaces: ``for item in "no concerns found"`` iterates characters,
+    producing seventeen one-letter concerns that rendered as a bullet list of noise. A
+    string is a plausible shape for this field, so it is kept as one concern rather than
+    dropped — the text is still a complaint someone wrote, just not in the schema.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items: list[object] = [raw] if raw.strip() else []
+    elif isinstance(raw, dict):
+        items = [raw]
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        items = [raw]
 
     concerns: list[dict] = []
-    for item in payload.get("concerns") or []:
+    for item in items:
         if isinstance(item, dict):
             file = str(item.get("file", ""))[:200]
             why = str(item.get("why", ""))[:500]
@@ -205,12 +236,27 @@ def normalise(payload: dict) -> dict:
             file, why = "", str(item)[:500]
         if why:
             concerns.append({"file": file, "why": why})
+    return concerns[:20]
+
+
+def normalise(payload: dict) -> dict:
+    """Coerce a parsed payload into the documented shape, or fail closed."""
+    if not isinstance(payload, dict):
+        # Reachable when normalise() is called directly (tests, future callers); the
+        # script path is guarded earlier in _extract_json.
+        raise ReviewError(f"模型返回了 {type(payload).__name__} 而不是 JSON 对象")
+    verdict = str(payload.get("verdict", "")).strip().lower()
+    risk = str(payload.get("risk", "")).strip().lower()
+    if verdict not in VERDICTS:
+        raise ReviewError(f"模型返回了未知 verdict: {verdict!r}")
+    if risk not in RISKS:
+        risk = "medium"
 
     return {
         "verdict": verdict,
         "risk": risk,
         "summary": str(payload.get("summary", ""))[:1000],
-        "concerns": concerns[:20],
+        "concerns": _normalise_concerns(payload.get("concerns")),
     }
 
 
@@ -451,7 +497,20 @@ def main() -> int:
                 "files": os.environ.get("PR_FILES", ""),
                 "model": model,
             }
-            result = review(diff, meta, api_key=api_key, model=model, base_url=base_url)
+            try:
+                result = review(diff, meta, api_key=api_key, model=model, base_url=base_url)
+            except Exception as exc:
+                # A last-resort net, not a design: `review()` degrades internally for
+                # everything it knows about. But an uncaught exception here fails the
+                # `Ask the model` step, which skips `Comment` and `Label`, so the PR gets
+                # a red X with no text explaining it — and `review` is a required check.
+                # Reporting "the reviewer itself broke" beats a silent block. The type
+                # name is included so the log still points at the real bug.
+                result = _degraded(
+                    f"审查脚本自身出错（{type(exc).__name__}: {exc}），本条不是对代码的判断。",
+                    False,
+                    "",
+                )
             result["model"] = model
 
     meta = {
