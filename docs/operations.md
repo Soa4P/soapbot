@@ -34,6 +34,14 @@
 `soapbot_csrf`；同时 `Origin` 必须同源。脚本用 Bearer token 不受这条约束，因为
 跨站页面附加不了 Bearer 头。
 
+**重启后找不到 `init_token.txt`（令牌「掉了」）。** 先看
+`GET /api/auth/status` 的 `bootstrap_state`：`redeemed` 表示登录成功过，文件当时就
+被删除并留下 `init_token.redeemed`，重启不会重新发放，反复重启没有用；`available`
+表示令牌还在，照 `bootstrap_path` 给的完整路径去读，别按写死的 `C:\soapbot` 猜。
+要一枚新的，在服务器本机执行 `python -m soapbot.cli token --reset`（会直接打印），
+然后重启服务才生效。完整可复制的命令见
+[部署 · 第一次登录](deploy-quickstart.md)。
+
 ## 部署前检查
 
 ```bash
@@ -127,10 +135,11 @@ soapbot migrate             # 顺序升到本程序支持的版本
 | `check_deploy.py` | 容器配置静态校验 |
 | `check_doc_links.py` | README / SECURITY / docs 的相对链接 |
 | `check_test_gaps.py` | 孤儿模块与文档数字 |
+| `check_mypy_baseline.py` | 类型错误总数只降不升（基线 80，超过即失败；阻断项） |
 | `check_contrast.py` / `check_a11y.py` | 对比度与可静态检查的无障碍规则 |
 
 `pre-push` 只跑 `check_secrets.py --pre-push`（用项目虚拟环境的解释器，Windows 上不依赖
-系统 `python`），所以**只有它会挡住 push**；其余八项由 `make check` 与 CI 的 `backend`
+系统 `python`），所以**只有它会挡住 push**；其余各项由 `make check` 与 CI 的 `backend`
 任务拦截，本地不跑就直接推的话，红在 CI 而不是红在 push。
 `tests/test_gate_parity.py` 断言 `make check` 与 CI 的差集恰好是两项（`check_secrets
 --committed` 要 git 历史、`pip-audit` 要联网），两边再漂移就会红。

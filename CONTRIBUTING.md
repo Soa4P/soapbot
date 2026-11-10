@@ -39,7 +39,8 @@ make check
 | `make check-deps` | `requirements.txt` 与 `pyproject.toml` 是否一致 |
 | `make console-encoding` | 打印中文的脚本必须先把流设成 UTF-8（Windows CI 专属故障） |
 | `make deploy-check` | 容器配置静态检查（不需要 docker） |
-| `make typecheck` | mypy（当前基线 79 个错误，尚未作为阻断项） |
+| `make typecheck` | mypy 原始输出（存量错误非零，仅用于查看，不进 `make check`） |
+| `make mypy-baseline` | `scripts/check_mypy_baseline.py`：类型错误总数只降不升，基线 80，超过即失败（进 `make check` 与 CI，阻断） |
 | `make progress` | 启动进度看板 `http://127.0.0.1:8099/` |
 
 改前端后还要跑：

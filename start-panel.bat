@@ -110,10 +110,16 @@ echo [4/4] up.
 echo.
 echo   panel:  http://127.0.0.1:6185
 echo.
+rem This is the LOCAL foreground path: there is no service transcript to leak into and
+rem no other place to read the value, so showing it here is deliberate. The service
+rem installers (install.ps1 / windows-bootstrap.ps1) print only the path and a command.
 if exist "%SOAPBOT_DATA_DIR%\init_token.txt" (
-    echo   login token ^(data\init_token.txt^), for a first run:
+    echo   first login token ^(only on this machine; copy it now^):
     type "%SOAPBOT_DATA_DIR%\init_token.txt"
     echo.
+) else (
+    echo   No init_token.txt here. You probably already logged in ^(the file is^)
+    echo   deleted then^), or the service has not started. See docs\deploy-quickstart.md.
 )
 echo   Stop it with stop-panel.bat, or close the "soapbot panel" window.
 echo.

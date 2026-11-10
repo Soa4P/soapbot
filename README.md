@@ -52,9 +52,12 @@ curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/instal
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
-装完打开 `http://127.0.0.1:6185`，一次性登录令牌在 `data/init_token.txt`（Docker 里是
-`docker compose -f deploy/docker-compose.yml exec soapbot cat /data/init_token.txt`）。
-脚本不会把令牌打进终端。
+装完打开 `http://127.0.0.1:6185`。第一次登录要用一次性令牌：在**服务器本机**读
+`data/init_token.txt`，Windows 云服务器上可直接复制的 PowerShell 命令、以及「重启后
+找不到文件」「已经登录过」怎么办，见
+[部署 · 第一次登录](docs/deploy-quickstart.md)。Docker 里读令牌用
+`docker compose -f deploy/docker-compose.yml exec soapbot cat /data/init_token.txt`。
+服务化安装不会把令牌打进终端；本机双击 `start-panel.bat` 会在启动窗口直接显示它。
 
 从源码跑（改代码时用）：
 
