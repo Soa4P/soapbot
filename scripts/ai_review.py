@@ -42,6 +42,16 @@ MAX_DIFF_BYTES = 200_000
 MAX_DIFF_LINES = 4_000
 REQUEST_TIMEOUT = 60.0
 
+#: Output budget for one review. ``deepseek-flash`` is a reasoning model, and
+#: ``completion_tokens`` includes the hidden reasoning: at 3000 every call ended with
+#: ``finish_reason=length`` and empty ``content``, so the reviewer posted「自动审查未能
+#: 完成」on every PR (#24, #25) while the job itself stayed green.
+MAX_TOKENS = 8000
+#: One retry, and only for "the model answered but reasoning ate the budget". An HTTP
+#: 401/429, a timeout or unparsable JSON fails the same way twice; retrying those buys
+#: another error and another minute of a 25-minute job.
+RETRY_MAX_TOKENS = 16000
+
 VERDICTS = ("safe", "needs_review", "malicious")
 RISKS = ("low", "medium", "high")
 
@@ -74,6 +84,34 @@ concerns 可以为空数组。"""
 
 class ReviewError(RuntimeError):
     """Raised when the model could not be consulted; callers degrade to needs_review."""
+
+
+class EmptyCompletionError(ReviewError):
+    """The model answered, but the output budget was consumed by hidden reasoning.
+
+    This is the *only* failure worth a bigger budget: the request was fine, the answer
+    simply did not fit. It carries the numbers because the previous message
+    (「模型返回空内容」) left a reader unable to tell a reasoning-budget problem from a
+    content filter or a provider bug.
+    """
+
+    def __init__(
+        self,
+        *,
+        finish_reason: str,
+        reasoning_tokens: int | None,
+        completion_tokens: int | None,
+        max_tokens: int,
+    ) -> None:
+        self.finish_reason = finish_reason
+        self.reasoning_tokens = reasoning_tokens
+        self.completion_tokens = completion_tokens
+        self.max_tokens = max_tokens
+        super().__init__(
+            f"模型返回空内容（finish_reason={finish_reason}, "
+            f"reasoning_tokens={reasoning_tokens}, "
+            f"completion_tokens={completion_tokens}, max_tokens={max_tokens}）"
+        )
 
 
 def truncate(text: str) -> tuple[str, bool, str]:
@@ -176,7 +214,14 @@ def normalise(payload: dict) -> dict:
     }
 
 
-def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
+def call_model(
+    prompt: str,
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = MAX_TOKENS,
+) -> str:
     # An invisible BOM in the secret surfaces as `UnicodeEncodeError: 'latin-1' codec
     # can't encode characters` from deep inside urllib's header writer, which reads like
     # a model or network failure and sends the investigation the wrong way. It is a
@@ -197,10 +242,9 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
         ],
         # Deterministic: a review that changes with the temperature is not reviewable.
         "temperature": 0,
-        # `deepseek-v4-pro` is a reasoning model: `completion_tokens` includes the
-        # hidden reasoning, and at 1200 the budget can be consumed before any `content`
-        # is produced — which surfaced as "模型响应不是 JSON" with no explanation.
-        "max_tokens": 3000,
+        # Reasoning models spend this budget on hidden thinking before emitting any
+        # `content`; see MAX_TOKENS for the failure that made 3000 insufficient.
+        "max_tokens": max_tokens,
     }
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
@@ -243,14 +287,35 @@ def call_model(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
     if not content or not str(content).strip():
         # Say why it was empty. A bare "empty content" made a real CI failure
         # unattributable: it could mean the reasoning budget was exhausted, the request
-        # was filtered, or the provider changed its response shape.
+        # was filtered, or the provider changed its response shape. Only the first is
+        # retryable, so it gets its own exception type.
         usage = body.get("usage") or {}
         reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        if finish == "length":
+            raise EmptyCompletionError(
+                finish_reason=finish,
+                reasoning_tokens=reasoning,
+                completion_tokens=usage.get("completion_tokens"),
+                max_tokens=max_tokens,
+            )
         raise ReviewError(
             f"模型返回空内容（finish_reason={finish}, reasoning_tokens={reasoning}, "
-            f"completion_tokens={usage.get('completion_tokens')}）"
+            f"completion_tokens={usage.get('completion_tokens')}, max_tokens={max_tokens}）"
         )
     return str(content)
+
+
+def _degraded(summary: str, truncated: bool, dropped: str) -> dict:
+    """The only shape a failed review may take: needs_review, never safe."""
+    return {
+        "verdict": "needs_review",
+        "risk": "medium",
+        "summary": summary,
+        "concerns": [],
+        "truncated": truncated,
+        "dropped": dropped,
+        "degraded": True,
+    }
 
 
 def review(diff: str, meta: dict, *, api_key: str, model: str, base_url: str) -> dict:
@@ -258,18 +323,43 @@ def review(diff: str, meta: dict, *, api_key: str, model: str, base_url: str) ->
     clipped, truncated, dropped = truncate(diff)
     prompt = build_prompt(clipped, meta, truncated, dropped)
     try:
-        raw = call_model(prompt, api_key=api_key, model=model, base_url=base_url)
+        raw = call_model(
+            prompt, api_key=api_key, model=model, base_url=base_url, max_tokens=MAX_TOKENS
+        )
+    except EmptyCompletionError:
+        # The request was fine; the answer did not fit. This is the only failure where a
+        # second call can plausibly succeed, so it is the only one that gets retried.
+        try:
+            raw = call_model(
+                prompt,
+                api_key=api_key,
+                model=model,
+                base_url=base_url,
+                max_tokens=RETRY_MAX_TOKENS,
+            )
+        except EmptyCompletionError as second:
+            return _degraded(
+                "自动审查未能完成：已用 "
+                f"{MAX_TOKENS} 与 {RETRY_MAX_TOKENS} 两次预算，均被推理耗尽"
+                f"（finish_reason={second.finish_reason}, "
+                f"reasoning_tokens={second.reasoning_tokens}, "
+                f"completion_tokens={second.completion_tokens}）",
+                truncated,
+                dropped,
+            )
+        except ReviewError as exc:
+            return _degraded(
+                f"自动审查未能完成（{MAX_TOKENS} → {RETRY_MAX_TOKENS} tokens 重试失败）：{exc}",
+                truncated,
+                dropped,
+            )
+    except ReviewError as exc:
+        return _degraded(f"自动审查未能完成：{exc}", truncated, dropped)
+
+    try:
         result = normalise(_extract_json(raw))
     except ReviewError as exc:
-        return {
-            "verdict": "needs_review",
-            "risk": "medium",
-            "summary": f"自动审查未能完成：{exc}",
-            "concerns": [],
-            "truncated": truncated,
-            "dropped": dropped,
-            "degraded": True,
-        }
+        return _degraded(f"自动审查未能完成：{exc}", truncated, dropped)
 
     if truncated and result["verdict"] == "safe":
         # It only saw part of the change; "safe" would be a claim about unread text.

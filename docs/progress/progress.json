@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T12:04:49+08:00",
+  "updated_at": "2026-11-10T20:15:00+08:00",
   "current": null,
   "phases": [
     {
@@ -2705,6 +2705,66 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph38",
+      "index": "P38",
+      "name": "AI 审查真的说话 + 模式真生效 + 模板真被用",
+      "goal": "让 ai-review 在真实 PR 上给出真正的结论（而不是绿的 job 加固定的「模型返回空内容」），把 AI_REVIEW_MODE 从死变量接成 observe/block 开关，并让 PR 模板挡住「改了代码却没同步数字基线」「没看审查结论就合并」。",
+      "tasks": [
+        {
+          "id": "ph38-t1",
+          "name": "预算提到 8000 并对预算耗尽重试一次",
+          "status": "done",
+          "note": "根因非推测：仓库变量 AI_REVIEW_MODEL=deepseek-flash，而脚本硬编码 max_tokens=3000；PR #24 与 #25 的评论逐字相同（finish_reason=length, reasoning_tokens=3000, completion_tokens=3000），content 为空，review() 按 fail-closed 降级为 needs_review，于是 job 绿、审查从未发生。改动：MAX_TOKENS=8000、RETRY_MAX_TOKENS=16000；新增 EmptyCompletionError 携带 finish_reason/reasoning_tokens/completion_tokens/max_tokens；call_model 接受单次预算；review 只对 EmptyCompletionError 重试一次，HTTP 401/网络/非 JSON/非法字段一律不重试；两次都空时 summary 写明「已用 8000 与 16000 两次预算」。明确不做 response_format=json_object：当前 provider 对 reasoning 模型的 JSON mode 未经验证，400 会把可诊断的降级换成新的失败源。tests/test_ai_review.py 13 → 19 项（新增 5 项：重试一次且预算递增、两次都空写明两档预算、HTTP 401 只调用一次、非预算原因不重试、重试成功不放宽截断规则）。",
+          "files": [
+            {
+              "path": "scripts/ai_review.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ai_review.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph38-t2",
+          "name": "AI_REVIEW_MODE 接成真开关，工作流与模板变成可校验项",
+          "status": "done",
+          "note": "AI_REVIEW_MODE=observe 之前从未被 ai-review.yml 引用，是死配置——改了不会生效，比没有开关更糟。现在末尾新增 Enforce review mode（刻意排在 Comment/Label 之后：block 模式下 job 一失败就没有后续步骤，放在前面会让 PR 只剩没有原因的红叉），observe 恒 exit 0，block 在 DEGRADED=true 或 VERDICT!=safe 时先 echo mode/verdict/degraded 再 exit 1。新增 tests/test_ai_review_workflow.py（7 项）用 yaml.safe_load 解析 ai-review.yml：checkout 钉 pull_request.base.sha、持有密钥的 job 里无 pip install/npm install/npm ci、AI_REVIEW_MODE 被读取且 observe 是默认、Enforce 在 Comment/Label 之后且为最后一步、存在 block 分支、未知模式值 fail-closed（case 分支，MODE=Block 这类拼写不许静默落进 observe——否则等于把死变量换成死拼写）；含 pop checkout、删 Enforce、插 pip install、把 Enforce 移到 Comment 之前、把 case 改回 if 五条反向用例。历史 run 42654474652（PR #22 的 startup_failure，0 秒无日志）只是「YAML 必须可校验」的旁证，本轮故障与它无关。",
+          "files": [
+            {
+              "path": ".github/workflows/ai-review.yml",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ai_review_workflow.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph38-t3",
+          "name": "PR 模板重写为九节清单并修掉 --fill 绕过",
+          "status": "done",
+          "note": "模板从 5 节扩到 9 节：改了什么/为什么/影响面（兼容性、数据迁移、配置变更、依赖变更、是否需重启）/验证（make check、全量 pytest、静态门禁三行，并要求 make check 未整体跑时写明原因）/数字基线（点名四处基线文件）/AI 审查（verdict 与 risk 原文，degraded 或 needs_review 必须写人工复核范围）/安全影响/回滚/检查（7 条逐条勾选）。顶部写明「不适用的小节直接删掉，不要留空」。根因修正：CONTRIBUTING.md 原写 gh pr create --fill --base master，而 --fill 用 commit message 填 body、直接覆盖模板——不改这条，模板改了也不会被使用；改为 gh pr create --base master 并写明为什么禁 --fill，同时补 AI 审查 observe/block 段落。新增 tests/test_pr_template.py（12 项）：九节齐全、逐节删除都报错（参数化）、不适用说明存在、四处基线文件被点名、make check 未跑要说原因、degraded 需人工复核、检查项不少于 5 条、CONTRIBUTING 不再出现 --fill 且写出替代命令与 block 模式。",
+          "files": [
+            {
+              "path": ".github/pull_request_template.md",
+              "status": "done"
+            },
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_pr_template.py",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -2800,7 +2860,7 @@
     }
   ],
   "verification": {
-    "pytest": "1908 passed, 12 skipped",
+    "pytest": "1932 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
