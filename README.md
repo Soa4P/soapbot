@@ -152,7 +152,7 @@ base commit、只通过 `gh pr diff` 读文本，从不执行 PR 里的代码。
 | 值 | 行为 |
 | --- | --- |
 | `observe`（默认） | 只评论、只打标签，job 恒通过；结论是建议 |
-| `block` | verdict 不是 `safe`、或评论是降级结论时让 job 失败；`review` 加入必需检查后即阻断合并 |
+| `block` | verdict 不是 `safe`、或评论是降级结论时让 job 失败；`review` 是必需检查，因此失败即阻断合并 |
 
 `block` 下判定步骤排在评论与标签**之后**：先让人看到原因，再让 job 变红。
 
@@ -161,6 +161,10 @@ base commit、只通过 `gh pr diff` 读文本，从不执行 PR 里的代码。
 绿的（PR #24、#25）。因此「`finish_reason=length` 且内容为空」会用 16000 重试一次，
 HTTP 错误、超时、非法 JSON 不重试——那些重试只会重复同一个错误。两次都空时评论写明
 用过的两档预算，方便判断是改模型还是继续加预算。
+
+8000 上线后在 PR #27 上实测通过：评论第一次给出真实结论（`未发现问题`、风险 `low`），
+没有用到 16000 那一档。`block` 模式也在真实降级（故意把模型名设错）下验过——job 变红，
+而评论仍然先出现在 PR 上。
 
 配置：仓库 secret `DEEPSEEK_API_KEY`（必需）；variable `AI_REVIEW_MODEL`（可选，
 默认 `deepseek-chat`，本仓库设为 `deepseek-flash`）、`AI_REVIEW_MODE`（可选，默认
