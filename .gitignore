@@ -104,6 +104,10 @@ Thumbs.db
 # Throwaway drivers written while testing a host (never part of the project).
 .tmp-*
 
+# Redirect targets for command output (`.tmp_full.txt` and friends). The dash and the
+# underscore are both in use on this machine, and `git add -A` picked one up once.
+.tmp_*
+
 # Watchdog output from tests/conftest.py. Written only when a test exceeds its
 # deadline, and printed by CI at that point; it is a diagnostic, not a source file.
 pytest-hang-dump.log
