@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-10T14:44:26+08:00",
+  "updated_at": "2026-11-10T16:27:06+08:00",
   "current": null,
   "phases": [
     {
@@ -2909,6 +2909,70 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph41",
+      "index": "P41",
+      "name": "AI 审查自己会挂 + 门禁自己会放行：两处契约缺口与它们的反向用例",
+      "goal": "ph40 的结论「门禁能挡住必需检查名单漂移」只对「整行删掉」成立，对「清单里少一项」不成立；ai_review.py 的 review() docstring 写着 never raises，但模型返回 []、null、42 这类能解析却不是对象的 JSON 时会抛 AttributeError，把 Ask the model 步骤打红，后续 Comment/Label 全部跳过，PR 上只剩一个没有解释的红叉——而 review 是必需检查。本轮把这两条契约补上，并给两处都加上会在改坏时失败的用例。",
+      "tasks": [
+        {
+          "id": "ph41-t1",
+          "name": "非对象 JSON 与畸形 concerns 走 fail-closed，并保证评论与输出文件照常写出",
+          "status": "done",
+          "note": "_extract_json 原来直接 return json.loads(...)，\"[]\"、\"\\\"safe\\\"\"、\"null\"、\"42\" 都能解析成功，于是 normalise 的 payload.get 抛 AttributeError 逃出 review()。改为解析成功后校验 isinstance(dict)，失败抛 ReviewError（消息区分「不是 JSON」与「是 JSON 但不是对象」，因为修法不同：后者是该改 prompt 说清返回对象，不是加 token 预算）。normalise 也加了同样的守卫，供直接调用方使用。concerns 原来 for item in payload.get('concerns') or [] 在字符串上按字符迭代，'no concerns found' 产出 17 条单字符关注点；抽出 _normalise_concerns，字符串当一条保留（那是人写的抱怨，只是不合 schema），dict 当一条，其余按单条处理，上限仍是 20。main() 里 review() 外层加了最后一道网：意外异常也降级成 needs_review 并把异常类型写进评论，理由是这个步骤红掉等于 PR 上只有一个不说话的红叉。复验：git show HEAD:scripts/ai_review.py 喂同样 6 种载荷全部 RAISED AttributeError，concerns 字符串产出 17 条；修复后全部 verdict=needs_review 且 summary 含「JSON 对象」，main() 返回 0 并写出 comment.md 与 GITHUB_OUTPUT。",
+          "files": [
+            {
+              "path": "scripts/ai_review.py",
+              "status": "done"
+            },
+            {
+              "path": "tests/test_ai_review.py",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph41-t2",
+          "name": "文档门禁从全文子串改为段落锚定，并补上「删任一项都会红」的用例",
+          "status": "done",
+          "note": "初版 required_check_doc_problems 只检查名字是否出现在全文。在上一轮合并的那一版（git show HEAD~1: 的旧门禁 + 旧文档）上，从真实名单里删掉 frontend/desktop/review 三项仍报 NO PROBLEM（review 在同一文件出现 6 次、desktop 在 225 行还有一次、frontend 在 73 行还有一次），只有 package 被抓到——纯粹因为那版全文只出现一次。本轮把 225 行改对、让那句也提到 package 之后，同一个旧门禁对四个删除项（frontend/desktop/package/review）全部放行，连最后一个偶然的拦截点也失去反应，说明它的命中依赖与意图无关的巧合。这正是上一轮 docstring 里写的那个错（a substring test would stay green on a list that dropped the check），在文档级实现里又犯了一遍。改为三条段落级规则：①必须有某一段同时写下数量和完整名单，失败时点名缺哪一项；②每处写下的数量都必须是 6；③含「全绿」的句子若点名了 job，就必须正好是那五个 job 名（多一个 types 也报）。实现细节两处被真实文档打回：CLAUSE_BREAK 起初含换行符，第 225 行在 desktop 后换行，含全绿的半句只剩三个名字，误报漏了 package/review——改为先把续行拼回逻辑行再按句号切；token 起初直接与 leaf 名比较，写完整 context 的文档（backend (ubuntu-latest, 3.12)）匹配不上，改为 token.split(' (')[0] 归一。CONTRIBUTING.md 第 225 行据此改写：点名六个必需检查，types 单独一句说明「红了也要修，但咨询性不拦合并」。复验：新门禁对 6 个删除项全部命中；旧门禁＋旧文档漏 3 项，旧门禁＋新文档漏 4 项，对 HEAD~1:CONTRIBUTING.md 的 225 行原句返回空列表。",
+          "files": [
+            {
+              "path": "tests/test_required_checks_doc.py",
+              "status": "done"
+            },
+            {
+              "path": "CONTRIBUTING.md",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "id": "ph41-t3",
+          "name": "同步四处基线数字、看板与验证矩阵",
+          "status": "done",
+          "note": "新增 5 项 test_ai_review、3 项 test_required_checks_doc，全量 1947 → 1955 passed / 12 skipped。同步 architecture.md 目录树、delivery-readiness-v2.md 两处、verification-matrix.md 复现命令，以及看板 verification.pytest 与 updated_at。verification-matrix 两行的用例数改 19→24、6→9，并把本轮的自查证据（旧代码 6 种载荷全抛、旧门禁 6 项漏 4 项、225 行原句返回 []）写进实测列。pytest 计数门禁 test_doc_test_counts.py 在改数字前会报出两行不符，改完通过。",
+          "files": [
+            {
+              "path": "docs/architecture.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/delivery-readiness-v2.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/verification-matrix.md",
+              "status": "done"
+            },
+            {
+              "path": "docs/progress/progress.json",
+              "status": "done"
+            }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -3004,7 +3068,7 @@
     }
   ],
   "verification": {
-    "pytest": "1947 passed, 12 skipped",
+    "pytest": "1955 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

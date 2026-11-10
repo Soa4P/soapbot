@@ -222,7 +222,8 @@ await None 抛错被 pipeline 当作 observer 错误吞掉，于是所有耗时�
 2. **major 不会自动来**。`ignore: version-update:semver-major`：major 需要人先读
    changelog，所以它应该是 issue，不是 bot PR。`github-actions` 例外，它的 major 通常
    只是运行时升级、输入不变。
-3. **合并看 CI**。`backend` 两个平台 + `frontend` + `types` + `desktop` 全绿。
+3. **合并看 CI**。必需的六个检查全绿：`backend` 两个平台、`frontend`、`desktop`、
+   `package`、`review`。`types` 红了也要修，但它是咨询性的，不拦合并。
    2026-11-08 的 `#18`（16 个包）在 Windows 上红过一次，根因是 `.env` 旁路锁的字节
    竞态，与依赖无关；修完之后同一组包在两个平台都通过。
 4. **合并后本地跑一次全量**。CI 跑的是同一套，但本地能立刻看到新增的 warning。
