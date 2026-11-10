@@ -120,6 +120,40 @@ def test_a_malformed_response_degrades_to_needs_review() -> None:
     assert result["verdict"] == "needs_review"
 
 
+def test_a_non_object_json_response_degrades_to_needs_review() -> None:
+    """Valid JSON is not the same as a valid answer.
+
+    ``"[]"``, ``"null"`` and ``"42"`` all parse, so they got past ``_extract_json`` and
+    the first ``payload.get`` raised AttributeError out of ``review()`` — which promises
+    never to raise. The step then failed before ``Comment`` ran, leaving a red X on the
+    PR with no explanation, and ``review`` is a required check.
+    """
+    module = _module()
+    for payload in ("[]", "[1, 2]", '"safe"', "null", "42", "true"):
+        with mock.patch.object(module, "call_model", return_value=payload):
+            result = module.review("diff", _meta(), api_key="k", model="m", base_url="u")
+        assert result["verdict"] == "needs_review", f"{payload} 必须降级而不是抛异常"
+        assert result["degraded"] is True, payload
+        assert "JSON 对象" in result["summary"], result["summary"]
+
+
+def test_a_non_object_payload_is_rejected_by_normalise() -> None:
+    """The guard also holds for direct callers, not only the script path."""
+    module = _module()
+    for payload in ([], None, "safe", 42):
+        with pytest.raises(module.ReviewError):
+            module.normalise(payload)
+
+
+def test_concerns_shaped_as_a_string_is_not_split_into_characters() -> None:
+    """``"no concerns found"`` iterated as characters produced 17 one-letter bullets."""
+    module = _module()
+    result = module.normalise({"verdict": "safe", "concerns": "no concerns found"})
+
+    assert len(result["concerns"]) == 1, result["concerns"]
+    assert result["concerns"][0]["why"] == "no concerns found"
+
+
 def test_a_truncated_diff_cannot_be_safe() -> None:
     """'safe' over text the reviewer never saw is a claim it cannot make."""
     module = _module()
@@ -180,6 +214,52 @@ def test_missing_api_key_reports_rather_than_passing(tmp_path, monkeypatch, caps
     assert module.main() == 0
 
     assert "DEEPSEEK_API_KEY" in comment.read_text(encoding="utf-8")
+    assert "verdict=needs_review" in output.read_text(encoding="utf-8")
+
+
+def _main_env(tmp_path, monkeypatch):
+    diff = tmp_path / "pr.diff"
+    diff.write_text("+ hello", encoding="utf-8")
+    comment = tmp_path / "comment.md"
+    output = tmp_path / "out.txt"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    monkeypatch.setenv("PR_DIFF_PATH", str(diff))
+    monkeypatch.setenv("AI_REVIEW_COMMENT_PATH", str(comment))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    return comment, output
+
+
+def test_a_non_object_response_still_writes_the_comment_and_the_outputs(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """The workflow runs Comment/Label *after* Ask the model.
+
+    If this step exits non-zero, those steps are skipped and the PR shows a red X with
+    no text saying why. ``review`` is a required check, so that is a merge blocked by a
+    model output shape. The contract is therefore about files on disk, not just verdicts.
+    """
+    module = _module()
+    comment, output = _main_env(tmp_path, monkeypatch)
+
+    with mock.patch.object(module, "call_model", return_value="[]"):
+        assert module.main() == 0
+
+    assert comment.exists(), "评论没写出来，PR 上就只剩一个没有解释的红叉"
+    assert "需要人工确认" in comment.read_text(encoding="utf-8")
+    assert "verdict=needs_review" in output.read_text(encoding="utf-8")
+    assert "degraded=true" in output.read_text(encoding="utf-8")
+
+
+def test_an_unexpected_exception_still_writes_the_comment(tmp_path, monkeypatch, capsys) -> None:
+    """Last-resort net: a bug in the reviewer must not become an unexplained block."""
+    module = _module()
+    comment, output = _main_env(tmp_path, monkeypatch)
+
+    with mock.patch.object(module, "review", side_effect=KeyError("boom")):
+        assert module.main() == 0
+
+    text = comment.read_text(encoding="utf-8")
+    assert "KeyError" in text, "日志要能指回真正的 bug，而不只是「审查失败」"
     assert "verdict=needs_review" in output.read_text(encoding="utf-8")
 
 
