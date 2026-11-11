@@ -148,6 +148,20 @@ class WhitelistStage(Stage):
         self.policy = policy or AccessPolicy()
 
     async def run(self, ctx: PipelineContext) -> StageResult:
+        if ctx.event.adapter == "web":
+            # Admission for web conversations was already decided upstream, in the API
+            # layer: the endpoint only exists when talk is enabled, and it grants the
+            # session only after the account authenticated with a password and a
+            # chat_memberships row named exactly this session. Re-deriving it here from
+            # private_allowlist would reopen the question this branch closes — the QQ
+            # lists hold QQ numbers and cannot express "account 3", so every web
+            # conversation would need a second, manual list that drifts from the one
+            # the panel manages. The QQ paths below stay deny-by-default; this branch
+            # is reachable only for events the runtime accepted from the in-process
+            # web adapter, which itself only exists when chat_talk_enabled is on.
+            ctx.extras["memory_collect"] = True
+            ctx.extras["replies_here"] = True
+            return StageResult()
         ok, reason = self.policy.allows(
             ctx.event.scene, ctx.event.group_id, ctx.event.sender.user_id
         )

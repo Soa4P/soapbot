@@ -516,6 +516,68 @@ class MemoryStore:
             for row in rows
         ]
 
+    async def messages_page(
+        self,
+        session_key: str,
+        *,
+        before_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Descending-into-history page, returned ascending. ``(rows, has_older)``.
+
+        ``messages_since`` pages forward from a cursor because its callers sync the
+        tail of a live conversation. A reader opening an old session has the opposite
+        question — "show me the newest messages, then the ones before them" — and
+        ``after_id`` cannot answer it: with no rows after the cursor it returns an
+        empty page, so the recent history of any session older than one page was
+        unreachable from the clients. ``before_id=None`` means no upper bound, i.e.
+        the newest page; a client pages older history by passing ``messages[0]["id"]``.
+
+        ``has_older`` is a separate existence probe, not ``len(rows) == limit``: a
+        page that happens to end exactly at the first message would otherwise report
+        "maybe more" forever, and the client would render a load button that always
+        returns an empty page.
+        """
+        bound = max(1, min(limit, 200))
+        async with self.db.session_factory()() as session:
+            stmt = select(MessageRow).where(MessageRow.session_key == session_key)
+            if before_id is not None:
+                stmt = stmt.where(MessageRow.id < before_id)
+            desc_rows = (
+                (await session.execute(stmt.order_by(MessageRow.id.desc()).limit(bound)))
+                .scalars()
+                .all()
+            )
+            rows = list(reversed(desc_rows))
+            has_older = False
+            if rows:
+                probe = await session.execute(
+                    select(MessageRow.id)
+                    .where(
+                        MessageRow.session_key == session_key,
+                        MessageRow.id < rows[0].id,
+                    )
+                    .limit(1)
+                )
+                has_older = probe.first() is not None
+        return (
+            [
+                {
+                    "id": row.id,
+                    "session_key": row.session_key,
+                    "role": row.role,
+                    "content": row.content,
+                    "image_desc": row.image_desc,
+                    "user_id": row.user_id,
+                    "user_name": row.user_name,
+                    "adapter": row.adapter,
+                    "created_at": row.created_at,
+                }
+                for row in rows
+            ],
+            has_older,
+        )
+
     async def add_note(
         self,
         *,
