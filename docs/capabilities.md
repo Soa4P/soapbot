@@ -57,7 +57,7 @@
 | MCP 面板编辑 | ✅ | 07 页可直接增删改：读取 → diff → 确认 → 写入，写入后热重载并逐 server 报告「N 个工具」或「启动失败·原因」。**仅 owner**——新增一台服务器等于开放一条子进程执行通道。`env` 只写不读：接口只回键名，diff 里显示 `redacted:` 指纹而不是值 |
 | 语音 | ✅（默认关） | 入站转写（多 Provider 故障转移）+ 出站 edge-tts（需 `.[voice]`）。没有厂商凭据时以明确失败降级，不伪造结果 |
 | 流式输出 | ✅（默认关） | `STREAM_REPLY=true` 且适配器声明 `PROGRESSIVE` 才生效——目前只有 OneBot v11 声明。工具调用轮次不流式。09 页可观察：首 token / 首句送达 / 整条回复三段耗时 + 实际发出的分句 |
-| 多用户账号 | ✅ | 邀请制：`account_invites` 只存邀请码的 SHA-256，一次性、默认 72 小时过期（`hours` 可调，上限 30 天）；密码用标准库 `hashlib.scrypt(n=2**14, r=8, p=1)`，salt 与 hash 分列，比较走 `hmac.compare_digest`。首个所有者必须带面板的一次性 bootstrap token（`POST /api/accounts/owner`），账号表非空后该端点固定 409——否则它就是公开注册。**没有**找回密码、邮箱验证、双因素 |
+| 多用户账号 | ✅ | 邀请制：`account_invites` 只存邀请码的 SHA-256，一次性、默认 72 小时过期（`hours` 可调，上限 30 天）；密码用标准库 `hashlib.scrypt(n=2**14, r=8, p=1)`，salt 与 hash 分列，比较走 `hmac.compare_digest`。首个所有者必须带面板的一次性 bootstrap token（`POST /api/accounts/owner`），账号表非空后该端点固定 409——否则它就是公开注册。停用 / 启用走 `POST /api/accounts/{id}/status`（仅 owner），停用会立即作废已签发的 cookie，最后一个活动 owner 不能被停用。**没有**删除账号、找回密码、邮箱验证、双因素 |
 | 只读聊天存档 | ✅ | 第 13 页 + `/api/chat/*`：会话按 `chat_memberships` 在 SQL 里过滤（不是取完再筛），越权返回 404 而非 403；消息用 `after_id` 游标而非 offset，并发写入不重复不漏行；输入只写 `role=note` / `adapter=web` / `delivered=false`，调用图不 import 适配器。**没有**发送、编辑、删除、导出 |
 | 聊天端开关 | ✅ | `SOAPBOT_CHAT_WEB_ENABLED`（默认开）、`SOAPBOT_CHAT_APP_ENABLED`、`SOAPBOT_CHAT_DESKTOP_ENABLED`（默认关）。全关时 `/api/chat/*` 返回 404 而不是 403，像这个部署从没有过这些路由。手机端与桌面壳默认关闭，因为它们是装到别人设备上的二进制 |
 | 多语言 | ✅ | 中文 / English，三条通道：机器人发到群里的话（`DEFAULT_LOCALE`，人格卡可逐群覆盖）、API `detail`（按 `Accept-Language`）、面板全 13 页含外壳与图表（按浏览器切换并持久化）。流水线阶段名与顺序约束由后端按请求语言输出，不在前端维护第二份文案。**日志与堆栈有意保持英文**：同一事件在不同语言下变成不同字符串，会让 `grep` 与告警规则静默失效。`tests/test_webui_i18n.py` 用「模板里不得残留中文」防止半翻译回归 |

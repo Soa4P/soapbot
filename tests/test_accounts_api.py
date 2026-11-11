@@ -191,3 +191,48 @@ def test_the_documented_curl_bootstrap_flow_actually_works(tmp_path, monkeypatch
         account_header = {"Authorization": f"Bearer {signed.json()['access_token']}"}
         assert client.get("/api/chat/sessions", headers=account_header).status_code == 200
         assert client.get("/api/chat/sessions", headers=operator).status_code == 401
+
+
+async def test_an_owner_can_disable_a_member_and_the_old_cookie_stops_working(env) -> None:
+    """Disabling has to end the session it already started, not just the next login."""
+    env.current.update({"subject": str(env.member.id), "role": env.member.role})
+    assert (await env.client.get("/api/accounts/me")).status_code == 200
+
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    disabled = await env.client.post(
+        f"/api/accounts/{env.member.id}/status", json={"status": "disabled"}
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["account"]["status"] == "disabled"
+
+    env.current.update({"subject": str(env.member.id), "role": env.member.role})
+    assert (await env.client.get("/api/accounts/me")).status_code == 401
+
+
+async def test_a_disabled_account_can_be_enabled_again(env) -> None:
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    await env.client.post(f"/api/accounts/{env.member.id}/status", json={"status": "disabled"})
+
+    back = await env.client.post(
+        f"/api/accounts/{env.member.id}/status", json={"status": "active"}
+    )
+    assert back.status_code == 200
+    assert back.json()["account"]["status"] == "active"
+
+
+async def test_a_member_cannot_disable_anybody(env) -> None:
+    env.current.update({"subject": str(env.member.id), "role": env.member.role})
+    response = await env.client.post(
+        f"/api/accounts/{env.owner.id}/status", json={"status": "disabled"}
+    )
+    assert response.status_code == 403
+
+
+async def test_the_last_active_owner_cannot_be_disabled(env) -> None:
+    """Otherwise nobody could switch it back on without editing the database."""
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    response = await env.client.post(
+        f"/api/accounts/{env.owner.id}/status", json={"status": "disabled"}
+    )
+    assert response.status_code == 400
+    assert "owner" in response.json()["detail"]

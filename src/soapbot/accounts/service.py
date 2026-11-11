@@ -268,6 +268,43 @@ async def redeem_invite(
         return _to_account(row)
 
 
+# --------------------------------------------------------------------- status
+async def set_account_status(db: Database, *, account_id: int, status: str) -> Account:
+    """Enable or disable an account.
+
+    Disabling only works if both halves move together. ``authenticate`` stops issuing
+    cookies for a disabled account, but a cookie issued before the flip stays valid
+    until it expires — so ``active_account_from_claims`` has to reject it too, or
+    "disabled" would mean "no new logins" while the incumbent session keeps reading
+    the archive.
+
+    The last active owner cannot be disabled. Otherwise nobody could re-enable
+    anything, and the only way out would be editing the database by hand.
+    """
+    if status not in ("active", "disabled"):
+        raise AccountError("status must be active or disabled")
+    async with db.write() as session:
+        row = (
+            await session.execute(select(AccountRow).where(AccountRow.id == account_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise AccountError("account does not exist")
+        if status == "disabled" and row.status == "active" and row.role == "owner":
+            owners = (
+                await session.execute(
+                    select(func.count(AccountRow.id)).where(
+                        AccountRow.role == "owner",
+                        AccountRow.status == "active",
+                    )
+                )
+            ).scalar() or 0
+            if owners <= 1:
+                raise AccountError("the last active owner cannot be disabled")
+        row.status = status
+        await session.flush()
+        return _to_account(row)
+
+
 # --------------------------------------------------------------------- memberships
 async def list_memberships(db: Database, account_id: int) -> list[str]:
     async with db.session_factory()() as session:

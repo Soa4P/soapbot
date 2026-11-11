@@ -19,6 +19,7 @@ from soapbot.accounts.service import (
     list_accounts,
     list_memberships,
     redeem_invite,
+    set_account_status,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "list_accounts",
     "list_memberships",
     "redeem_invite",
+    "set_account_status",
 ]
