@@ -175,13 +175,17 @@ def build_pipeline(
 
     The security ordering is the part that matters most:
 
-        dedup -> guard -> whitelist -> wake -> strip -> sanitize
+        guard -> dedup -> whitelist -> wake -> strip -> sanitize
               -> injection_screen -> authorization -> command -> persist ...
 
     ``guard`` runs before the whitelist because it establishes *who* is speaking;
     the whitelist can only judge *where* they are speaking once identity is known.
     ``command`` and ``persist`` run after both, so an unauthorised user never
     reaches a handler that reads the database.
+
+    ``dedup`` sits *after* ``guard`` on purpose. Before, a refused or unknown peer still
+    consumed a dedup slot, so the same id arriving later from a legitimate path was
+    discarded as a duplicate even though the first copy was never processed.
     """
     policy = access or AccessPolicy()
     default_wake = wake or WakePolicy(wake_words=_collect_wake_words(personas))
@@ -190,8 +194,10 @@ def build_pipeline(
     pipeline = Pipeline()
 
     # --- identity first: nothing downstream may run for an unknown peer ---
-    pipeline.add(DedupStage())
+    # Dedup is after guard so a rejected event cannot occupy the slot that a later,
+    # legitimate copy of the same id would need.
     pipeline.add(GuardStage(principal_resolver, audit=audit_log))
+    pipeline.add(DedupStage())
 
     # --- reachability gates ---
     pipeline.add(WhitelistStage(policy))
