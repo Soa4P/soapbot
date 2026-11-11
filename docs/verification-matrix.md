@@ -75,6 +75,7 @@
 | 安全立场与缺口契约 | `SECURITY.md`、`security/provenance.py`、`budget/store.py`、`core/trace.py` | `tests/test_security_claims.py`（8 项：提示可被提取的立场、轨迹 / 审批 / 预算三处边界、两处缺口必须写成缺口、引用路径真实存在、完整性校验先于来源分支、预算按会话 + 周期累计、轨迹声明不可回放、把缺口改写成已覆盖必须被检测） | 本轮只补文档与测试：`vet_arguments` 的完整性校验经核实为已实现（未改代码）；轨迹无持久化、模型 token 无会话累积上限，均明确标为缺口 | **仅自动** |
 | 审查发现的接口越权与去重修复 | `api/config_probe.py`、`api/admin.py`、`api/bilibili.py`、`core/stages.py`、`core/builder.py` | `tests/test_bilibili_endpoint_limits.py`（2 项：第 4 次调用在构建 client 前被拒并带 Retry-After、限流按调用方而非全局）、`tests/test_dedup_scope.py`（2 项：不同账号的相同消息 id 不互相误丢、guard 仍先于 dedup）、`tests/test_config_probe.py`（新增 2 项：env: 与 enc:v1: 引用被拒绝且不触网）、`tests/test_wave9_admin.py`（新增 1 项：跨会话预算视图需要 MANAGE_CONFIG） | 四条均来自审查截图并已在当前代码核实：模型探测会把 env:/enc: 解析成明文发往任意地址；`/api/budget` 空 session_key 返回全量；`/impression` 无配额；dedup 键缺账号维度且在 guard 前 | **仅自动** |
 | 缺口收口：令牌空闲窗口、长会话上界、PR 标题门禁 | `security/tokens.py`、`config.py`、`scripts/check_pr_title.py`、`.github/workflows/ci.yml`、`docs/optimization-triage.md` | `tests/test_token_idle_decay.py`（6 项：默认关闭、超窗拒绝且不复活、活跃滑窗、刷新新窗、映射有界、吊销优先于空闲）、`tests/test_long_session_determinism.py`（4 项：去重环 1000 轮不增长、限流窗口滑 1000 秒仍按 5/60、轨迹环 4000 条后仍为 40、预算键 1000 天跨月单调）、`tests/test_pr_title_check.py`（7 项：中文半角/全角冒号、英文前缀、空对象、超长、环境变量传入、缺标题退出码 2） | 三处缺口取自 `docs/optimization-triage.md` §5 与 `SECURITY.md`；插件 `warn` 标红经核实早已由 `PluginsView.vue:272-278` 实现，本轮只修正过时文档；PR 标题校验跑在已有的 `backend` 必需检查里，未新增规则集上下文 | **仅自动 + 实测** |
+| QQ 官方机器人主路径 | `adapters/qq_official.py`、`cli_setup.py`、`docs/qq-official-setup.md` | `tests/test_qq_official_adapter.py`（13 项：缺依赖文案、双 intent、群/私聊事件映射、AT 段、图片附件、纯文本 `msg_type=0`、富媒体先上传再 `msg_type=7`、上传失败回退、`msg_id`/`msg_seq` 递增、第 6 次不再占用被动槽、状态表有界、停止先排空后关闭、`split_leading_at` 三种形态）、`tests/test_cli_setup.py`（新增 4 项：官方 patch 无 OneBot 键、向导写入 AppID 与环境引用、缺 AppID/AppSecret 时拒绝写文件） | 富媒体与被动回复来自官方文档（5 分钟窗口 / 每条 5 次 / 20 qpm / 每群每天 1000 / 100 QPS），旧常量 `DAILY_PROACTIVE_PER_GROUP=20` 是频道时代数字；**未做真机联网验证**（缺 AppID/AppSecret），测试用注入的假 `botpy` | **自动 + 文档**（线上联调未做） |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 
@@ -111,7 +112,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：2060 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：2077 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁
