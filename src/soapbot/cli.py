@@ -76,7 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="literal key; written to the file, so prefer --api-key-env",
     )
-    p_setup.add_argument("--kind", default="onebot11")
+    p_setup.add_argument(
+        "--kind",
+        default="",
+        help="qq_official (official platform) or onebot11 (self-hosted protocol end)",
+    )
+    p_setup.add_argument("--app-id", default="", help="qq_official: open-platform AppID")
+    p_setup.add_argument("--app-secret-env", default="", help="qq_official: env var holding AppSecret")
+    p_setup.add_argument("--app-secret", default="", help="qq_official: literal AppSecret (avoid)")
     p_setup.add_argument("--mode", default="", help="forward or reverse")
     p_setup.add_argument("--ws-url", default="", help="forward mode: ws://host:port")
     p_setup.add_argument("--host", default="", help="reverse mode: listen address")

@@ -96,6 +96,11 @@
 | `DEFAULT_LOCALE` | `zh-CN` | 机器人**对群里说话**的语言（拒绝文案、语音标签）。不影响面板，面板按浏览器语言走；人格卡可用 `locale` 逐群覆盖 |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | `LOG_JSON=false` 便于人读终端 |
 
+> `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
+> 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的
+> `kind: qq_official` 条目里，AppSecret 建议引用环境变量（例如 `env:QQ_BOT_SECRET`），
+> 不要把明文写进 YAML。
+
 > 列表型变量支持三种写法：`123,456`、`123;456`、`["123","456"]`。
 > 早期版本只接受 JSON，用逗号会以一条不说明正确语法的 `SettingsError` 启动失败。
 

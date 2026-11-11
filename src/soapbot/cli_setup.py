@@ -110,13 +110,29 @@ def adapter_patch(
     host: str = "",
     port: int | None = None,
     access_token: str = "",
+    app_id: str = "",
+    app_secret: str = "",
 ) -> list[dict[str, Any]]:
     """One adapter entry. Only the keys the chosen mode uses are sent.
 
     A stale ``host`` left over from a previous reverse setup would give the file two
     connection targets with no way to tell which one wins — the same reasoning as the
     panel's ``payload()``.
+
+    The official bot does not speak OneBot and has no ``ws_url`` / ``mode``: writing
+    those keys would describe a connection that never happens, so the two families
+    get separate branches rather than one shape with empty fields.
     """
+    if kind == "qq_official":
+        return [
+            {
+                "kind": kind,
+                "enabled": True,
+                "account_id": account_id or app_id,
+                "app_id": app_id,
+                "app_secret": app_secret or config_write.UNCHANGED,
+            }
+        ]
     entry: dict[str, Any] = {
         "kind": kind,
         "mode": mode,
@@ -241,25 +257,71 @@ def _setup_adapter(args: Any, interactive: bool) -> int:
     print("== 适配器（QQ 接入）==")
     print(f"目标文件：{path}")
 
-    kind = getattr(args, "kind", "") or "onebot11"
+    kind = (getattr(args, "kind", "") or "").strip()
     mode = (getattr(args, "mode", "") or "").lower()
     ws_url = getattr(args, "ws_url", "") or ""
     host = getattr(args, "host", "") or ""
     port = getattr(args, "port", None)
     account_id = getattr(args, "account_id", "") or ""
     token = _access_token_value(args)
+    app_id = getattr(args, "app_id", "") or ""
+    app_secret = _app_secret_value(args)
 
     if interactive:
-        kind = kind or _ask("适配器类型", "onebot11")
-        mode = _ask_choice("连接方式", ("forward", "reverse"), mode or "forward")
-        account_id = account_id or _ask("机器人 QQ（可留空）", "")
-        if mode == "reverse":
-            host = host or _ask("监听地址", "127.0.0.1")
-            port = port or int(_ask("监听端口", "6700") or 6700)
+        if not kind:
+            # The two families are not variations of one setting: one connects to a
+            # protocol end the operator runs, the other is a platform account with an
+            # AppID. Asking "which" first is what keeps the next questions meaningful.
+            choice = _ask_choice(
+                "接入方式",
+                ("官方 Bot（推荐）", "OneBot（自建协议端）"),
+                "官方 Bot（推荐）",
+            )
+            kind = "qq_official" if choice.startswith("官方") else "onebot11"
+        if kind == "qq_official":
+            app_id = app_id or _ask("AppID（开放平台应用 ID）", "")
+            if not app_secret:
+                app_secret = _ask_app_secret()
         else:
-            ws_url = ws_url or _ask("NapCat/Lagrange 的 WS 地址", "ws://127.0.0.1:3001")
-        if not token:
-            token = _ask_access_token()
+            mode = _ask_choice("连接方式", ("forward", "reverse"), mode or "forward")
+            account_id = account_id or _ask("机器人 QQ（可留空）", "")
+            if mode == "reverse":
+                host = host or _ask("监听地址", "127.0.0.1")
+                port = port or int(_ask("监听端口", "6700") or 6700)
+            else:
+                ws_url = ws_url or _ask("协议端的 WS 地址", "ws://127.0.0.1:3001")
+            if not token:
+                token = _ask_access_token()
+
+    kind = kind or "onebot11"
+
+    if kind == "qq_official":
+        if not app_id:
+            print("官方机器人需要 --app-id（开放平台应用的 AppID）。", file=sys.stderr)
+            return EXIT_BAD_INPUT
+        if not app_secret:
+            print(
+                "官方机器人需要 AppSecret：用 --app-secret-env QQ_BOT_SECRET 指向环境变量，"
+                "或交互输入。",
+                file=sys.stderr,
+            )
+            return EXIT_BAD_INPUT
+        written, message = _write(
+            path,
+            adapter_patch(
+                kind=kind,
+                mode="",
+                account_id=account_id,
+                app_id=app_id,
+                app_secret=app_secret,
+            ),
+            adapters=True,
+        )
+        print(message)
+        if not written:
+            return EXIT_NOT_WRITTEN
+        print()
+        return EXIT_OK
 
     if mode not in ("forward", "reverse"):
         print(f"连接方式只能是 forward/reverse，收到 {mode or '(空)'}。", file=sys.stderr)
@@ -312,6 +374,30 @@ def _access_token_value(args: Any) -> str:
     if env_name:
         return f"env:{env_name}"
     return str(getattr(args, "access_token", "") or "").strip()
+
+
+def _app_secret_value(args: Any) -> str:
+    env_name = str(getattr(args, "app_secret_env", "") or "").strip()
+    if env_name:
+        return f"env:{env_name}"
+    return str(getattr(args, "app_secret", "") or "").strip()
+
+
+def _ask_app_secret() -> str:
+    """Ask for the AppSecret without echoing it, and prefer an env reference.
+
+    Same reasoning as the provider key: this is the credential that opens the
+    official API, and a literal typed into a shared terminal ends up in scrollback.
+    """
+    import getpass
+
+    choice = _ask_choice("AppSecret 存放方式", ("env", "literal", "skip"), "env")
+    if choice == "skip":
+        return ""
+    if choice == "env":
+        name = _ask("环境变量名", "QQ_BOT_SECRET")
+        return f"env:{name}" if name else ""
+    return getpass.getpass("AppSecret（不回显）: ").strip()
 
 
 def _ask_api_key() -> str:
