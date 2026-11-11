@@ -3064,6 +3064,29 @@
             { "path": "docs/verification-matrix.md", "status": "done" },
             { "path": "docs/progress/progress.json", "status": "done" }
           ]
+        },
+        {
+          "id": "ph42-t8",
+          "name": "把 README 与其余文档补齐，顺手补掉停用账号的实时失效",
+          "status": "done",
+          "note": "用户指出「README 没改，其他的也没落实」。逐条核对后确认属实：README 还写着面板 12 页、没有任何存档入口；guide 的页表缺第 13 行；capabilities 仍写「全 12 页」；CHANGELOG 没有这一轮的条目；security-model 没写「存档账号与面板令牌是两套凭据」；public-user-guide 没有建首个账号的复制式步骤；verification-matrix / delivery-readiness 也没登记本轮能力。补文档的过程中又挖出两处「文档承诺、代码没兜住」：① bootstrap token 被描述成建完第一个账号就失效，实际只有 POST /api/auth/login 会 redeem 它，直接当 Bearer 调 API 并不消费，所以文档改成给出「用完立刻 redeem 或删文件」的做法；② 「停用账号」原先只挡住下一次登录——authenticate 里的 status != active 只在登录路径上，已签发的 cookie 能一直读到过期。新增 active_account_from_claims，让停用即刻生效，/api/chat/* 与 /api/accounts/* 四个调用点统一走它，两侧各加一条用例（停用后 /me 401、停用后 /api/chat/sessions 401）。另外文档里那条 curl 从来没被测过，补 test_the_documented_curl_bootstrap_flow_actually_works 按文档原样跑一遍：bootstrap 建号 200、第二次 409、账号登录 200、账号 token 读存档 200、bootstrap token 读存档 401。",
+          "files": [
+            { "path": "README.md", "status": "done" },
+            { "path": "docs/guide.md", "status": "done" },
+            { "path": "docs/capabilities.md", "status": "done" },
+            { "path": "CHANGELOG.md", "status": "done" },
+            { "path": "docs/security-model.md", "status": "done" },
+            { "path": "docs/public-user-guide.md", "status": "done" },
+            { "path": "docs/chat-archive.md", "status": "done" },
+            { "path": "docs/architecture.md", "status": "done" },
+            { "path": "docs/verification-matrix.md", "status": "done" },
+            { "path": "docs/delivery-readiness-v2.md", "status": "done" },
+            { "path": "src/soapbot/accounts/service.py", "status": "done" },
+            { "path": "src/soapbot/api/accounts.py", "status": "done" },
+            { "path": "src/soapbot/api/chat.py", "status": "done" },
+            { "path": "tests/test_accounts_api.py", "status": "done" },
+            { "path": "tests/test_chat_api.py", "status": "done" }
+          ]
         }
       ]
     }
@@ -3161,7 +3184,7 @@
     }
   ],
   "verification": {
-    "pytest": "2123 passed, 12 skipped",
+    "pytest": "2126 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

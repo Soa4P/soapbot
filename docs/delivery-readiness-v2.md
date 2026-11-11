@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `2123 passed, 12 skipped`；CI 六个
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `2126 passed, 12 skipped`；CI 六个
 必需检查全绿（`backend` 两个平台、`frontend`、`desktop`、`package`、`review`），另有两个
 按需 job：`desktop-bundle` 出 Windows 安装包、`release` 在 tag 上发布。
 
@@ -125,7 +125,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 
 ### 5. 多语言：只翻译给人看的话
 
-**边界**：全部 12 页（含外壳、图表、对话框、阶段图）与机器人对外文案都已接通；日志与
+**边界**：12 个管理页 + 第 13 页存档（含外壳、图表、对话框、阶段图）与机器人对外文案都已接通；日志与
 异常堆栈保持英文。这条边界现在由测试守着，而不是由文档声明——见下文。
 
 三处文案被翻译，其余一律不翻：
@@ -201,8 +201,9 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（16 项）+ `tests/test_mcp_live.py`（opt-in）；已接真实 filesystem server，14 个工具 |
 | **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
 | **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（30 项） |
-| **多语言（对外文案 + 面板全 12 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；浏览器逐页实测中英双向切换 |
+| **多语言（对外文案 + 面板全 13 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；12 个管理页浏览器逐页实测中英双向切换，第 13 页存档由 `test_webui_i18n.py` 保证键齐全与「模板无中文残留」，**未做浏览器实测** |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
+| **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（9 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
 | **面板流式观察（09 页）** | **已完成** | 三段耗时阶梯（首 token / 首句送达 / 整条回复）、分句序列、中断与截断角标；中英双语浏览器实测 |
 | **上游连通性自检（doctor）** | **已完成** | `tests/test_posture.py`（51 项）；`doctor` 实跑输出 `[warn] provider.upstream`；`--probe` 为可选网络探测 |
 
@@ -245,7 +246,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 2123 passed, 12 skipped
+python -m pytest -q                 # 2126 passed, 12 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度

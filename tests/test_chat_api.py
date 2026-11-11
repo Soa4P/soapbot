@@ -205,3 +205,25 @@ async def test_a_member_grant_is_applied_before_the_limit(env) -> None:
     )
     rows = await env.memory.list_sessions(limit=1, session_keys=["qq:group:1"])
     assert [row["session_key"] for row in rows] == ["qq:group:1"]
+
+
+async def test_a_disabled_member_cannot_read_the_archive(env) -> None:
+    """The chat router resolves the account itself, so it needs its own guard.
+
+    ``/api/accounts/me`` refusing a disabled account does not protect this surface: it
+    is a different call site, and leaving it out is exactly how "disable" ends up
+    meaning "no new logins" while the old cookie keeps reading.
+    """
+    from soapbot.memory.db import AccountRow
+
+    env.current["account"] = env.member
+    assert (await env.client.get("/api/chat/sessions")).status_code == 200
+
+    async with env.database.write() as session:
+        await session.execute(
+            AccountRow.__table__.update()
+            .where(AccountRow.id == env.member.id)
+            .values(status="disabled")
+        )
+
+    assert (await env.client.get("/api/chat/sessions")).status_code == 401

@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from soapbot.accounts import Account, has_access, list_memberships
-from soapbot.accounts.service import account_from_claims
+from soapbot.accounts.service import active_account_from_claims
 from soapbot.api.auth import require_api_auth
 from soapbot.config import settings
 
@@ -75,8 +75,10 @@ async def chat_surfaces() -> dict[str, bool]:
 async def _account(request: Request, auth: dict[str, Any]) -> Account:
     _ensure_surface()
     memory = _memory(request)
-    account = await account_from_claims(memory.db, auth)
+    account = await active_account_from_claims(memory.db, auth)
     if account is None:
+        # Same answer for "deleted" and "disabled": the caller learns only that this
+        # credential is not a way in any more.
         raise HTTPException(status_code=401, detail="account no longer exists")
     if account.id == 0:
         # The bootstrap token resolves to a synthetic owner. It exists to create the
