@@ -49,25 +49,56 @@ make check
 cd webui && npm run typecheck && npm run build
 ```
 
-## 分支与合并：走 PR，不直推 master
+## 分支与合并：所有权、审批与绕过
 
-`master` 有分支保护：必须通过 pull request，且 6 个必需状态检查全绿才能合并。
-2026-11-09 有一次直推绕过它（GitHub 允许管理员 bypass），事后看，那条保护只是被跳过
-而不是被遵守——「已保护」于是变成一句注释。所以流程写在这里，作为默认而不是建议：
+### 谁能做什么
+
+| 角色 | 直推 `master` | 开 PR | 人工批准 | 合并方式 |
+|---|---|---|---|---|
+| 仓库所有者（`admin`） | 允许 | 需要留痕或 AI 审查时 | 不需要 | 直推，或 `gh pr merge --admin --squash` |
+| 其他人（`write` / `maintain`，含被授予审批权的人） | 禁止 | 必须 | 必须由他人批准 | 普通 `gh pr merge --squash` |
+
+规则由仓库 Ruleset 执行，不是靠自觉：
+
+- **提交者不能自批自合**：启用 `require_last_push_approval`（最后一次推送必须由他人批准），
+  自己提交的 PR 既不能自己批准，也不能自己强制合并。
+- **绕过权限绑定 `admin` 角色，不绑定某个人**。GitHub Ruleset 的 `bypass_actors` 只接受
+  角色 / team / App，而本仓库挂在个人账号下、没有 team 可建，无法按 user id 锁定。
+  当前全仓只有所有者是 `admin`、`Cossiant` 是 `write`，所以效果就是「仅所有者可绕过」。
+- **新增协作者最高给 `maintain`**。给 `admin` 等于把直推权一起给出去了；`maintain`
+  可以审别人的 PR，但自己的 PR 仍然要别人批准。
+- 所有者的直推路径**不产生 PR，因此也没有 PR 上的 AI 审查记录**。需要 AI 审查或留痕时，
+  走 PR + `--admin` 合并，结论留在 PR 里可查。
+- `--admin` 只跳过人工批准这一项，**不得用来跳过红色检查**。
+
+### 贡献者与其他维护者的流程
 
 ```bash
 git switch -c feat/short-description          # 1. 开分支，不碰 master
 # …改动、make check…
 git push -u origin feat/short-description      # 2. 推分支
-gh pr create --base master                     # 3. 开 PR（让 gh 载入模板）
+gh pr create --base master --body-file pr-body.md   # 3. 开 PR，正文按模板四节写
 gh pr checks --watch                           # 4. 等必需检查全绿
-gh pr merge --squash --delete-branch           # 5. 合并并删分支
+gh pr merge --squash --delete-branch           # 5. 由他人批准后合并
 ```
 
-**不要用 `--fill`**：它用 commit message 填 body，直接覆盖
-`.github/pull_request_template.md`。模板里「影响面」「数字基线」「AI 审查」「回滚」
-这几节是给下一个人看的，`--fill` 会让它们从来不出现——模板改了等于没改。不传 `--body`
-时 `gh` 才会打开编辑器并带上模板。
+**不要用 `--fill`**：它用 commit message 填 body，模板四节一个都不会出现。
+正文用 `--body-file` 传入，十几行就够，结构见 `.github/pull_request_template.md`；
+不传 `--body` 时 `gh` 会打开编辑器并带上模板。
+
+### PR 标题与正文
+
+标题一行中文「动作: 对象」：
+
+```
+新增安全加固: 语义授权取舍与完整性信号
+修复: Windows 重启后保留登录令牌
+```
+
+正文四节：作用的模块（仅英文小写）、为什么、提交前确认、Agent 参与声明。
+检查项是普通列表，不是复选框；不要放表格。
+
+### 六道必需检查
 
 六道必需检查（读自 `branches/master/protection`，不是凭印象）是
 `backend (ubuntu-latest, 3.12)`、`backend (windows-latest, 3.12)`、`frontend`、
@@ -110,30 +141,31 @@ gh api repos/:owner/:repo/branches/master/protection/required_status_checks \
 这不是假想——2026-11-09 发生过一次（run `42654474652`）。`tests/test_ai_review_workflow.py`
 就是为了让这类语法错误在本地就暴露，但它替代不了 `actionlint`。
 
-### 单人维护时的 review 要求
+### 所有者强制合并
 
-保护规则还要求 1 个批准。仓库只有一个人时 GitHub 不允许自己批自己，PR 会停在
-`REVIEW_REQUIRED`，`gh pr merge` 被拒：
+保护规则要求 1 个批准。PR 由你自己的账号开出时，GitHub 认为提交者就是你，无法自批，
+PR 会停在 `REVIEW_REQUIRED`：
 
 ```
 X Pull request #N is not mergeable: the base branch policy prohibits the merge.
 ```
 
-这时用管理员的 `--admin`：
+所有者用 `--admin`：
 
 ```bash
 gh pr merge <N> --admin --squash --delete-branch
 ```
 
-`--admin` 只跳过人工 approve 这一项：PR 存在、6 个必需检查全绿、diff 与检查结果都留在 PR 里。
-它和直推 `master` 不是一回事——直推把 PR 和检查一起跳过了。等有第二个维护者时，
-`required_approving_review_count` 保持为 1，`--admin` 就不该再用。
+`--admin` 只跳过人工批准：PR 存在、6 项检查全绿、diff 与结果都留在 PR 里。
+它和直推 `master` 不是一回事——直推不留 PR 记录，也不会跑 PR 上的 AI 审查。
+检查红的时候先修问题，`--admin` 不是跳过检查的工具。
 
-为什么不允许直推：
+### 为什么其他人不允许直推
 
 - bypass 一次之后，规则的存在与不存在没有区别，下一个人也只能靠自觉；
 - PR 把 diff、检查结果和讨论放在同一处，回滚时能找到「为什么」；
-- Windows 的差异只有 CI 的 `windows-latest` 能跑出来，本地绿不等于能合并。
+- Windows 的差异只有 CI 的 `windows-latest` 能跑出来，本地绿不等于能合并；
+- 自己批自己等于没有批准，所以 `require_last_push_approval` 必须开着。
 
 发布走 tag，不手工上传：
 
