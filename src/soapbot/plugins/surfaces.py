@@ -82,6 +82,8 @@ class SurfaceRouter:
         audit=None,
         http_client=None,
         storage=None,
+        bilibili_cookie_provider=None,
+        bilibili_client_factory=None,
     ) -> None:
         self._guard = guard
         self._plugin = plugin
@@ -92,6 +94,8 @@ class SurfaceRouter:
         self._audit = audit
         self._http = http_client
         self._storage = storage
+        self._bilibili_cookie_provider = bilibili_cookie_provider
+        self._bilibili_client_factory = bilibili_client_factory
         self._log_writes: list[float] = []
 
     def _audit_denied(self, surface: str, reason: str) -> None:
@@ -206,6 +210,28 @@ class SurfaceRouter:
         resp = await self._http.request(method, url, **kwargs)
         return {"status": resp.status_code, "text": resp.text[:8000]}
 
+    async def _bilibili(self, args: dict[str, Any], caller) -> Any:
+        # Re-checked here even though the in-process client checks again: in the
+        # isolated path this router *is* the security boundary — the child has no
+        # guard at all, and this is the object that decides.
+        self._guard.check(Capability.BILIBILI, detail="bilibili.request")
+        path = str(args.get("path") or "")
+        if not path:
+            raise ValueError("bilibili.request needs a path")
+        raw_params = args.get("params") or {}
+        if not isinstance(raw_params, dict):
+            raise ValueError("params must be an object of string->string")
+        from soapbot.plugins.sandbox import BilibiliClient
+
+        client = BilibiliClient(
+            self._guard,
+            cookie_provider=self._bilibili_cookie_provider or _default_bilibili_cookie,
+            client_factory=self._bilibili_client_factory,
+        )
+        # The client audits the request with the path only; the cookie value never
+        # enters a detail string, a log line or an error message.
+        return await client.get_json(path, params=raw_params)
+
     async def _storage_get(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.STORAGE, detail="storage.get")
         if self._storage is None:
@@ -263,6 +289,20 @@ def _as_int(value: Any, default: int) -> int:
         return default
 
 
+def _default_bilibili_cookie() -> str:
+    """Lazy settings read, mirroring ``api.chat.surfaces()``.
+
+    ``None``/empty returns ``""`` so the client raises its own specific
+    "not configured" error rather than an AttributeError here.
+    """
+    from soapbot.config import settings
+
+    value = getattr(settings, "bili_cookie", None)
+    if value is None:
+        return ""
+    return value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
+
+
 #: Surface name -> handler. Kept as a module-level table so ``dispatch`` has exactly
 #: one lookup, and so adding a surface requires touching one obvious place.
 _SURFACE_TABLE = {
@@ -273,6 +313,7 @@ _SURFACE_TABLE = {
     "session.view": SurfaceRouter._session_view,
     "send.message": SurfaceRouter._send,
     "http.request": SurfaceRouter._http,
+    "bilibili.request": SurfaceRouter._bilibili,
     "storage.get": SurfaceRouter._storage_get,
     "storage.set": SurfaceRouter._storage_set,
     "storage.delete": SurfaceRouter._storage_delete,
