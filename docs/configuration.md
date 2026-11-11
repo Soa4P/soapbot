@@ -116,6 +116,7 @@ OneBot 11 网关（阶段二）用四个变量：
 | `CHAT_APP_ENABLED` | `false` | Flutter 手机端可以访问聊天接口 |
 | `CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问聊天接口 |
 | `CHAT_TALK_ENABLED` | `false` | 允许被授权的账号在网页/手机端与机器人**对话**（`POST /api/chat/messages`） |
+| `BILI_COOKIE` | 空 | B 站登录 Cookie（`SESSDATA=...`），供插件的 `bilibili` 能力使用；宿主持有并在请求时注入，不进日志/审计。**这是凭据**，泄露等于交出 B 站账号，只在本机或容器挂载文件里配置 |
 
 三个端开关全关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。
 `CHAT_TALK_ENABLED` 单独控制发送端点，关掉时它同样 404。开启后也不是「能登录就能聊」：
