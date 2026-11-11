@@ -226,3 +226,67 @@ def test_surface_table_routes_bilibili() -> None:
     from soapbot.plugins.surfaces import _SURFACE_TABLE
 
     assert "bilibili.request" in _SURFACE_TABLE
+
+
+async def test_bili_example_plugin_registers_and_uses_the_surface() -> None:
+    """The example plugin: command registration + surface usage, with a stub ctx.
+
+    Naming ``soapbot.examples.plugins.bili.main`` here also keeps the test-gaps
+    ratchet honest — the module ships in the wheel, so somebody has to look at it.
+    """
+    from soapbot.examples.plugins.bili.main import BiliPlugin
+
+    class _StubBilibili:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def get_json(self, path, *, params=None):
+            self.calls.append((path, dict(params or {})))
+            if path == "/x/web-interface/history/cursor":
+                return {
+                    "code": 0,
+                    "data": {"items": [{"title": "视频 A", "bvid": "BV1a", "author_name": "UP 主"}]},
+                }
+            return {"code": 0, "data": {"title": "视频 A", "owner": {"name": "UP"},
+                                        "stat": {"view": 1, "danmaku": 2}, "desc": ""}}
+
+    class _StubStorage:
+        def __init__(self) -> None:
+            self.data: dict = {}
+
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+
+        def set(self, key, value):
+            self.data[key] = value
+
+        def delete(self, key):
+            self.data.pop(key, None)
+
+    class _StubCtx:
+        def __init__(self) -> None:
+            self.bilibili = _StubBilibili()
+            self.storage = _StubStorage()
+            self.commands: dict = {}
+
+        def command(self, name, *, description="", usage=""):
+            def deco(fn):
+                self.commands[name] = fn
+                return fn
+
+            return deco
+
+    ctx = _StubCtx()
+    plugin = BiliPlugin()
+    await plugin.setup(ctx)  # type: ignore[arg-type]
+    assert {"bili-history", "bili-look", "bili-forget"} <= set(ctx.commands)
+
+    history = await ctx.commands["bili-history"](None, [])
+    assert "视频 A" in history and "UP 主" in history
+    assert ctx.bilibili.calls[0][0] == "/x/web-interface/history/cursor"
+
+    await ctx.commands["bili-look"](None, ["BV1a"])
+    assert ctx.storage.data["seen_bvids"]["BV1a"]["title"] == "视频 A"
+
+    await ctx.commands["bili-forget"](None, [])
+    assert "seen_bvids" not in ctx.storage.data
