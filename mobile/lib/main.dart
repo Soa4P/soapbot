@@ -73,7 +73,7 @@ class _SoapbotArchiveAppState extends State<SoapbotArchiveApp> {
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _account == null
               ? LoginScreen(api: _api, onSignedIn: _signedIn)
-              : SessionsScreen(api: _api, onSignOut: _signOut),
+              : SessionsScreen(api: _api, accountId: _account!.id, onSignOut: _signOut),
     );
   }
 }

@@ -108,16 +108,23 @@ OneBot 11 网关（阶段二）用四个变量：
 
 聊天存档有三个端开关，决定 `/api/chat/*` 是否存在：
 
+聊天存档有三个端开关，决定 `/api/chat/*` 是否存在；第四个决定这些端能不能**对话**：
+
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `CHAT_WEB_ENABLED` | `true` | 浏览器端；唯一常开的入口，因为它同时是验证存档是否正确的工具 |
 | `CHAT_APP_ENABLED` | `false` | Flutter 手机端可以访问聊天接口 |
 | `CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问聊天接口 |
+| `CHAT_TALK_ENABLED` | `false` | 允许被授权的账号在网页/手机端与机器人**对话**（`POST /api/chat/messages`） |
 
-三个都关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。手机端
-与桌面壳默认关闭，是因为它们是装到别人设备上的二进制，默认能读存档不合适；开启等于
-所有者明确同意。账号本身由邀请码创建，首个所有者用面板的一次性 bootstrap token 建立
-（`POST /api/accounts/owner`）。开关的完整语义见 [`chat-archive.md`](./chat-archive.md)。
+三个端开关全关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。
+`CHAT_TALK_ENABLED` 单独控制发送端点，关掉时它同样 404。开启后也不是「能登录就能聊」：
+账号需要在第 15 页被授权自己的会话（`web:private:account-<id>`），每条消息都走与 QQ
+消息相同的管线门禁（注入检测、按适配器限频）。改这个开关要重启进程——web 适配器在
+启动时注册。手机端与桌面壳默认关闭，是因为它们是装到别人设备上的二进制，默认能读存档
+不合适；开启等于所有者明确同意。账号本身由邀请码创建，首个所有者用面板的一次性
+bootstrap token 建立（`POST /api/accounts/owner`）。开关的完整语义见
+[`chat-archive.md`](./chat-archive.md)。
 
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
 > 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的

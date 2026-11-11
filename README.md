@@ -88,7 +88,7 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 [模型接入指南](docs/model-providers.md)。
 
 三条路径的细节、常见失败、验证命令和卸载在
-[部署文档](docs/deploy-quickstart.md)。面板 13 页、群范围、语音、远程访问和登录在
+[部署文档](docs/deploy-quickstart.md)。面板 15 页、群范围、语音、远程访问和登录在
 [使用指南](docs/guide.md)。第一次使用、Windows 重启令牌、Linux SSH、模型和插件的复制式步骤见
 [公开用户指南](docs/public-user-guide.md)。
 
@@ -101,15 +101,19 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
    `POST /api/accounts/owner`。账号表非空后这个端点固定 409，所以它不会变成公开注册。
    密码至少 8 位，库里只有 scrypt 哈希。令牌本身只被 `POST /api/auth/login` 消费——直接当
    Bearer 用不会消费它，所以在拿到账号后应立刻登录一次，或直接删掉那个文件。
-2. 所有者在第 13 页生成邀请码，邀请码一次性、默认 72 小时过期（`hours` 可调，上限 30 天），库里只存 SHA-256。
+2. 所有者在**第 15 页「账号与邀请」**生成邀请码并授权会话（含「与机器人对话」一键授权），
+   邀请码一次性、默认 72 小时过期（`hours` 可调，上限 30 天），库里只存 SHA-256。
 3. 成员用邀请码注册并登录，只看得到被授权的会话；越权访问别人的会话返回 404 而不是
    403——403 会确认「这个会话存在」。
 
-存档是**只读**的：输入框写的是备注，落库为 `role=note`、`adapter=web`，响应里带
-`delivered=false`，调用图上没有任何适配器——「不发送」由代码结构保证，不由提示语保证。
+存档默认**只读**：输入框写的是备注，落库为 `role=note`、`adapter=web`，响应里带
+`delivered=false`，永不投递——「不发送」由代码结构保证，不由提示语保证。要让成员在网页/
+手机上**和机器人对话**，设 `SOAPBOT_CHAT_TALK_ENABLED=true` 并在第 15 页给账号授权自己的
+会话；此后 `POST /api/chat/messages` 存在，每条消息走与 QQ 消息同一条管线（注入检测、
+按适配器限频），机器人的回复只出现在该成员自己的 `web:private:account-<id>` 会话里。
 手机端和桌面壳默认关闭（`SOAPBOT_CHAT_APP_ENABLED` / `SOAPBOT_CHAT_DESKTOP_ENABLED`），
-因为它们是装到别人设备上的二进制；三个开关全关时 `/api/chat/*` 返回 404，像这个部署从没有过
-这些路由。完整语义见 [docs/chat-archive.md](docs/chat-archive.md)。
+因为它们是装到别人设备上的二进制；三个端开关全关时 `/api/chat/*` 返回 404，像这个部署
+从没有过这些路由。完整语义见 [docs/chat-archive.md](docs/chat-archive.md)。
 
 ## 边界
 
@@ -118,7 +122,8 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
   写操作另需 CSRF 头与同源 `Origin`。Cookie 挡不住已经在页面里执行的 XSS，
   CSP 和输出转义各管各的那一段。
 - 私聊默认拒绝。插件要显式批准，批准不等于自动加载。模型输出复述了不可信内容的
-  canary，整条回复丢弃，不尝试清洗。
+  canary，整条回复丢弃，不尝试清洗。QQ 私聊的默认拒绝不因 web 对话而变：网页/手机端
+  的对话是显式开启、逐账号授权的独立能力，见 [docs/security-model.md](docs/security-model.md) §9.2。
 - 配置写入走「读取 → diff → 确认 → 写入」，diff 由服务端用与启动同一套解析器算。
   审计只记字段名，不记值。错误响应只给稳定短句和类别标签，完整异常进服务端日志。
 - Provider 响应正文不进 `last_error`、不进日志环；用户消息正文不写日志。

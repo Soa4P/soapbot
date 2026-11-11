@@ -171,12 +171,17 @@ async def test_every_surface_off_means_the_endpoint_disappears(env, monkeypatch)
     # pass while the real switch silently did nothing.
     monkeypatch.setattr(
         "soapbot.api.chat.settings",
-        SimpleNamespace(chat_web_enabled=False, chat_app_enabled=False, chat_desktop_enabled=False),
+        SimpleNamespace(
+            chat_web_enabled=False,
+            chat_app_enabled=False,
+            chat_desktop_enabled=False,
+            chat_talk_enabled=False,
+        ),
     )
     response = await env.client.get("/api/chat/sessions")
     assert response.status_code == 404
     surfaces = await env.client.get("/api/chat/surfaces")
-    assert surfaces.json() == {"web": False, "app": False, "desktop": False}
+    assert surfaces.json() == {"web": False, "app": False, "desktop": False, "talk": False}
 
 
 async def test_default_flags_leave_only_the_web_surface_on() -> None:
@@ -187,6 +192,9 @@ async def test_default_flags_leave_only_the_web_surface_on() -> None:
     assert defaults.chat_web_enabled is True
     assert defaults.chat_app_enabled is False
     assert defaults.chat_desktop_enabled is False
+    # Conversation is the newest and most powerful surface (it spends model budget
+    # from a browser), so like app/desktop it ships off; an operator turns it on.
+    assert defaults.chat_talk_enabled is False
 
 
 async def test_the_bootstrap_token_cannot_read_the_archive(env) -> None:
@@ -227,3 +235,88 @@ async def test_a_disabled_member_cannot_read_the_archive(env) -> None:
         )
 
     assert (await env.client.get("/api/chat/sessions")).status_code == 401
+
+
+# ---------------------------------------------------------------- history paging
+# The forward cursor answers "what arrived since N" — the wrong question for a reader
+# opening an old session. latest/before_id exist so the newest page is reachable at
+# all; these tests pin the contract the two clients build their "load earlier" on.
+
+
+async def _seed(session_key: str, count: int, memory: MemoryStore) -> list[int]:
+    ids = []
+    for i in range(count):
+        ids.append(
+            await memory.archive_message(
+                session_key=session_key, role="user", content=f"m{i}", adapter="onebot11"
+            )
+        )
+    return ids
+
+
+async def test_latest_returns_the_newest_page_ascending(env) -> None:
+    ids = await _seed("qq:group:1", 5, env.memory)
+    response = await env.client.get(
+        "/api/chat/messages", params={"session_key": "qq:group:1", "latest": "true", "limit": 2}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["id"] for row in body["messages"]] == ids[-2:]
+    assert body["has_older"] is True
+
+
+async def test_latest_on_a_short_session_reports_no_older(env) -> None:
+    """A page ending exactly at the first message must not leave a dead load button."""
+    await _seed("qq:group:1", 2, env.memory)
+    response = await env.client.get(
+        "/api/chat/messages", params={"session_key": "qq:group:1", "latest": "true", "limit": 200}
+    )
+    assert response.json()["has_older"] is False
+
+
+async def test_before_id_pages_backwards_through_history(env) -> None:
+    ids = await _seed("qq:group:1", 6, env.memory)
+    first = await env.client.get(
+        "/api/chat/messages", params={"session_key": "qq:group:1", "latest": "true", "limit": 2}
+    )
+    oldest_on_page = first.json()["messages"][0]["id"]
+    assert oldest_on_page == ids[-2]
+
+    second = await env.client.get(
+        "/api/chat/messages",
+        params={"session_key": "qq:group:1", "before_id": oldest_on_page, "limit": 3},
+    )
+    body = second.json()
+    assert [row["id"] for row in body["messages"]] == ids[-5:-2]
+    # One row remains below this page (ids[-5] is the fifth of six).
+    assert body["has_older"] is True
+
+    third = await env.client.get(
+        "/api/chat/messages",
+        params={"session_key": "qq:group:1", "before_id": body["messages"][0]["id"], "limit": 3},
+    )
+    tail = third.json()
+    # Everything remaining sits below this page and nothing sits below them: history
+    # is exhausted, so the client hides the button.
+    assert all(row["id"] < body["messages"][0]["id"] for row in tail["messages"])
+    assert tail["has_older"] is False
+
+
+async def test_paging_modes_are_mutually_exclusive(env) -> None:
+    base = {"session_key": "qq:group:1"}
+    for params in (
+        {**base, "after_id": "1", "latest": "true"},
+        {**base, "after_id": "1", "before_id": "5"},
+        {**base, "latest": "true", "before_id": "5"},
+    ):
+        response = await env.client.get("/api/chat/messages", params=params)
+        assert response.status_code == 400, params
+
+
+async def test_latest_respects_session_isolation(env) -> None:
+    env.current["account"] = env.member
+    response = await env.client.get(
+        "/api/chat/messages", params={"session_key": "qq:group:2", "latest": "true"}
+    )
+    # Same answer as the forward cursor: the member was not invited into group 2.
+    assert response.status_code == 404

@@ -233,7 +233,7 @@ soapbot/
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（2130 项通过 / 12 项跳过）
+└── tests/              # pytest（2145 项通过 / 12 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点

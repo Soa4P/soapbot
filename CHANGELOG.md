@@ -10,6 +10,46 @@
 
 ## [Unreleased]
 
+### 多端对话：网页/手机端可以和机器人真正说话了
+
+原来错在哪：存档端点做完后，「多端」只有读的能力——网页和手机上的输入框写的是备注，
+永远发不出一条能让机器人回答的消息。原本在 QQ 里完成的「和机器人对话」这件事，在
+主力使用的网页端/手机端上不存在；而会话列表还有两个伴随缺陷：首屏加载的是**最早的**
+100 条（老会话的中间历史永远看不到），列表拉一次就不再更新（新会话不出现、计数不涨）。
+
+现在：
+
+- **`POST /api/chat/messages`**：构造进程内消息交给 `runtime.dispatch`，与 QQ 消息过
+  同一条管线（Guard → 注入检测 → 白名单 → 限频 → 人格 → 模型 → 回复落库）。端点不持有
+  适配器引用，回复由 `PersistReplyStage` 在 `send_ok` 后落库，SSE 自动送达客户端。
+  session_key 由服务端推导为 `web:private:account-<id>`，请求体里没有身份字段；
+  `account-` 前缀保证永不与 owner/admin 名单里的纯数字 QQ 号撞车
+  （`normalize_id` 对字母前缀保形）。
+- **逐个授权**：账号必须有自己的 membership 行（owner 豁免），无授权与读路径一样 404。
+  `WhitelistStage` 的 web 分支锚定在进程内适配器名上，QQ 私聊默认拒绝原样保留，
+  `tests/test_chat_talk.py` 有 QQ 侧仍然拒绝的对抗用例。
+- **开关 `SOAPBOT_CHAT_TALK_ENABLED`**（默认 false，改后需重启——web 适配器启动时注册），
+  关闭时发送端点 404；`/api/chat/surfaces` 新增 `talk` 键。
+- **新适配器 `adapters/web.py`**：capabilities 只有 TEXT/REPLY（语音自动降级为文本），
+  `send()` 不写库（`PersistReplyStage` 会写，写两次等于每条回复存两行）。
+- **历史翻页**：`GET /api/chat/messages` 新增 `latest`（最新一页）与 `before_id`（向前
+  翻）两种模式，响应带服务端探测的 `has_older`；三种模式互斥，同时给返回 400，
+  `after_id` 原语义不动。网页端与手机端首屏改为最新一页，消息区顶部有「加载更早」，
+  空白消息在端点被 400 拒绝（POST 直进 dispatch，绕过了 `_on_event` 的 blank 检查，
+  这条是补上的）。
+- **会话列表自动刷新**：网页端 30 秒轮询（保留选中态），手机端 30 秒定时器 + 从聊天页
+  返回时刷新。
+- **第 15 页「账号与邀请」**：账号列表、停用/启用、签邀请码（明文一次性显示 + 复制）、
+  授权会话——「与机器人对话」按钮一键预填 `web:private:account-<id>`。此前这些操作
+  只有 API，文档自己承认「面板上还没有这一层按钮」。页面编号按「只追加、永不重排」
+  规则落到 15（14 已被存档登录页占用），面板页数口径 13 → 15。
+- **手机端**：`sendMessage`/`talkEnabled`/翻页参数进 `client.dart`，聊天屏对自己的
+  web 会话显示发送框（其余会话仍是备注按钮），列表屏 30 秒刷新。**仍未在真机构建验证**
+  ——本机没有 Flutter SDK，这是本轮已知未验证项。
+- **测试**：`tests/test_chat_talk.py` 10 项（flag 404、无适配器 503、无授权 404、
+  owner/成员对话、halted 429、内容边界、白名单对抗）、`tests/test_chat_api.py` 6 项
+  翻页用例、webui `ChatView.spec.ts` 5 项 + `AccountsView.spec.ts` 4 项。
+
 ### 接入层只有一个身份：拿到令牌的人能看到一切
 
 原来错在哪：前 41 轮把机器人本体做完了，接入层却始终是「一条 `init_token` 就是 operator」。

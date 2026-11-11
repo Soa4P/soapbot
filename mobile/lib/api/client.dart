@@ -44,6 +44,8 @@ class SessionRow {
     if (kind == 'private' || kind == 'c2c') return '私聊 $id';
     return sessionKey;
   }
+
+  bool isWebTalk(String accountId) => sessionKey == 'web:private:account-$accountId';
 }
 
 class Message {
@@ -88,6 +90,18 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// A history page plus whether even older messages exist.
+///
+/// `has_older` comes from a server-side existence probe, not from `length == limit`,
+/// so a page ending exactly at the first message never leaves a dead "load earlier"
+/// button on screen.
+class MessagesPage {
+  const MessagesPage({required this.messages, required this.hasOlder});
+
+  final List<Message> messages;
+  final bool hasOlder;
 }
 
 /// Thin client for the same endpoints the web page uses.
@@ -152,21 +166,51 @@ class ChatApi {
 
   Future<Account> me() async => Account.fromJson(await _send('GET', '/api/accounts/me'));
 
+  /// Which client surfaces the deployment has on. `talk` gates the send box.
+  Future<bool> talkEnabled() async {
+    final body = await _send('GET', '/api/chat/surfaces');
+    return body['talk'] == true;
+  }
+
   Future<List<SessionRow>> sessions() async {
     final body = await _send('GET', '/api/chat/sessions');
     final rows = body['sessions'] as List<dynamic>? ?? const [];
     return rows.map((row) => SessionRow.fromJson(row as Map<String, dynamic>)).toList();
   }
 
-  Future<List<Message>> messages(String sessionKey, {int afterId = 0, int limit = 100}) async {
-    final query = Uri(queryParameters: {
+  /// One paging mode per call — the server rejects combinations with 400.
+  ///
+  /// Default (`afterId: 0`) is the forward-sync contract used by the poll loop;
+  /// [latest] fetches the newest page of an old session; [beforeId] is the
+  /// "load earlier" cursor. The result is always ascending, plus [hasOlder].
+  Future<MessagesPage> messages(
+    String sessionKey, {
+    int afterId = 0,
+    int? beforeId,
+    bool latest = false,
+    int limit = 100,
+  }) async {
+    final params = {
       'session_key': sessionKey,
-      'after_id': '$afterId',
       'limit': '$limit',
-    }).query;
+      if (latest) 'latest': 'true',
+      if (beforeId != null) 'before_id': '$beforeId',
+      if (!latest && beforeId == null && afterId > 0) 'after_id': '$afterId',
+    };
+    final query = Uri(queryParameters: params).query;
     final body = await _send('GET', '/api/chat/messages?$query');
     final rows = body['messages'] as List<dynamic>? ?? const [];
-    return rows.map((row) => Message.fromJson(row as Map<String, dynamic>)).toList();
+    return MessagesPage(
+      messages: rows.map((row) => Message.fromJson(row as Map<String, dynamic>)).toList(),
+      hasOlder: body['has_older'] == true,
+    );
+  }
+
+  /// Converse with the bot. The server derives the session from the authenticated
+  /// account, so no key is sent — a client-named key would be a forgery primitive.
+  Future<String> talk(String content) async {
+    final body = await _send('POST', '/api/chat/messages', body: {'content': content});
+    return body['reply'] as String? ?? '';
   }
 
   /// Saves a note. `delivered` is always false; the field exists so the UI can say so.
