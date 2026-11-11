@@ -98,6 +98,10 @@ gh pr merge --squash --delete-branch           # 5. 由他人批准后合并
 正文四节：作用的模块（仅英文小写）、为什么、提交前确认、Agent 参与声明。
 检查项是普通列表，不是复选框；不要放表格。
 
+标题格式不是建议：`scripts/check_pr_title.py` 在 PR 事件上校验它，跑在 `backend`
+这个必需检查里，所以 `feat:` / `fix:` 这类前缀会让 PR 直接变红。规则本身只有三条：
+中文动作 + 冒号 + 非空对象、不使用英文前缀、不超过 80 字符。
+
 ### 六道必需检查
 
 六道必需检查（读自 `branches/master/protection`，不是凭印象）是
