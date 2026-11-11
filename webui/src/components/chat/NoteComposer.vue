@@ -3,11 +3,33 @@ import { computed, ref } from 'vue'
 
 import { t } from '@/i18n'
 
-const props = defineProps<{ disabled?: boolean; saving?: boolean }>()
+/**
+ * One composer, two contracts. `note` writes a row that is never delivered;
+ * `talk` posts through the pipeline and the bot answers in the same session.
+ * The input, submit wiring and styles are shared so the two modes cannot drift
+ * visually — only the copy and the submit target differ.
+ */
+const props = withDefaults(defineProps<{ disabled?: boolean; saving?: boolean; mode?: 'note' | 'talk' }>(), {
+  mode: 'note',
+})
 const emit = defineEmits<{ submit: [text: string] }>()
 
 const text = ref('')
 const canSubmit = computed(() => text.value.trim().length > 0 && !props.disabled && !props.saving)
+
+const label = computed(() => (props.mode === 'talk' ? t('chat.talk.label') : t('chat.composer.label')))
+const placeholder = computed(() =>
+  props.mode === 'talk' ? t('chat.talk.placeholder') : t('chat.composer.placeholder'),
+)
+const sendLabel = computed(() =>
+  props.saving
+    ? props.mode === 'talk'
+      ? t('chat.talk.sending')
+      : t('chat.composer.saving')
+    : props.mode === 'talk'
+      ? t('chat.talk.send')
+      : t('chat.composer.save'),
+)
 
 function send(): void {
   if (!canSubmit.value) return
@@ -18,12 +40,12 @@ function send(): void {
 
 <template>
   <form class="composer" @submit.prevent="send">
-    <p class="composer__notice">
+    <p class="composer__notice" :class="{ 'composer__notice--talk': mode === 'talk' }">
       <span aria-hidden="true">◦</span>
-      {{ t('chat.composer.notice') }}
+      {{ mode === 'talk' ? t('chat.talk.notice') : t('chat.composer.notice') }}
     </p>
 
-    <label class="composer__label" for="chat-note">{{ t('chat.composer.label') }}</label>
+    <label class="composer__label" for="chat-note">{{ label }}</label>
     <div class="composer__row">
       <textarea
         id="chat-note"
@@ -31,13 +53,13 @@ function send(): void {
         class="composer__input"
         rows="2"
         maxlength="4000"
-        :placeholder="t('chat.composer.placeholder')"
+        :placeholder="placeholder"
         :disabled="disabled"
         @keydown.ctrl.enter.prevent="send"
         @keydown.meta.enter.prevent="send"
       />
       <button class="composer__send" type="submit" :disabled="!canSubmit">
-        {{ saving ? t('chat.composer.saving') : t('chat.composer.save') }}
+        {{ sendLabel }}
       </button>
     </div>
   </form>

@@ -120,6 +120,32 @@ export const api = {
   providers: () => request<any>('/api/providers'),
   personas: () => request<any>('/api/personas'),
 
+  // Archive accounts (owner-only endpoints; the panel token is the credential).
+  accounts: () =>
+    request<{ accounts: Array<{ id: number; username: string; role: string; status: string }> }>(
+      '/api/accounts',
+    ),
+  createInvite: (body: {
+    role?: string
+    hours?: number
+    max_uses?: number
+    session_keys?: string[]
+  }) =>
+    request<{ invite: string; role: string; expires_in_hours: number }>('/api/accounts/invites', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  setAccountStatus: (accountId: number, status: 'active' | 'disabled') =>
+    request<{ ok: boolean }>(`/api/accounts/${accountId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  grantMembership: (accountId: number, sessionKey: string) =>
+    request<{ ok: boolean }>('/api/accounts/memberships', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, session_key: sessionKey }),
+    }),
+
   /** The full card, body included. The list endpoint truncates the prompt, and saving
    * a truncated prompt back would destroy the rest of it. */
   persona: (id: string) => request<PersonaCard>(`/api/personas/${encodeURIComponent(id)}`),
@@ -824,6 +850,8 @@ export interface ChatSurfaces {
   web: boolean
   app: boolean
   desktop: boolean
+  /** Web/mobile accounts may converse in their own `web:private:account-<id>` session. */
+  talk: boolean
 }
 
 export interface ChatAccount {
@@ -854,7 +882,10 @@ export interface ChatMessage {
 export interface ChatMessagePage {
   session_key: string
   messages: ChatMessage[]
-  next_after_id: number
+  /** Forward-sync shape (`after_id` mode). */
+  next_after_id?: number
+  /** History-page shape (`latest`/`before_id` mode): true when even older messages exist. */
+  has_older?: boolean
 }
 
 export interface ChatAuthResult {
@@ -887,11 +918,30 @@ export const chatApi = {
     }),
   me: () => request<ChatAccount>('/api/accounts/me'),
   sessions: () => request<{ sessions: ChatSessionRow[]; scope: 'all' | 'member' }>('/api/chat/sessions'),
-  messages: (sessionKey: string, afterId = 0, limit = 100) => {
-    const query = new URLSearchParams({ session_key: sessionKey, after_id: String(afterId) })
-    query.set('limit', String(limit))
+  /**
+   * One paging mode per call — the server rejects combinations with 400.
+   * Default (`afterId: 0`) is the forward-sync contract; `latest` fetches the
+   * newest page of an old session; `beforeId` is the "load earlier" cursor.
+   */
+  messages: (
+    sessionKey: string,
+    opts: { afterId?: number; beforeId?: number; latest?: boolean; limit?: number } = {},
+  ) => {
+    const query = new URLSearchParams({ session_key: sessionKey })
+    if (opts.latest) query.set('latest', 'true')
+    if (opts.beforeId !== undefined) query.set('before_id', String(opts.beforeId))
+    if (opts.afterId !== undefined && opts.afterId > 0) query.set('after_id', String(opts.afterId))
+    query.set('limit', String(opts.limit ?? 100))
     return request<ChatMessagePage>(`/api/chat/messages?${query.toString()}`)
   },
+  /** Converse with the bot. The server derives the session (web:private:account-<id>)
+   * from the authenticated account, so no key is sent — a client-named key would be a
+   * forgery primitive. */
+  talk: (content: string) =>
+    request<{ session_key: string; reply: string; trace_id: string }>('/api/chat/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
   note: (sessionKey: string, content: string) =>
     request<{ note: ChatMessage; delivered: boolean }>('/api/chat/notes', {
       method: 'POST',
