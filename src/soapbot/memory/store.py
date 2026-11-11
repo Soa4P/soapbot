@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -437,7 +438,19 @@ class MemoryStore:
             for r in reversed(rows)
         ]
 
-    async def list_sessions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_sessions(
+        self,
+        *,
+        limit: int = 50,
+        session_keys: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest sessions first, optionally restricted to the caller's grants.
+
+        ``session_keys`` is pushed into SQL rather than applied to the result: a member
+        granted one quiet group would otherwise disappear as soon as 200 busier sessions
+        pushed its row past ``limit``, and the page would look empty rather than
+        unauthorised.
+        """
         async with self.db.session_factory()() as session:
             stmt = (
                 select(
@@ -449,10 +462,96 @@ class MemoryStore:
                 .order_by(func.max(MessageRow.created_at).desc())
                 .limit(limit)
             )
+            if session_keys is not None:
+                allowed = list(session_keys)
+                if not allowed:
+                    return []
+                stmt = stmt.where(MessageRow.session_key.in_(allowed))
             rows = (await session.execute(stmt)).all()
         return [
             {"session_key": r[0], "message_count": r[1], "last_at": r[2]} for r in rows
         ]
+
+    async def messages_since(
+        self,
+        session_key: str,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Ascending page after a cursor.
+
+        ``after_id`` rather than an offset: a client that pages while the bot keeps
+        archiving must not see the same message twice or skip one when a new row lands
+        between two requests. ``id`` is monotonic in SQLite, so it is the cursor.
+        """
+        async with self.db.session_factory()() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(MessageRow)
+                        .where(
+                            MessageRow.session_key == session_key,
+                            MessageRow.id > after_id,
+                        )
+                        .order_by(MessageRow.id.asc())
+                        .limit(max(1, min(limit, 200)))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            {
+                "id": row.id,
+                "session_key": row.session_key,
+                "role": row.role,
+                "content": row.content,
+                "image_desc": row.image_desc,
+                "user_id": row.user_id,
+                "user_name": row.user_name,
+                "adapter": row.adapter,
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ]
+
+    async def add_note(
+        self,
+        *,
+        session_key: str,
+        content: str,
+        user_id: str,
+        user_name: str,
+    ) -> dict[str, Any]:
+        """Append an operator note. Never sent anywhere.
+
+        The short-circuit is structural: this method only writes a row. There is no
+        adapter parameter to misuse, so a later refactor cannot accidentally turn a
+        note into a QQ message without changing the call graph.
+        """
+        text = content.strip()
+        if not text:
+            raise ValueError("note content is empty")
+        row_id = await self.archive_message(
+            session_key=session_key,
+            role="note",
+            content=text,
+            adapter="web",
+            scene="group" if "group" in session_key else "private",
+            user_id=user_id,
+            user_name=user_name,
+        )
+        return {
+            "id": row_id,
+            "session_key": session_key,
+            "role": "note",
+            "content": text,
+            "user_id": user_id,
+            "user_name": user_name,
+            "adapter": "web",
+            "created_at": time.time(),
+        }
 
     # ------------------------------------------------------------------ search
     async def recall(

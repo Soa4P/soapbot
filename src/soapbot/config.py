@@ -142,6 +142,28 @@ class Settings(BaseSettings):
     "open to everyone" mode.
     """
 
+    chat_web_enabled: bool = True
+    """Serve the browser chat client.
+
+    The web client is the always-on surface: it is the only way to confirm the archive
+    is correct before trusting the mobile build, so it ships enabled.
+    """
+
+    chat_app_enabled: bool = False
+    """Advertise the chat API to the Flutter client.
+
+    Off by default. The mobile client is a separate binary that starts on its own
+    schedule; enabling this is the owner agreeing that a second device may read the
+    archive, which is a decision, not a default.
+    """
+
+    chat_desktop_enabled: bool = False
+    """Advertise the chat surface to the Tauri desktop shell.
+
+    Off by default for the same reason as :attr:`chat_app_enabled`: the desktop shell
+    can be installed on a machine the owner does not control.
+    """
+
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 

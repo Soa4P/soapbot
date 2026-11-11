@@ -3,14 +3,17 @@
 Why this exists
 ---------------
 The template is read by every contributor and pre-filled by GitHub on every new PR.
-It went through two failures worth pinning:
+It went through three failures worth pinning:
 
 1. it grew into a thirteen-section table with empty cells and unchecked boxes, which
    nobody fills in and which reads like machine output;
-2. the sections it promised drifted away from what ``CONTRIBUTING.md`` told readers.
+2. the sections it promised drifted away from what ``CONTRIBUTING.md`` told readers;
+3. it asked for an "Agent declaration", which turned every PR into a disclosure form
+   and said nothing about whether the change was reviewable.
 
-So the contract here is narrow and literal: four sections, plain lists instead of
-checkboxes, no tables, and an Agent declaration that names a concrete model.
+So the contract here is narrow and literal: three sections, plain lists instead of
+checkboxes, no tables, and no agent declaration. What makes a PR reviewable lives in
+``CONTRIBUTING.md`` and is pinned by its own test.
 """
 
 from __future__ import annotations
@@ -24,10 +27,9 @@ TEMPLATE = ROOT / ".github" / "pull_request_template.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 
 REQUIRED_SECTIONS = (
-    "该PR作用的模块是(仅英文小写)",
+    "PR 的意义",
     "为什么要增加/修改这个东西",
     "在提交PR前请确认已完成以下工作",
-    "Agent 参与声明",
 )
 
 
@@ -45,8 +47,8 @@ def template_problems(text: str) -> list[str]:
 
     if "不适用的小节直接删除" not in text:
         out.append("模板没有说明「不适用就删掉，不要留空」")
-    if "具体型号" not in text:
-        out.append("模板没有要求 Agent 声明写到具体型号")
+    if "Agent 参与声明" in headings:
+        out.append("模板又要求填写 Agent 声明：审核看的是改动，不是署名")
 
     # The two shapes that made the old template unreadable. Checked as literals
     # rather than parsed: "a table in a PR body" is what a human notices at a
@@ -81,6 +83,12 @@ def test_deleting_a_section_is_reported(section: str) -> None:
     assert any(section in problem for problem in template_problems("\n".join(kept)))
 
 
+def test_the_template_does_not_ask_for_an_agent_declaration() -> None:
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert "Agent 参与声明" not in text
+    assert "具体型号" not in text
+
+
 def test_contributing_no_longer_tells_people_to_bypass_the_template() -> None:
     """``--fill`` puts the commit message in the body; the template never loads."""
     text = CONTRIBUTING.read_text(encoding="utf-8")
@@ -110,3 +118,17 @@ def test_contributing_documents_who_may_bypass() -> None:
     assert "不能自批" in text or "不得自批" in text
     assert "require_last_push_approval" in text or "最后一次推送" in text
     assert "--admin" in text
+
+
+def test_contributing_defines_what_makes_a_pr_reviewable() -> None:
+    """A rubric that lives only in someone's head is not a convention.
+
+    The four load-bearing phrases: the manual re-review label, the statement that
+    non-conforming PRs go through it, the fact that AI review is a signal rather than
+    an approval, and the demand for evidence instead of "tested locally".
+    """
+    text = CONTRIBUTING.read_text(encoding="utf-8")
+    assert "needs-manual-review" in text
+    assert "人工二次复检" in text
+    assert "AI 审查" in text
+    assert "不等于" in text or "不能替代" in text

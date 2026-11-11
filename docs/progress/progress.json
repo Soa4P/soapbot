@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-11T14:00:51+08:00",
+  "updated_at": "2026-11-11T16:54:49+08:00",
   "current": null,
   "phases": [
     {
@@ -2973,6 +2973,99 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ph42",
+      "index": "P42",
+      "name": "多用户 + 只读存档 + 网页优先：把接入层从单用户重做成可授权的存档",
+      "goal": "前 41 轮把机器人本身做完了，但接入层只有一条一次性 bootstrap token：谁拿到它谁就是 operator，没有用户、没有隔离、没有可回看的存档。本轮按「QQ 仍是信源、网页优先、手机端只给骨架」重做接入层：账号改邀请制多用户，会话按成员映射在服务端过滤，消息按 after_id 游标增量拉取，输入只写备注且显式不调用适配器；同时把 PR 模板里那条无法审核的「Agent 参与声明」换成可对照的三节，并把历史 PR #32/#33 的正文补正。",
+      "tasks": [
+        {
+          "id": "ph42-t1",
+          "name": "PR 公约从「声明」改成「可审核」",
+          "status": "done",
+          "note": "模板删掉「Agent 参与声明」与复选框式自证，留下三节：PR 的意义 / 为什么这么做 / 提交前确认；「该PR作用的模块是」改为「PR 的意义」，因为前者只要求填名词、审阅者从中读不出判断依据。CONTRIBUTING 写清可审核 PR 的硬条件（能指出改动的行为差异、能给出复现路径、失败时能说清哪一步先红）、不符合时需人工二次复检、AI 审查结论不可全信（它按 diff 说话，不跑测试）。历史 PR #32/#33 用 gh pr edit 删除同一段声明——公约只约束新提交，不补正历史就等于承认两套标准。",
+          "files": [
+            { "path": ".github/pull_request_template.md", "status": "done" },
+            { "path": "CONTRIBUTING.md", "status": "done" },
+            { "path": "tests/test_pr_template.py", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t2",
+          "name": "三张表 + scrypt 账号服务，不新增依赖",
+          "status": "done",
+          "note": "accounts / account_invites / chat_memberships 三张表声明为 ORM 模型，随每次 init 的 Base.metadata.create_all 落到新库与老库上——create_all 只补缺失的表，所以这是纯增量的加表，SCHEMA_VERSION 仍是 5，不加一个什么都不改的迁移步。密码用标准库 hashlib.scrypt(n=2**14, r=8, p=1)，salt 与 hash 分列存放，比较走 hmac.compare_digest；邀请码只存 sha256，明文仅在创建响应里出现一次。首个所有者必须带面板的一次性 bootstrap token，且账号表非空后该端点固定 409——否则它就变成公开注册。service 层抛 AccountError，消息是作者手写的中文，可直接回给调用方。",
+          "files": [
+            { "path": "src/soapbot/memory/db.py", "status": "done" },
+            { "path": "src/soapbot/accounts/service.py", "status": "done" },
+            { "path": "src/soapbot/api/accounts.py", "status": "done" },
+            { "path": "tests/test_accounts.py", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t3",
+          "name": "隔离做在服务端，备注在服务层短路",
+          "status": "done",
+          "note": "GET /api/chat/sessions 按 chat_memberships 过滤，owner 走另一条分支；越权访问未授权会话返回 404 而不是 403——403 会确认「这个会话存在」。消息用 after_id 游标而不是 offset：归档只在尾部增长，offset 在并发写入时会重复或漏行。备注写 role=note、adapter=web、user_id=web:<id>，响应里显式带 delivered=false，并且整条路径没有 import 适配器——「不发送」由调用图保证，不由注释保证。SSE 是 1.5 秒轮询游标的 async generator，拆成独立函数是为了能直接驱动一次而不必让测试挂在一个永不结束的响应流上。孤儿模块门禁随后报出 soapbot.api.accounts 没有任何测试点名：service 层有 15 项、路由层 0 项，而角色下限、require_credential 与跨站检查只存在于路由层——service 全绿也拦不住一条漏挂 require_role 的路由。补 tests/test_accounts_api.py 7 项（第二个所有者 409、未知邀请码 400、成员列账号/签邀请 403、无凭据签邀请 401、/me 只回被授权会话、账号被删后旧 token 401）。合并前复审又改了三处：会话列表原先是先取 200 条再在 Python 里过滤，成员只被授权一个冷清群时那行早被挤出窗口、页面显示成「没有会话」——过滤下推到 SQL 并留一条 limit=1 的用例钉住；bootstrap token 原本解析成合成 owner 能读全部存档，而服务注释写的是「之后对存档读取失效」，改成直接 401，安装时打印的那把钥匙不再是最宽的钥匙；create_owner 的「账号表为空」检查原在写事务之外，两个并发 bootstrap 会都读到 0，移进事务内（Database.write 已串行化写者）。",
+          "files": [
+            { "path": "src/soapbot/api/chat.py", "status": "done" },
+            { "path": "src/soapbot/memory/store.py", "status": "done" },
+            { "path": "tests/test_chat_api.py", "status": "done" },
+            { "path": "tests/test_accounts_api.py", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t4",
+          "name": "网页端：登录、会话、消息流、备注",
+          "status": "done",
+          "note": "ChatLoginView 与 ChatView 复用 base.css 的 token，不引入第二套视觉；桌面端三栏、窄屏折叠成单栏，消息区 role=log + aria-live=polite，备注气泡用虚线边框与「仅记录」标签，避免和真实消息混淆。API 调用单独收在 chatApi 对象里，因为面板用 bootstrap token、存档用账号密码，两套凭据不能互相继承。npm run verify（typecheck / lint / i18n / a11y / contrast / build）全绿并重建 dist；dist 进提交，这是面板被 PyInstaller 打进 sidecar 的前提。",
+          "files": [
+            { "path": "webui/src/views/ChatView.vue", "status": "done" },
+            { "path": "webui/src/views/ChatLoginView.vue", "status": "done" },
+            { "path": "webui/src/components/chat/MessageBubble.vue", "status": "done" },
+            { "path": "webui/src/components/chat/NoteComposer.vue", "status": "done" },
+            { "path": "webui/src/api/client.ts", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t5",
+          "name": "Flutter 骨架：四屏接同一套 API",
+          "status": "done",
+          "note": "mobile/ 只有源码与 README：登录、会话列表、消息流、备注四屏，用 http 包直连同一组端点，会话 cookie 换成 Bearer 头。没有发送按钮、没有本地数据库、没有上架配置——这一轮的交付边界是「能编译的骨架」，真机构建放到有 Android SDK 的机器上做。README 写明 `flutter create .` 补平台目录的顺序，以及为什么不能把 baseUrl 硬编码成 127.0.0.1（模拟器里那是手机自己）。",
+          "files": [
+            { "path": "mobile/pubspec.yaml", "status": "done" },
+            { "path": "mobile/lib/api/client.dart", "status": "done" },
+            { "path": "mobile/lib/screens/chat_screen.dart", "status": "done" },
+            { "path": "mobile/README.md", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t6",
+          "name": "部署方案先出文档：443 与内存两条硬约束",
+          "status": "done",
+          "note": "服务器 A 的 443 已被 sshd 占用、可用内存约 341 MB，所以文档给的是「先停旧实例、SSH 迁 2222 或 HTTPS 走 8443、保留当前会话做回滚验证」的顺序，并附增量成本（2 vCPU / 3.9 GB 上再加一个 uvicorn 大约 +90 MB RSS，SSE 每连接约几十 KB）。三端开关 SOAPBOT_CHAT_{WEB,APP,DESKTOP}_ENABLED 默认只有 web=true：手机端与桌面壳是装到别人机器上的二进制，默认能读存档不合适。三端全关时 /api/chat/* 返回 404 而不是 403——这个部署里就该像没有这些路由。",
+          "files": [
+            { "path": "docs/deployment-web-chat.md", "status": "done" },
+            { "path": "docs/chat-archive.md", "status": "done" },
+            { "path": "docs/configuration.md", "status": "done" },
+            { "path": ".env.example", "status": "done" }
+          ]
+        },
+        {
+          "id": "ph42-t7",
+          "name": "全量门禁逼出的三处真问题",
+          "status": "done",
+          "note": "① 三端开关最初用 os.getenv 读，而 .env 是 pydantic-settings 消费的、从不写进 os.environ——运维改 .env 会静默无效，测试却因为 monkeypatch.setenv 通过。改为读 Settings，并把默认值用例改成构造真实 Settings(_env_file=None)，这样它验的是出厂默认而不是桩。② check_security_boundaries 的 s11 抓住 accounts.py / chat.py 的 detail=str(exc)：即使消息是手写的，这条写法会把下一次「把 repr(exc) 塞进去」变成零成本。AccountError 增加 .message 属性，chat 的 ValueError 改成固定文案 + 服务端日志。③ 部署文档写了 `soapbot serve`，而 CLI 只有 start/token/doctor/setup/migrate/version——test_cli_documented_commands 直接把这条文档漂移报了出来，照着改回 `soapbot start --host --port`。三处都是「文档/测试先红，代码后改」，不是事后补说明。",
+          "files": [
+            { "path": "src/soapbot/api/chat.py", "status": "done" },
+            { "path": "src/soapbot/accounts/service.py", "status": "done" },
+            { "path": "docs/deployment-web-chat.md", "status": "done" },
+            { "path": "docs/verification-matrix.md", "status": "done" },
+            { "path": "docs/progress/progress.json", "status": "done" }
+          ]
+        }
+      ]
     }
   ],
   "archive": [
@@ -3068,7 +3161,7 @@
     }
   ],
   "verification": {
-    "pytest": "2089 passed, 12 skipped",
+    "pytest": "2123 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
