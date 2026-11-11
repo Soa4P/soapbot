@@ -180,6 +180,17 @@ class Capability(StrEnum):
     SEND = "send"
     """Send messages proactively (rate-limited, group-scoped)."""
 
+    BILIBILI = "bilibili"
+    """Call Bilibili's *logged-in* API (history, watch later).
+
+    The plugin chooses a path on ``api.bilibili.com`` and gets JSON back; the
+    ``SESSDATA`` cookie stays with the host, which injects it at request time and
+    never logs it. This is the shape L3 has to take: the sandbox already refuses
+    ``Cookie`` headers from ``ctx.http`` (any credential the plugin can hold, it can
+    leak), so login state arrives as a vetted surface instead of as a header the
+    plugin composes itself.
+    """
+
 
 #: Capabilities that can leak data or reach the network. A plugin holding any of
 #: these is flagged in the WebUI, and the audit log records each use.
@@ -190,12 +201,13 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.KB_READ,
         Capability.SEND,
         Capability.STORAGE,
+        Capability.BILIBILI,
     }
 )
 
 #: Capabilities that can cost money or annoy users; always rate limited.
 RATE_LIMITED_CAPABILITIES: frozenset[Capability] = frozenset(
-    {Capability.HTTP, Capability.SEND, Capability.CRON, Capability.TOOL}
+    {Capability.HTTP, Capability.SEND, Capability.CRON, Capability.TOOL, Capability.BILIBILI}
 )
 
 

@@ -71,7 +71,7 @@ type Tab = 'official' | 'community' | 'installed'
 const tab = ref<Tab>('installed')
 
 /** Sensitive capabilities get an explicit warning, not just a checkbox. */
-const RISKY = new Set(['http', 'memory_read', 'kb_read', 'send', 'storage', 'cron'])
+const RISKY = new Set(['http', 'memory_read', 'kb_read', 'send', 'storage', 'cron', 'bilibili'])
 
 const installed = computed<any[]>(() => listing.data.value?.installed ?? [])
 const exported = computed<any[]>(() => installed.value.filter((p) => p.api))

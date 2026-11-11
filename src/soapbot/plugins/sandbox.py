@@ -32,11 +32,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import ipaddress
+import json
 import logging
 import re
 import socket
 import time
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -713,6 +714,106 @@ class SafeHttpClient:
                     f"redirect to {resp.headers.get('location', '?')!r} not followed"
                 )
             return resp.status_code, data
+        finally:
+            aclose = getattr(client, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+
+class BilibiliUnavailableError(RuntimeError):
+    """The operator has not configured the login cookie this surface needs.
+
+    Distinct from ``CapabilityDeniedError`` on purpose: denial means "the operator
+    saw this capability and refused"; this means "nobody ever supplied the
+    credential", so a plugin author reading a traceback can tell a missing approval
+    from a missing configuration.
+    """
+
+
+class BilibiliClient:
+    """Logged-in Bilibili calls, with the cookie held by the host.
+
+    Why this exists as its own surface instead of plugins composing their own
+    ``Cookie`` header through ``ctx.http``: the sandbox refuses credential headers
+    from plugins (see :meth:`SafeHttpClient._sanitize_headers`) — any credential a
+    plugin can *hold*, it can *leak*, into logs, into storage, into a chat reply.
+    So the cookie lives in host configuration, is injected here at request time,
+    and never appears in audit details, logs or error messages. The plugin's whole
+    degree of freedom is a path on a host-pinned allow-list.
+
+    Shared mechanics with :class:`SafeHttpClient` on purpose: no redirects (a
+    redirect is how a vetted request walks to an unvetted host), a response size
+    cap, a timeout cap, and ``assert_url_allowed`` re-run on every request. The
+    destination allow-list is a class constant rather than configuration — L3
+    means "Bilibili login state", not "the host's cookie sent somewhere else".
+    """
+
+    ALLOWED_HOSTS = ("api.bilibili.com",)
+    MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+    MAX_TIMEOUT = 15.0
+    _USER_AGENT = "soapbot/0.1 (+https://github.com/Soa4P/soapbot)"
+
+    def __init__(
+        self,
+        guard: CapabilityGuard,
+        *,
+        cookie_provider: Callable[[], str],
+        client_factory=None,
+    ) -> None:
+        self._guard = guard
+        self._cookie_provider = cookie_provider
+        self._client_factory = client_factory
+
+    async def get_json(self, path: str, *, params: dict[str, str] | None = None) -> dict:
+        """GET ``https://api.bilibili.com{path}`` and return the parsed payload.
+
+        ``path`` must start with ``/`` and carry no scheme or authority — the host
+        owns the destination, the plugin owns the endpoint. ``params`` values are
+        coerced to strings; anything else is a caller bug and fails loudly.
+        """
+        self._guard.check(Capability.BILIBILI, detail=f"GET {path[:120]}")
+        if not isinstance(path, str) or not path.startswith("/") or "//" in path:
+            raise ValueError("path must look like '/x/...'; the host owns scheme and host")
+        clean_params = {str(k): str(v) for k, v in (params or {}).items()}
+        url = f"https://api.bilibili.com{path}"
+        assert_url_allowed(url, allowed_hosts=self.ALLOWED_HOSTS)
+
+        cookie = self._cookie_provider()
+        if not cookie:
+            raise BilibiliUnavailableError(
+                "Bilibili login state is not configured: set SOAPBOT_BILI_COOKIE "
+                "(SESSDATA) to use capability 'bilibili'"
+            )
+
+        timeout = self.MAX_TIMEOUT
+        factory = self._client_factory
+        if factory is None:
+            import httpx
+
+            client = httpx.AsyncClient(
+                follow_redirects=False,
+                timeout=timeout,
+                trust_env=False,
+            )
+        else:  # pragma: no cover - test seam
+            client = factory(timeout=timeout)
+        try:
+            resp = await client.request(
+                "GET",
+                url,
+                headers={"Cookie": cookie, "User-Agent": self._USER_AGENT},
+                params=clean_params,
+            )
+            data = resp.content
+            if len(data) > self.MAX_RESPONSE_BYTES:
+                raise ValueError("response exceeds the 2 MiB cap")
+            if resp.status_code != 200:
+                # Status only: the body can echo the request and its credentials.
+                raise ValueError(f"bilibili returned HTTP {resp.status_code}")
+            payload = json.loads(data.decode("utf-8", errors="replace"))
+            if not isinstance(payload, dict):
+                raise ValueError("bilibili returned a non-object JSON payload")
+            return payload
         finally:
             aclose = getattr(client, "aclose", None)
             if aclose is not None:

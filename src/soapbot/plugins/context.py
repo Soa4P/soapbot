@@ -34,6 +34,7 @@ from typing import Any
 
 from soapbot.plugins.manifest import Capability
 from soapbot.plugins.sandbox import (
+    BilibiliClient,
     CapabilityGuard,
     EncryptedPluginStorage,
     PluginStorage,
@@ -158,6 +159,7 @@ class PluginContext:
         guard: CapabilityGuard,
         logger_: logging.Logger | None = None,
         http_client_factory: Callable[[CapabilityGuard], SafeHttpClient] | None = None,
+        bilibili_cookie_provider: Callable[[], str] | None = None,
         storage_backend: dict[str, dict[str, Any]] | None = None,
         crypto=None,
         audit=None,
@@ -184,6 +186,10 @@ class PluginContext:
         self._crypto = crypto
         self._audit = audit
         self._http_factory = http_client_factory or SafeHttpClient
+        #: Host-injected cookie source for the ``bilibili`` surface. ``None`` falls
+        #: back to the lazy settings read below; tests inject a callable so no test
+        #: ever needs a real credential in the environment.
+        self._bilibili_cookie_provider = bilibili_cookie_provider
         # The set of sessions this plugin may send to is owned by the HOST, not by
         # this object. Keeping it here as a plain set let a plugin call
         # ``ctx._observed_sessions.add("onebot11:group:<any>")`` and then broadcast
@@ -487,6 +493,18 @@ class PluginContext:
         """Outbound HTTP with SSRF defence, redirect refusal and size caps."""
         return self._http_factory(self._guard)
 
+    @property
+    def bilibili(self) -> BilibiliClient:
+        """Logged-in Bilibili surface: the plugin picks a path, the host holds the cookie.
+
+        See :class:`soapbot.plugins.sandbox.BilibiliClient` for why login state is a
+        vetted surface rather than a header the plugin composes: the sandbox refuses
+        credential headers from plugins, so the alternative was never "plugins hold
+        the cookie safely" — it was "no login state at all".
+        """
+        provider = self._bilibili_cookie_provider or _default_bilibili_cookie
+        return BilibiliClient(self._guard, cookie_provider=provider)
+
     async def send(self, text: str, *, session_key: str) -> None:
         """Send an unsolicited message to a session.
 
@@ -645,6 +663,22 @@ class PluginContext:
             "has_notice_hook": bool(self._notice_hooks),
             "events": sorted(self._event_handlers),
         }
+
+
+def _default_bilibili_cookie() -> str:
+    """Read the login cookie from settings at call time.
+
+    Lazy like ``api.chat.surfaces()``: a test (or a future reload path) flips the
+    setting without re-importing the module, and a process that never uses the
+    surface never touches the value. Returning ``""`` lets the client raise its
+    own, more specific "not configured" error instead of a bare KeyError here.
+    """
+    from soapbot.config import settings
+
+    value = getattr(settings, "bili_cookie", None)
+    if value is None:
+        return ""
+    return value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
 
 
 def validate_args(args: Any) -> list[str]:
