@@ -817,3 +817,89 @@ export interface McpApplyResult {
   servers?: Record<string, { tools: number; error: string }>
   note?: string
 }
+
+// ---------------------------------------------------------------- chat archive
+
+export interface ChatSurfaces {
+  web: boolean
+  app: boolean
+  desktop: boolean
+}
+
+export interface ChatAccount {
+  id: number
+  username: string
+  role: string
+  sessions?: string[]
+}
+
+export interface ChatSessionRow {
+  session_key: string
+  message_count: number
+  last_at: number
+}
+
+export interface ChatMessage {
+  id: number
+  session_key: string
+  role: string
+  content: string
+  image_desc?: string | null
+  user_id?: string
+  user_name?: string
+  adapter?: string
+  created_at: number
+}
+
+export interface ChatMessagePage {
+  session_key: string
+  messages: ChatMessage[]
+  next_after_id: number
+}
+
+export interface ChatAuthResult {
+  account: ChatAccount
+  access_token: string
+  token_type: string
+  expires_in: number
+  expires_at?: number
+}
+
+/**
+ * Chat calls live beside the panel's own API but never share its login.
+ *
+ * The panel authenticates with the one-time bootstrap token; the archive authenticates
+ * with a username and password, and the cookie it sets is the same HttpOnly session
+ * cookie. Keeping the calls in a separate object makes it obvious which surface a
+ * change affects — the two must not silently inherit each other's permissions.
+ */
+export const chatApi = {
+  surfaces: () => request<ChatSurfaces>('/api/chat/surfaces'),
+  login: (username: string, password: string) =>
+    request<ChatAuthResult>('/api/accounts/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  register: (invite: string, username: string, password: string) =>
+    request<ChatAuthResult>('/api/accounts/register', {
+      method: 'POST',
+      body: JSON.stringify({ invite, username, password }),
+    }),
+  me: () => request<ChatAccount>('/api/accounts/me'),
+  sessions: () => request<{ sessions: ChatSessionRow[]; scope: 'all' | 'member' }>('/api/chat/sessions'),
+  messages: (sessionKey: string, afterId = 0, limit = 100) => {
+    const query = new URLSearchParams({ session_key: sessionKey, after_id: String(afterId) })
+    query.set('limit', String(limit))
+    return request<ChatMessagePage>(`/api/chat/messages?${query.toString()}`)
+  },
+  note: (sessionKey: string, content: string) =>
+    request<{ note: ChatMessage; delivered: boolean }>('/api/chat/notes', {
+      method: 'POST',
+      body: JSON.stringify({ session_key: sessionKey, content }),
+    }),
+  /** EventSource cannot set headers, so this URL relies on the session cookie. */
+  streamUrl: (sessionKey: string, afterId: number) => {
+    const query = new URLSearchParams({ session_key: sessionKey, after_id: String(afterId) })
+    return `/api/chat/stream?${query.toString()}`
+  },
+}

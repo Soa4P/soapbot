@@ -87,6 +87,20 @@ const routes = [
     component: () => import('@/views/SettingsView.vue'),
     meta: { titleKey: 'nav.12', index: '12' },
   },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('@/views/ChatView.vue'),
+    meta: { titleKey: 'nav.13', index: '13' },
+  },
+  {
+    // 14 is the sign-in page for the archive, not a rail destination: it exists so a
+    // shared link can land on a form instead of an empty log with a 401 behind it.
+    path: '/chat/login',
+    name: 'chat-login',
+    component: () => import('@/views/ChatLoginView.vue'),
+    meta: { titleKey: 'nav.14', index: '14' },
+  },
   // Anything else falls back to the overview rather than showing a dead end in a tool
   // with eight pages and no deep links.
   { path: '/:pathMatch(.*)*', redirect: '/' },
