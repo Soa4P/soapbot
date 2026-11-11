@@ -1,13 +1,16 @@
-"""The PR template is short enough for a first-time contributor to fill in.
+"""The PR template stays as short as the fyscs repositories it mirrors.
 
 Why this exists
 ---------------
-The template must ask for the small set of facts a maintainer needs to review a
-public contribution: purpose, user instructions, breaking changes, verification,
-and Agent participation. It should not turn every PR into an internal audit report.
+The template is read by every contributor and pre-filled by GitHub on every new PR.
+It went through two failures worth pinning:
 
-A removed question must fail here, not silently vanish from future PRs. These tests
-pin the contributor-facing section list and the ``--fill`` prohibition.
+1. it grew into a thirteen-section table with empty cells and unchecked boxes, which
+   nobody fills in and which reads like machine output;
+2. the sections it promised drifted away from what ``CONTRIBUTING.md`` told readers.
+
+So the contract here is narrow and literal: four sections, plain lists instead of
+checkboxes, no tables, and an Agent declaration that names a concrete model.
 """
 
 from __future__ import annotations
@@ -21,49 +24,41 @@ TEMPLATE = ROOT / ".github" / "pull_request_template.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 
 REQUIRED_SECTIONS = (
-    "该 PR 作用的地图（仅英文小写）",
+    "该PR作用的模块是(仅英文小写)",
     "为什么要增加/修改这个东西",
-    "用户怎么使用",
-    "破坏性变更",
-    "在提交 PR 前确认已经完成以下工作",
-    "验证结果",
+    "在提交PR前请确认已完成以下工作",
     "Agent 参与声明",
-)
-
-#: CONTRIBUTING.md explicitly tells readers that these sections exist, so a template
-#: that drops them makes the contribution guide a lie. Kept separate from
-#: REQUIRED_SECTIONS so the parameterised case count stays stable — a doc edit must
-#: not force four "N passed" baselines to be rewritten.
-EXTRA_SECTIONS = (
-    "改了什么",
-    "影响面",
-    "安全影响",
-    "数字基线",
-    "AI 审查",
-    "回滚",
 )
 
 
 def template_problems(text: str) -> list[str]:
-    """Return every required section or warning the template has lost."""
+    """Return every required section or convention the template has lost."""
     out: list[str] = []
     headings = [
         line.lstrip("#").strip()
         for line in text.splitlines()
         if line.startswith("## ")
     ]
-    for section in (*REQUIRED_SECTIONS, *EXTRA_SECTIONS):
+    for section in REQUIRED_SECTIONS:
         if section not in headings:
             out.append(f"模板缺少小节：{section}")
 
     if "不适用的小节直接删除" not in text:
         out.append("模板没有说明「不适用就删掉，不要留空」")
-    if "none" not in text or "实际使用的模型" not in text:
-        out.append("模板没有要求声明 Agent 参与情况")
-    if "未验证" not in text:
-        out.append("模板没有要求标注未验证内容")
-    if text.count("- [ ]") < 5:
-        out.append("检查项少于 5 条，勾选清单退化了")
+    if "具体型号" not in text:
+        out.append("模板没有要求 Agent 声明写到具体型号")
+
+    # The two shapes that made the old template unreadable. Checked as literals
+    # rather than parsed: "a table in a PR body" is what a human notices at a
+    # glance, and a parser would quietly normalise it away.
+    if "| ---" in text:
+        out.append("模板又出现了 Markdown 表格")
+    if "- [ ]" in text:
+        out.append("检查项退化成复选框")
+
+    bullets = [line for line in text.splitlines() if line.startswith("- ")]
+    if len(bullets) < 5:
+        out.append("检查项少于 5 条，清单退化了")
     return out
 
 
@@ -91,7 +86,7 @@ def test_contributing_no_longer_tells_people_to_bypass_the_template() -> None:
     text = CONTRIBUTING.read_text(encoding="utf-8")
     assert "gh pr create --fill" not in text
     assert "gh pr create --base master" in text
-    assert "--fill 会用 commit message" in text or "不要用 `--fill`" in text
+    assert "不要用 `--fill`" in text
 
 
 def test_contributing_documents_the_block_mode() -> None:
@@ -99,3 +94,19 @@ def test_contributing_documents_the_block_mode() -> None:
     text = CONTRIBUTING.read_text(encoding="utf-8")
     assert "AI_REVIEW_MODE" in text
     assert "block" in text
+
+
+def test_contributing_documents_who_may_bypass() -> None:
+    """The rule that replaced "everyone goes through a PR" must stay explicit.
+
+    Three facts have to survive future edits: bypass is tied to the admin role (not
+    to a person — the ruleset API cannot express that on a user-owned repository), a
+    submitter may not approve or force-merge their own PR, and new collaborators top
+    out at maintain.
+    """
+    text = CONTRIBUTING.read_text(encoding="utf-8")
+    assert "admin" in text
+    assert "maintain" in text
+    assert "不能自批" in text or "不得自批" in text
+    assert "require_last_push_approval" in text or "最后一次推送" in text
+    assert "--admin" in text
