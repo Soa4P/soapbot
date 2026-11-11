@@ -27,7 +27,7 @@
 | 03 | 显式度量模拟-真实校准误差和覆盖缺口；未评测维度标记为未知风险而非通过 | 已具备 | `docs/semantic-authorization.md` 已有「未知」档（D20）并由 `tests/test_semantic_authorization_review.py` 锁定；本仓不做模型校准，模拟-真实误差无测量对象 |
 | 04 | 证据工件（mandate / receipt / settlement / 工具输出）间做类型化语义映射校验，而非结构邻接等价 | 不适用 | 无前述工件；本仓只有 `src/soapbot/security/provenance.py` 的 `ToolArguments` / `Provenance` 与 `src/soapbot/memory/handoff.py` 的 `Handoff` 三元组，属类型化数据结构而非跨协议映射 |
 | 05 | 推理层之外建立独立语义参照系；执行前校验解析出的操作含义与批准时定义一致 | 该落实（局部） | 独立参照系无实体；但「操作含义与批准时一致」在本仓有真实对象：`src/soapbot/plugins/dispatch.py` 工具名前缀未校验、`src/soapbot/mcp/client.py` 的 `list_tools()` 只清洗不算摘要。落地为网关前缀硬化 + 工具元数据摘要 |
-| 06 | 每次加载时与批准快照比对工件哈希 / 端点 / 能力；静默变化触发重新批准 | 该落实 | 哈希与能力已有（`src/soapbot/plugins/loader.py` 的 `digest_tree` / `grant_for`）；端点未比对，`warn` 模式在 `:539-557` 记 `outcome="allow"` 后照常加载。本轮落地了 MCP 工具元数据的批准摘要与不匹配拒绝；插件 `warn` 模式的显式标红**未做**，见 §5 |
+| 06 | 每次加载时与批准快照比对工件哈希 / 端点 / 能力；静默变化触发重新批准 | 该落实 | 哈希与能力已有（`src/soapbot/plugins/loader.py` 的 `digest_tree` / `grant_for`）；端点未比对，`warn` 模式在 `:539-557` 记 `outcome="allow"` 后照常加载。本轮落地了 MCP 工具元数据的批准摘要与不匹配拒绝；插件 `warn` 模式的显式标红由 `webui/src/views/PluginsView.vue:272-278` 承担——对 `code_changed` 无条件标红，不分模式，`tests/test_plugin_integrity.py:157-171` 断言 `warn` 下 `loaded.integrity == "changed"` |
 | 07 | 翻译边界维护显式语义映射；下游缺失语义视为不可知而非默认安全 | 该落实（局部） | 无翻译层；但「缺失语义不可默认为安全」在本仓有真实缺口：`src/soapbot/security/provenance.py:110-112` 对未打标签的 dict 返回 `Admission(True, "host_constructed")`。落地为外部工具分支要求非默认允许 |
 | 08 | 证据在插件信任域之外产生；与工件哈希和策略版本绑定；参照 TRACE / VOLT 格式而非自研 | 没有用 | `src/soapbot/plugins/attestation.py` 首行自述「detectably tamper-evident, not cryptographically signed」；同进程无外部信任根，加 HMAC 不改变信任域，只增加密钥管理面。TRACE/VOLT 不是本仓格式 |
 | 09 | 跨层失效路径维护可更新的残余风险度量；修复清单 ≠ 风险归零 | 已具备 | `docs/security-model.md` 与 `docs/semantic-authorization.md` 均有残余风险披露；本轮补一份「落地了什么、仍缺什么」即可 |
@@ -84,7 +84,7 @@
 | 后端 | 高 | 工具名前缀可伪造、重名无检测；`mcp__` 前缀被抢先路由 | `src/soapbot/plugins/dispatch.py:353-360, :362-387, :447`；`src/soapbot/mcp/client.py:54, :490` |
 | 后端 | 高 | 多 MCP source 的循环被第一个异常中断，后续 source 永不尝试 | `src/soapbot/plugins/dispatch.py:399-411` |
 | 后端 | 中 | `verify_attestation` 已定义但零生产调用点，漂移检测只跑在测试里 | `src/soapbot/plugins/loader.py:617-628`；`tests/test_runtime_attestation.py:134-137` |
-| 后端 | 中 | `warn` 完整性模式下代码变更记 `outcome="allow"` 后照常加载，面板无感 | `src/soapbot/plugins/loader.py:539-557` |
+| 后端 | 中 | `warn` 完整性模式下代码变更记 `outcome="allow"` 后照常加载；面板已在 `webui/src/views/PluginsView.vue:272-278` 无条件标红「代码已改动」，并禁用 `block` 模式下的加载按钮 | `src/soapbot/plugins/loader.py:539-557` |
 | 后端 | 中 | refresh 无限续期：旧 jti 仍有效 72h，无 idle / last_activity | `src/soapbot/api/auth.py:509-545`；`src/soapbot/security/tokens.py:113,135` |
 | 后端 | 中 | `log.write` 无能力检查、无速率上限、无审计 | `src/soapbot/plugins/surfaces.py:227-236` |
 | 后端 | 中 | MCP 工具描述 / inputSchema 无完整性摘要，`pinned_version` 只覆盖握手 | `src/soapbot/mcp/client.py:287-351, :448-496` |
@@ -130,9 +130,11 @@
 - 运行时证明依旧不是密码学签名；`signature` 恒空的事实保留，不因接线而改口。
 - 跨调用数据驻留仍判「未知」：静态扫描证明不了运行时不存在隐式残留。
 - 备份恢复仍是整库覆盖，没有按调用 / 轨迹的选择性回滚。
-- **本轮取舍后明确未做的三件**：插件 `warn` 完整性模式的显式标红、按活跃度的
-  idle 凭证衰减、长会话跨轮确定性的专项回归。前两件需要改加载状态与令牌生命周期
-  的对外契约，第三件需要可控时钟；都不属于「确定性小修」，留作独立工作，不在此
-  声称已解决。
+- **本轮取舍后明确未做的两件**：按活跃度的 idle 凭证衰减、长会话跨轮确定性的专项
+  回归。前者要改令牌生命周期的对外契约，后者需要可控时钟；都不属于「确定性小修」，
+  留作独立工作，不在此声称已解决。
+  （插件 `warn` 模式的显式标红不在其列：`PluginsView.vue:272-278` 对 `code_changed`
+  无条件标红，`tests/test_plugin_integrity.py:157-171` 锁住 `warn` 下
+  `loaded.integrity == "changed"`。此前这条被记成「未做」，是文档没有跟上代码。）
 - 「先收集后解密」只写进了 `SECURITY.md` 的威胁模型，**没有**改变任何密码学能力：
   Fernet 与 HS256 都不是后量子方案，也没有前向保密。

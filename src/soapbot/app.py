@@ -182,6 +182,7 @@ def _init_auth(app: Any = None) -> None:
     service = TokenService(
         secret=settings.jwt_secret.get_secret_value(),
         ttl_hours=settings.jwt_ttl_hours,
+        idle_hours=settings.jwt_idle_hours,
         revocations=revocations,
     )
     # The credential lives on disk, not in this process. It used to be regenerated on

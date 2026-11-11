@@ -505,6 +505,14 @@ class Settings(BaseSettings):
     value that mints an ``owner`` session. A leaked log line here is a leaked login.
     """
     jwt_ttl_hours: int = 72
+    jwt_idle_hours: int = 0
+    """Refuse a token that has been unused for this many hours. ``0`` disables it.
+
+    Off by default: an idle window changes when an existing session stops working, and
+    a silent change to the login lifetime is worse than an operator never turning it on.
+    The bookkeeping is per process, so a restart restarts every window; use it together
+    with a bounded :attr:`jwt_ttl_hours`, not as a replacement for one.
+    """
 
     init_token: SecretStr = SecretStr("")
     """One-time bootstrap token. Empty means persist one in ``<data>/init_token.txt``
