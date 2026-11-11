@@ -101,6 +101,14 @@ const routes = [
     component: () => import('@/views/ChatLoginView.vue'),
     meta: { titleKey: 'nav.14', index: '14' },
   },
+  {
+    // 15 is appended for the same reason as 09/10: the number is an identifier, and
+    // account administration existed as API-only before this page gave it a rail row.
+    path: '/accounts',
+    name: 'accounts',
+    component: () => import('@/views/AccountsView.vue'),
+    meta: { titleKey: 'nav.15', index: '15' },
+  },
   // Anything else falls back to the overview rather than showing a dead end in a tool
   // with eight pages and no deep links.
   { path: '/:pathMatch(.*)*', redirect: '/' },

@@ -10,13 +10,16 @@ import { t } from '@/i18n'
 const router = useRouter()
 
 const me = ref<ChatAccount | null>(null)
+const surfaces = ref<{ talk: boolean }>({ talk: false })
 const sessions = ref<ChatSessionRow[]>([])
 const scope = ref<'all' | 'member'>('member')
 const activeKey = ref('')
 const messages = ref<ChatMessage[]>([])
 const cursor = ref(0)
+const hasOlder = ref(false)
 const loadingSessions = ref(true)
 const loadingMessages = ref(false)
+const loadingEarlier = ref(false)
 const saving = ref(false)
 const error = ref('')
 const noteError = ref('')
@@ -28,6 +31,13 @@ const unread = ref(0)
 const scroller = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
 let pendingId = -1
+let sessionsTimer: ReturnType<typeof setInterval> | null = null
+
+/** This account's conversation session; empty when talk is off. */
+const talkKey = computed(() =>
+  me.value && surfaces.value.talk ? `web:private:account-${me.value.id}` : '',
+)
+const isTalkSession = computed(() => activeKey.value !== '' && activeKey.value === talkKey.value)
 
 const visibleSessions = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -48,8 +58,9 @@ const activeSession = computed(
   () => sessions.value.find((row) => row.session_key === activeKey.value) ?? null,
 )
 
-/** `qq:group:12345` reads as `群 12345`; anything unusual is shown verbatim. */
+/** `qq:group:12345` reads as `群 12345`; the talk session gets its own name. */
 function sessionLabel(key: string): string {
+  if (talkKey.value && key === talkKey.value) return t('chat.session.webTalk')
   const [platform, kind, ...rest] = key.split(':')
   const id = rest.join(':')
   if (!platform || !kind || !id) return key
@@ -116,14 +127,20 @@ async function openSession(key: string): Promise<void> {
   detailOpen.value = true
   messages.value = []
   cursor.value = 0
+  hasOlder.value = false
   loadingMessages.value = true
   error.value = ''
   unread.value = 0
   closeStream()
   try {
-    const page = await chatApi.messages(key, 0, 100)
+    // `latest`, not `after_id: 0`: the first screen of an old session must show the
+    // newest page. The forward cursor only answers "what arrived since N", which is
+    // the wrong question for a session with months of history.
+    const page = await chatApi.messages(key, { latest: true, limit: 100 })
     messages.value = page.messages
-    cursor.value = page.next_after_id
+    const last = page.messages[page.messages.length - 1]
+    cursor.value = last ? last.id : 0
+    hasOlder.value = page.has_older ?? false
     await scrollToBottom()
     openStream()
   } catch (err) {
@@ -137,11 +154,96 @@ async function openSession(key: string): Promise<void> {
   }
 }
 
+async function loadEarlier(): Promise<void> {
+  if (loadingEarlier.value || !activeKey.value || messages.value.length === 0) return
+  loadingEarlier.value = true
+  const el = scroller.value
+  const heightBefore = el?.scrollHeight ?? 0
+  try {
+    const page = await chatApi.messages(activeKey.value, {
+      beforeId: messages.value[0]?.id,
+      limit: 100,
+    })
+    messages.value = [...page.messages, ...messages.value]
+    hasOlder.value = page.has_older ?? false
+    await nextTick()
+    if (el) el.scrollTop = el.scrollHeight - heightBefore
+  } catch {
+    noteError.value = t('chat.messages.error')
+  } finally {
+    loadingEarlier.value = false
+  }
+}
+
+/** Sync the tail after a talk POST: both the user row and the reply are archived by
+ * the pipeline, and one forward page replaces the optimistic bubble with real ids. */
+async function syncTail(key: string): Promise<void> {
+  const page = await chatApi.messages(key, { afterId: cursor.value, limit: 100 })
+  if (key !== activeKey.value) return
+  for (const row of page.messages) {
+    if (row.id > cursor.value) {
+      messages.value.push(row)
+      cursor.value = row.id
+    }
+  }
+}
+
+async function sendTalk(text: string): Promise<void> {
+  const key = talkKey.value
+  if (!key) return
+  saving.value = true
+  noteError.value = ''
+  const optimistic: ChatMessage = {
+    id: pendingId--,
+    session_key: key,
+    role: 'user',
+    content: text,
+    adapter: 'web',
+    user_name: me.value?.username ?? '',
+    created_at: Date.now() / 1000,
+  }
+  messages.value.push(optimistic)
+  await scrollToBottom(true)
+  try {
+    const result = await chatApi.talk(text)
+    messages.value = messages.value.filter((row) => row.id !== optimistic.id)
+    await syncTail(key)
+    if (!result.reply) noteError.value = t('chat.talk.refused')
+    void scrollToBottom(true)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      messages.value = messages.value.filter((row) => row.id !== optimistic.id)
+      await router.replace({ path: '/chat/login', query: { next: '/chat' } })
+      return
+    }
+    messages.value = messages.value.filter((row) => row.id !== optimistic.id)
+    noteError.value = err instanceof Error ? err.message : t('chat.talk.refused')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function refreshSessions(): Promise<void> {
+  if (loadingSessions.value) return
+  try {
+    const result = await chatApi.sessions()
+    sessions.value = result.sessions
+    scope.value = result.scope
+  } catch {
+    // degraded: a missed poll leaves the previous list in place; the next one retries.
+  }
+}
+
 async function bootstrap(): Promise<void> {
   loadingSessions.value = true
   error.value = ''
   try {
     me.value = await chatApi.me()
+    try {
+      surfaces.value = await chatApi.surfaces()
+    } catch {
+      // fallback: an old backend without /surfaces still serves the archive; only talk hides.
+    }
     const result = await chatApi.sessions()
     sessions.value = result.sessions
     scope.value = result.scope
@@ -198,9 +300,17 @@ async function logout(): Promise<void> {
 
 onMounted(() => {
   void bootstrap()
+  // The list is derived from the archive, so a new session appears only when it has
+  // messages — poll at the same pace the SSE poll implies, keeping the selection.
+  sessionsTimer = setInterval(() => {
+    void refreshSessions()
+  }, 30_000)
 })
 
-onBeforeUnmount(closeStream)
+onBeforeUnmount(() => {
+  closeStream()
+  if (sessionsTimer !== null) clearInterval(sessionsTimer)
+})
 </script>
 
 <template>
@@ -289,6 +399,15 @@ onBeforeUnmount(closeStream)
         </div>
 
         <template v-else>
+          <button
+            v-if="hasOlder"
+            type="button"
+            class="chat__earlier"
+            :disabled="loadingEarlier"
+            @click="loadEarlier"
+          >
+            {{ loadingEarlier ? t('chat.loadEarlier.loading') : t('chat.loadEarlier') }}
+          </button>
           <MessageBubble
             v-for="row in messages"
             :key="row.id"
@@ -306,7 +425,8 @@ onBeforeUnmount(closeStream)
       <NoteComposer
         :disabled="!activeKey || loadingMessages"
         :saving="saving"
-        @submit="saveNote"
+        :mode="isTalkSession ? 'talk' : 'note'"
+        @submit="isTalkSession ? sendTalk($event) : saveNote($event)"
       />
     </section>
 
@@ -595,6 +715,28 @@ onBeforeUnmount(closeStream)
   font-size: 12px;
   padding: 5px 12px;
   cursor: pointer;
+}
+
+.chat__earlier {
+  align-self: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.chat__earlier:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--ink);
+}
+
+.chat__earlier:disabled {
+  color: var(--ink-3);
+  cursor: default;
 }
 
 .chat__empty {

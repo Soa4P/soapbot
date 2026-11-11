@@ -394,6 +394,15 @@ async def _attach_adapters(runtime) -> None:
         await runtime.add_adapter(adapter)
         logger.info("adapter registered: %s", config.kind)
 
+    # The web conversation adapter is config-gated, not adapters.yaml-gated: it has
+    # no options, no socket and no credentials, so a yaml entry would only invite a
+    # `kind: web` line that duplicates this registration on every boot.
+    if settings.chat_talk_enabled:
+        from soapbot.adapters.web import WebAdapter
+
+        await runtime.add_adapter(WebAdapter())
+        logger.info("adapter registered: web (chat talk enabled)")
+
 
 # --------------------------------------------------------------------- shutdown
 async def _shutdown() -> None:

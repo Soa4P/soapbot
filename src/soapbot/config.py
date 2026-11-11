@@ -164,6 +164,18 @@ class Settings(BaseSettings):
     can be installed on a machine the owner does not control.
     """
 
+    chat_talk_enabled: bool = False
+    """Let authorised accounts *converse* with the bot from the web/mobile ends.
+
+    Off by default, and the reversal it implies is deliberate and documented: the
+    archive API was built read-only ("QQ is the only source of truth"), and this flag
+    is what turns ``web:private:account-<id>`` sessions into a second message source.
+    Even when on, the gate is not this flag alone — an account still needs a
+    ``chat_memberships`` row for its own web session, so the owner grants conversation
+    per account, and every message pays the same pipeline tolls (guard, injection
+    screen, per-adapter rate limit) as a QQ message.
+    """
+
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 
