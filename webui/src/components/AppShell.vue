@@ -43,6 +43,7 @@ const nav = [
   { to: '/metrics', key: 'nav.10', index: '10' },
   { to: '/market', key: 'nav.11', index: '11' },
   { to: '/settings', key: 'nav.12', index: '12' },
+  { to: '/chat', key: 'nav.13', index: '13' },
 ]
 
 /**

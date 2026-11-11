@@ -106,6 +106,19 @@ OneBot 11 网关（阶段二）用四个变量：
 | `ONEBOT_GATEWAY_PATH` | `/onebot/v11/ws` | 文档与客户端约定的路径（鉴权在握手后按 token 判断，不按路径） |
 | `ONEBOT_GATEWAY_TOKEN` | 空 | 客户端必须携带的 Bearer token；**为空时网关拒绝启动** |
 
+聊天存档有三个端开关，决定 `/api/chat/*` 是否存在：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CHAT_WEB_ENABLED` | `true` | 浏览器端；唯一常开的入口，因为它同时是验证存档是否正确的工具 |
+| `CHAT_APP_ENABLED` | `false` | Flutter 手机端可以访问聊天接口 |
+| `CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问聊天接口 |
+
+三个都关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。手机端
+与桌面壳默认关闭，是因为它们是装到别人设备上的二进制，默认能读存档不合适；开启等于
+所有者明确同意。账号本身由邀请码创建，首个所有者用面板的一次性 bootstrap token 建立
+（`POST /api/accounts/owner`）。开关的完整语义见 [`chat-archive.md`](./chat-archive.md)。
+
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
 > 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的
 > `kind: qq_official` 条目里，AppSecret 建议引用环境变量（例如 `env:QQ_BOT_SECRET`），
