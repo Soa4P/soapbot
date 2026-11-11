@@ -41,6 +41,10 @@ CI_ONLY = {
         "whatever happens to be staged"
     ),
     "pip-audit": "needs the network; a gate that fails when PyPI is slow gets re-run until green",
+    "check_pr_title.py": (
+        "checks the title of a pull request; `make check` runs on a working tree and has "
+        "no title to inspect, and on a direct push there is no PR either"
+    ),
 }
 
 _SCRIPT = re.compile(r"scripts/(check_[a-z0-9_]+\.py)")

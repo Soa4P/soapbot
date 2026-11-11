@@ -56,6 +56,15 @@ jobs:
       - name: Secret and production artifact gate
         run: python scripts/check_secrets.py --committed
 
+      - name: PR title format
+        # Only on pull requests: an owner's direct push has no title to check. This
+        # lives inside `backend` on purpose — that job is already a required check, so
+        # a bad title blocks the PR without adding a seventh context to the ruleset.
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_pr_title.py
+
       - name: Install
         run: |
           python -m pip install --upgrade pip
