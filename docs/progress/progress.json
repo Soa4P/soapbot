@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-11T11:27:26+08:00",
+  "updated_at": "2026-11-11T11:54:09+08:00",
   "current": null,
   "phases": [
     {
@@ -3068,7 +3068,7 @@
     }
   ],
   "verification": {
-    "pytest": "2028 passed, 12 skipped",
+    "pytest": "2036 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
