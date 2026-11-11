@@ -452,6 +452,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 1fr;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--ink);
 }
@@ -460,6 +461,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 16px 14px;
   border-right: 1px solid var(--border);
   background: var(--surface);
@@ -618,6 +620,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   min-width: 0;
   background: var(--bg);
 }
@@ -844,10 +847,23 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Mobile: one pane at a time. The list is the home; opening a session swaps panes. */
+/* Mobile: one pane at a time. The list is the home; opening a session swaps panes.
+   安全区：刘海/底部指示条（viewport-fit=cover 后 env() 才非零）；触控目标 ≥44px；
+   输入 16px 防 iOS 聚焦自动放大。 */
 @media (max-width: 959px) {
   .chat__main {
     display: none;
+  }
+
+  .chat__list,
+  .chat__main {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .chat__logout,
+  .chat__back,
+  .chat__retry {
+    min-height: 44px;
   }
 
   .chat--detail .chat__list {

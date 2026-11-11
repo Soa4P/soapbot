@@ -158,4 +158,16 @@ function send(): void {
     transition: none;
   }
 }
+
+/* 触屏：输入字号提到 16px，否则 iOS 聚焦时整页自动放大；发送钮 ≥44px。 */
+@media (pointer: coarse) {
+  .composer__input {
+    font-size: 16px;
+  }
+
+  .composer__send {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
 </style>
