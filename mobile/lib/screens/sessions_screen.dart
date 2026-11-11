@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
@@ -5,9 +7,19 @@ import '../theme.dart';
 import 'chat_screen.dart';
 
 class SessionsScreen extends StatefulWidget {
-  const SessionsScreen({super.key, required this.api, required this.onSignOut});
+  const SessionsScreen({
+    super.key,
+    required this.api,
+    required this.accountId,
+    required this.onSignOut,
+  });
 
   final ChatApi api;
+
+  /// Signed-in account id, handed to the chat screen so it can recognise the
+  /// conversation session that belongs to this account.
+  final int accountId;
+
   final VoidCallback onSignOut;
 
   @override
@@ -16,11 +28,21 @@ class SessionsScreen extends StatefulWidget {
 
 class _SessionsScreenState extends State<SessionsScreen> {
   late Future<List<SessionRow>> _future;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _future = widget.api.sessions();
+    // The list is derived from the archive, so a new session exists only once it has
+    // messages. Poll at the same pace the chat poll implies; pull-to-refresh stays.
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _reload());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -86,11 +108,20 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: ink3)),
                   trailing: Text('${row.messageCount}',
                       style: const TextStyle(fontSize: 11, color: ink3)),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => ChatScreen(api: widget.api, session: row),
-                    ),
-                  ),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ChatScreen(
+                          api: widget.api,
+                          session: row,
+                          accountId: widget.accountId,
+                        ),
+                      ),
+                    );
+                    // Back from a chat: the session may have grown or, for a first
+                    // conversation, may not have existed when this list loaded.
+                    if (mounted) await _reload();
+                  },
                 );
               },
             );
