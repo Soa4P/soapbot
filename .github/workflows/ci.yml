@@ -259,6 +259,11 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # Pinned to the version the SDK verification ran against: `channel: stable`
+          # floats, and a newer Flutter turned 7 deprecation *infos* into exit-code-1
+          # (material.dart -> package:material_ui). mobile/README records the same
+          # decision; bump the two together.
+          flutter-version: 3.50.0
           channel: stable
           cache: true
 
