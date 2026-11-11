@@ -10,6 +10,20 @@
 
 ## [Unreleased]
 
+### 手机端首次真机链路验证与模型接入文档补全
+
+- **mobile/ 过了本机 Flutter 验证**：Flutter 3.50.0 下 `flutter analyze` 0 错误（剩 7 条
+  `material.dart` 弃用提示：新 SDK 把 Material 挪进 `package:material_ui`，但 pubspec
+  下限仍是 3.22，换 import 之前旧 SDK 装不上，保留并记录）、`flutter test` 12 项全过
+  （`mobile/test/client_test.dart` 模型解析与会话标签、`mobile/test/screens_test.dart`
+  翻页参数映射、对话发送不携带 session_key、两屏的备注/对话模式切换）。`flutter build apk`
+  仍需 Android SDK，是遗留的未验证项。`mobile/README.md` 的「从未构建验证」状态与
+  「不实现发送」的只读表述一并改写。
+- **docs/model-providers.md 扩充**：新增「原生协议」一节（四种 kind 的端点拼接与鉴权头
+  来自 providers 实现）与九家厂商接入表（MiniMax 国内外双域名、腾讯混元、火山方舟/豆包、
+  百度千帆、硅基流动、OpenRouter、Groq、Mistral、Moonshot/DashScope 国际版），每个端点
+  逐一核实于 2026-11 并附官方来源链接，本地推理服务列出默认端口。
+
 ### 多端对话：网页/手机端可以和机器人真正说话了
 
 原来错在哪：存档端点做完后，「多端」只有读的能力——网页和手机上的输入框写的是备注，

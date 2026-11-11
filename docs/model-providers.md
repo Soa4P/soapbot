@@ -11,8 +11,9 @@
 不知道选哪家：先选 **DeepSeek** 或 **Qwen**，注册和充值流程最 straightforward，且面板
 里已经预填好了地址和模型名。之后随时可以加第二家、第三家，互不影响。
 
-> 本文档只写仓库里真实存在的预填值，不猜测任何第三方厂商的申请网址或模型名。
-> 厂商控制台地址和可用模型会变，以厂商自己的文档为准。
+> 本文档里，**预填表只写仓库里真实存在的值**（来自 `webui/src/views/ConfigView.vue`）；
+> 「更多厂商的接入细节」一节的端点逐条核实于 2026-11 并附官方来源，不凭记忆写。
+> 厂商控制台地址和可用模型会变，以厂商自己的文档与「拉取模型列表」的结果为准。
 
 ## 三步完成
 
@@ -56,6 +57,60 @@ Key，就能接。所以 Claude、Gemini 这里用的是它们各自的 OpenAI �
 `deepseek-flash` 和 `deepseek-v4-pro`；模型会随厂商调整，最终以拉取到的列表和
 [DeepSeek 官方模型文档](https://api-docs.deepseek.com/quick_start/pricing)为准。
 仓库模板和面板默认使用 `deepseek-flash`；如果你的旧配置仍写着其他模型名，请点击「拉取模型列表」后选择官方返回的可用 ID。
+
+## 原生协议：openai_compat 之外的四种 kind
+
+手改 `data/config/providers.yaml` 时可选的 `kind`，端点拼接与鉴权方式来自
+`src/soapbot/providers/` 的实现（不是约定俗成，是这四个类真正发的请求）：
+
+| kind | 实际请求 | 鉴权头（代码自动加） | base_url 缺省值 |
+| --- | --- | --- | --- |
+| `openai_compat` | `POST {base}/chat/completions` | `Authorization: Bearer <key>` | `https://api.openai.com/v1` |
+| `anthropic` | `POST {base}/messages` | `x-api-key` + `anthropic-version` | `https://api.anthropic.com/v1` |
+| `gemini` | `POST {base}/models/{model}:generateContent` | `x-goog-api-key` | `https://generativelanguage.googleapis.com/v1beta` |
+| `ollama` | `POST {base}/api/chat`（本地原生协议） | 无 | `http://127.0.0.1:11434` |
+
+什么时候值得用原生：需要厂商只在原生协议上提供的字段（例如 Gemini 的
+`batchEmbedContents` 嵌入批处理，`gemini` kind 实现了、兼容端点没有）。纯聊天用
+`openai_compat` 就够，少一个分支少一种错。
+
+## 更多厂商的接入细节
+
+以下端点**逐一核实于 2026-11**，来源附在每家之后；厂商随时可能改版，填完仍以第 07 页
+「测试」的绿灯为准，模型 ID 用「拉取模型列表」取真实值。全部走 `openai_compat`（第 07
+页「添加一行」），中国版与国际版地址不同的一并列出。
+
+| 厂商 | base_url（OpenAI 兼容） | 说明与来源 |
+| --- | --- | --- |
+| MiniMax（国内） | `https://api.minimaxi.com/v1` | 国内平台域名多一个 `i`；官方 OpenAI 兼容文档 [platform.minimax.io](https://platform.minimax.io/docs/api-reference/text-chat-openai) |
+| MiniMax（国际） | `https://api.minimax.io/v1` | 同上；与国内账号不通用 |
+| 腾讯混元 | `https://api.hunyuan.cloud.tencent.com/v1` | 官方兼容调用文档 [cloud.tencent.com](https://cloud.tencent.com/document/product/1729/111007)；示例模型 `hunyuan-turbos-latest` |
+| 字节豆包（火山方舟） | `https://ark.cn-beijing.volces.com/api/v3` | 注意路径是 `/api/v3` 不以 `/v1` 结尾；先在 [方舟控制台](https://console.volcengine.com/ark)开通模型；官方文档 [volcengine.com](https://www.volcengine.com/docs/82379/1099455) |
+| 百度千帆（文心） | `https://qianfan.baidubce.com/v2` | v2 完全兼容 OpenAI 协议；官方文档 [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26)；示例模型 `ernie-4.5-turbo-128k` |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | 聚合托管平台，注册即送额度、部分模型免费；官方快速开始 [docs.siliconflow.cn](https://docs.siliconflow.cn/en/userguide/quickstart) |
+| OpenRouter | `https://openrouter.ai/api/v1` | 聚合网关：一个 Key 访问多家厂商，模型 ID 带厂商前缀（如 `anthropic/claude-…`）；[API 参考](https://openrouter.ai/docs/api_reference/overview) |
+| Groq | `https://api.groq.com/openai/v1` | 注意是 `/openai/v1` 不是 `/v1`；[官方兼容文档](https://console.groq.com/docs/openai) |
+| Mistral | `https://api.mistral.ai/v1` | 代码补全模型 Codestral 走单独端点与单独 Key（`https://codestral.mistral.ai/v1`）；[docs.mistral.ai](https://docs.mistral.ai) |
+
+三家预设之外的国内大厂补充说明：
+
+- **Moonshot 国际版**：`https://api.moonshot.ai/v1`（国内预设表里是
+  `api.moonshot.cn`，两个站点的账号与 Key 不通用）。
+- **DashScope 国际版**：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+  （国内预设表里是 `dashscope.aliyuncs.com`）。
+- **智谱 GLM**：预填的 `https://open.bigmodel.cn/api/paas/v4` 同时兼容
+  `/chat/completions` 调用，无需换路径。
+
+### 本地推理服务的默认端口
+
+都按「表里没有的厂商」一节处理（`kind: openai_compat`），Key 留空或填占位值：
+
+| 服务 | 默认 OpenAI 兼容地址 |
+| --- | --- |
+| Ollama | `http://127.0.0.1:11434/v1`（预设已内置） |
+| LM Studio | `http://127.0.0.1:1234/v1` |
+| vLLM | `http://127.0.0.1:8000/v1`（`--port` 可改） |
+| llama.cpp server | `http://127.0.0.1:8080/v1` |
 
 ## 表里没有的厂商：MiniMax、混元、Nemotron、seed、Llama / Meta、Muse……
 
