@@ -29,6 +29,7 @@ from soapbot.accounts import (
     list_accounts,
     list_memberships,
     redeem_invite,
+    set_account_status,
 )
 from soapbot.accounts.service import active_account_from_claims
 from soapbot.api.auth import (
@@ -73,6 +74,10 @@ class InviteRequest(BaseModel):
 class GrantRequest(BaseModel):
     account_id: int = Field(..., ge=1)
     session_key: str = Field(..., min_length=1, max_length=128)
+
+
+class StatusRequest(BaseModel):
+    status: str = Field(..., pattern="^(active|disabled)$")
 
 
 def _issue(request: Request, response: Response, account: Account) -> dict[str, Any]:
@@ -202,6 +207,39 @@ async def accounts(
             {"id": a.id, "username": a.username, "role": a.role, "status": a.status}
             for a in rows
         ]
+    }
+
+
+@router.post("/{account_id}/status")
+async def set_status(
+    account_id: int,
+    payload: StatusRequest,
+    request: Request,
+    auth: dict[str, Any] = Depends(require_role(Role.OWNER, require_credential=True)),
+) -> dict[str, Any]:
+    """Enable or disable an account.
+
+    This is the only way to take a member out of the archive: there is no delete, on
+    purpose — a deleted account would take its membership grants with it, while a
+    disabled one keeps its history and can be switched back on.
+    """
+    actor = await active_account_from_claims(_db(request), auth)
+    if actor is None or not actor.is_owner:
+        raise HTTPException(status_code=403, detail="owner only")
+    try:
+        updated = await set_account_status(
+            _db(request), account_id=account_id, status=payload.status
+        )
+    except AccountError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return {
+        "ok": True,
+        "account": {
+            "id": updated.id,
+            "username": updated.username,
+            "role": updated.role,
+            "status": updated.status,
+        },
     }
 
 

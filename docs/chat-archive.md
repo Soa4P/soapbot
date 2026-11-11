@@ -58,6 +58,10 @@ POST /api/chat/notes                    写一行 role="note"
   读全部」。它只用来建第一个账号，建完就该被 `POST /api/auth/login` 消费掉（删除
   `init_token.txt` 并留下 `init_token.redeemed` 标记）；只当 Bearer 用并不算消费。
 - 停用账号后，已经签发出去的 token 立即失效：鉴权每次按 subject 回查账号状态。
+- 停用 / 启用：`POST /api/accounts/{account_id}/status`，body `{"status": "active" | "disabled"}`，
+  仅 owner。**没有删除接口**——删号会连同它的会话授权一起消失，而停用保留历史、随时能开回来。
+  最后一个活动的 owner 不能被停用，否则谁也开不回来，只能改库。
+  账号管理目前只有 API，面板上还没有这一层按钮。
 
 不引入 argon2 是有意的：scrypt 已在标准库里提供内存困难特性，为它加一个依赖不值得。
 
