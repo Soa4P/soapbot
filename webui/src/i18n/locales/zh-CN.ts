@@ -988,6 +988,7 @@ export default {
   'overview.runtimeOffHint':
     '这是安装时的一个设置：`SOAPBOT_ENABLE_RUNTIME=false`。面板能用、能改配置、能取二维码，但不会去连 QQ、也不会回消息。要让它真的干活：把 `.env` 里这一行改成 `true`，重启服务；然后第 07 页填 Provider 与 QQ 接入。',
 
+  'config.modelsLiteralOnly': '列出模型需要字面 key：env: 与 enc:v1: 引用不会被解析或发送',
   'config.modelsList': '列出模型',
   'config.modelsSendsKey': '（这一下会把 Key 发给服务商，用来验证 Key 是否有效）',
   'config.modelsKeyShort': '你填的 Key 只有 {n} 个字符（DeepSeek 的是 35 个：sk- 加 32 位），很可能没复制完整。',

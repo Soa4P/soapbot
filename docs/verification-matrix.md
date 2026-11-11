@@ -73,6 +73,7 @@
 | 语义授权与证据链逐条判定 | `docs/semantic-authorization.md`、`docs/security-model.md` | `tests/test_semantic_authorization_review.py`（10 项：表头与四档口径、每行证据路径真实存在、不适用 / 未知编号与判定列交叉一致、不适用实体不得写成已通过、禁止正则非空转、源码与测试静态零命中、判定篡改 / 伪造路径 / 表头损坏 / 删行四类反向用例） | 28 条主张逐条取证：已覆盖 2 / 部分覆盖 15 / 不适用 10 / 未知 1；`docs/plugin-security-review.md` 已披露的「语义层未覆盖」与 `src/soapbot/plugins/attestation.py` 自述「未签名」原样保留；四类改错复验均触发断言失败 | **仅自动**（静态取证；跨调用数据驻留需动态污点追踪，本轮判未知） |
 | 语义授权取舍与四层加固 | `docs/optimization-triage.md`、`plugins/dispatch.py`、`mcp/client.py`、`api/security.py`、`core/trace.py`、`api/auth.py`、`webui/src/views/SecurityView.vue`、`desktop/sidecar/build.py` | `tests/test_optimization_triage.py`（8 项：取舍表四档 / 26 行编号 / 汇总计数 / 证据路径 / 不适用不写成已通过 / 重复与 git 结论 / 静态零命中 / 四类改错复验）、`tests/test_gateway_hardening.py`（8 项：保留前缀常量、插件抢占前缀、重复名抑制、无前缀 schema、无来源标记拒绝、形似名不路由、首个 source 异常不隐藏后续、全部失败仍报错）、`tests/test_mcp_metadata_integrity.py`（7 项：canonical digest、原始元数据摘要、描述变化改摘要、pin 匹配 / 不匹配拒绝、配置只收真摘要、status 暴露双摘要）、`tests/test_runtime_integrity_signals.py`（5 项：轨迹 boot_id 与不可回放、同进程共享 boot、log.write 审计、确定性限速、AI 只作参考的门禁锁）、`tests/test_integrity_endpoint.py`（3 项：三源聚合、运行时缺席不算通过、只读不回显凭据）、`tests/test_panel_artifact.py`（3 项：dist 引用无悬空、标题 UTF-8 完好、无 0 字节产物） | 清单 26 条取舍：该落实 12 / 没有用 3 / 不适用 6 / 已具备 5；ruff 4 个 error 归零；`npm run typecheck` / `lint` / `test` / `build` 全绿并重建 dist；`scripts/check_desktop.py` 15/15；PyInstaller 重建 sidecar exe 46.3 MiB 并 staging 成功；改错复验均触发断言失败 | **自动 + 实测**（本机；exe 被 gitignore，不进提交） |
 | 安全立场与缺口契约 | `SECURITY.md`、`security/provenance.py`、`budget/store.py`、`core/trace.py` | `tests/test_security_claims.py`（8 项：提示可被提取的立场、轨迹 / 审批 / 预算三处边界、两处缺口必须写成缺口、引用路径真实存在、完整性校验先于来源分支、预算按会话 + 周期累计、轨迹声明不可回放、把缺口改写成已覆盖必须被检测） | 本轮只补文档与测试：`vet_arguments` 的完整性校验经核实为已实现（未改代码）；轨迹无持久化、模型 token 无会话累积上限，均明确标为缺口 | **仅自动** |
+| 审查发现的接口越权与去重修复 | `api/config_probe.py`、`api/admin.py`、`api/bilibili.py`、`core/stages.py`、`core/builder.py` | `tests/test_bilibili_endpoint_limits.py`（2 项：第 4 次调用在构建 client 前被拒并带 Retry-After、限流按调用方而非全局）、`tests/test_dedup_scope.py`（2 项：不同账号的相同消息 id 不互相误丢、guard 仍先于 dedup）、`tests/test_config_probe.py`（新增 2 项：env: 与 enc:v1: 引用被拒绝且不触网）、`tests/test_wave9_admin.py`（新增 1 项：跨会话预算视图需要 MANAGE_CONFIG） | 四条均来自审查截图并已在当前代码核实：模型探测会把 env:/enc: 解析成明文发往任意地址；`/api/budget` 空 session_key 返回全量；`/impression` 无配额；dedup 键缺账号维度且在 guard 前 | **仅自动** |
 
 ## 二、没有变化的能力（沿用上几轮结论）
 
@@ -109,7 +110,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：2036 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：2043 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁

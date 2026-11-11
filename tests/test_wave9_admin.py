@@ -151,6 +151,27 @@ def test_budget_view_says_disabled_rather_than_empty(tmp_path, monkeypatch) -> N
     assert body["enabled"] is False
 
 
+def test_budget_cross_scope_view_requires_config_permission(
+    runtime_client: TestClient,
+) -> None:
+    """Enumerating every conversation's spending is not a MEMBER read.
+
+    The response names requesters, purposes and decision notes. A member may ask about
+    one session it already knows; it must not page through all of them.
+    """
+    service = runtime_client.app.state.soapbot_auth_state.token_service
+    token, _ = service.issue(subject="member", role="member")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    cross = runtime_client.get("/api/budget", headers=headers)
+    assert cross.status_code == 403
+
+    scoped = runtime_client.get(
+        "/api/budget", params={"session_key": "qq:group:1"}, headers=headers
+    )
+    assert scoped.status_code == 200
+
+
 def test_access_matrix_matches_the_permission_table(runtime_client: TestClient) -> None:
     body = runtime_client.get("/api/access").json()
     floors = {p["name"]: p["min_role"] for p in body["permissions"]}

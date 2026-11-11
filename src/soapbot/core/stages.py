@@ -38,9 +38,14 @@ class DedupStage(Stage):
     async def run(self, ctx: PipelineContext) -> StageResult:
         mid = ctx.event.message_id
         if mid:
-            if mid in self._seen:
+            # A protocol message id is unique only inside one adapter+account pair: two
+            # bots in the same group are handed the same id by the same server, and a
+            # second adapter can reuse the numbering. Keying on the id alone dropped a
+            # genuine message whenever the other bot's copy arrived first.
+            key = f"{ctx.event.adapter}:{ctx.event.self_id}:{mid}"
+            if key in self._seen:
                 return StageResult(halt=True, reason="duplicate")
-            self._seen[mid] = time.time()
+            self._seen[key] = time.time()
             if len(self._seen) > self._capacity:
                 self._seen.popitem(last=False)
         return StageResult()

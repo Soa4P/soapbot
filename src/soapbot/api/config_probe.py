@@ -54,7 +54,7 @@ from soapbot.api.auth import require_api_auth
 from soapbot.api.config_write import _audit, _caller_label, _require_permission
 from soapbot.config import settings
 from soapbot.core import config_write
-from soapbot.core.config_files import ConfigError, resolve_secret
+from soapbot.core.config_files import ENV_PREFIX, ConfigError, resolve_secret
 from soapbot.net import build_timeout, outbound_client
 from soapbot.security.posture import probe_endpoint
 from soapbot.security.principal import Permission
@@ -217,14 +217,17 @@ async def list_provider_models(
     _enforce_rate(auth, request)
 
     key = payload.api_key.strip()
-    problem = ""
-    if key.startswith("env:"):
-        try:
-            key = resolve_secret(key, field_name="providers[?].api_key")
-        except ConfigError as exc:
-            key, problem = "", str(exc)
-    if problem:
-        return {"ok": False, "models": [], "error": problem}
+    # A credential *reference* must not be resolvable here. ``resolve_secret`` turns
+    # ``env:NAME`` into this host's environment value and ``enc:v1:`` into the decrypted
+    # plaintext, and this endpoint sends whatever it gets to a caller-chosen URL. That
+    # would let an ADMIN read a secret the panel never shows them, and hand it to a host
+    # they control. Literal keys only: the operator typed it, the operator may send it.
+    if key.startswith(ENV_PREFIX) or key.startswith("enc:v1:"):
+        return {
+            "ok": False,
+            "models": [],
+            "error": "模型列表只接受字面 key；env: 与 enc:v1: 引用不会被解析或发送",
+        }
 
     # The base URL people type is not always the one /models lives under. Measured with no
     # credential against every provider we preset:
