@@ -150,6 +150,7 @@ ALLOWED_SURFACES = frozenset(
         "session.view",
         "send.message",
         "http.request",
+        "bilibili.request",
         "storage.get",
         "storage.set",
         "storage.delete",
@@ -408,6 +409,23 @@ class _RemoteCtx:
             {"args": [str(a) for a in args],
              "kwargs": {k: str(v) for k, v in kwargs.items()}},
         )
+
+    def bilibili(self):
+        """Logged-in Bilibili surface. The cookie stays in the parent: the child
+        sends a path (and query params) and gets JSON back, so no credential ever
+        crosses the wire in either direction."""
+
+        class _RemoteBilibili:
+            async def get_json(self, path, *, params=None):
+                return await _call(
+                    "bilibili.request",
+                    {
+                        "path": str(path),
+                        "params": {str(k): str(v) for k, v in (params or {}).items()},
+                    },
+                )
+
+        return _RemoteBilibili()
 
     def log(self, message, level="info"):
         _send({"type": "log", "level": level, "message": str(message)[:500]})

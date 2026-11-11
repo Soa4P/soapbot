@@ -10,6 +10,32 @@
 
 ## [Unreleased]
 
+### B 站 L3 落地：`bilibili` 插件能力（登录态由宿主持有）与示例插件
+
+原来错在哪：能力矩阵写着「L3 登录态未实现」。而沙箱明确拒绝插件发送 `Cookie` 头
+（`SafeHttpClient._sanitize_headers`）——任何插件能*持有*的凭据，都是它能*泄露*的凭据。
+所以 L3 的正确形态不是「让插件带 Cookie」，而是新增一个受审的宿主能力面。
+
+现在：
+
+- **`Capability.BILIBILI`**（`manifest.py`）：敏感 + 限频（30 次/分钟滑窗）。插件申请它
+  之后能做的只有一件事：向**宿主钉死的** `api.bilibili.com` 发 GET（路径由插件选，
+  scheme/host 由宿主管——路径必须形如 `/x/...`，带 scheme 或 `//` 直接拒绝）。
+- **`BilibiliClient`**（`sandbox.py`）：Cookie 由 `SOAPBOT_BILI_COOKIE`（`SecretStr`，
+  默认空）在请求时注入；无 Cookie 抛专门的 `BilibiliUnavailableError`（区别于能力被拒），
+  插件作者能分清「没批准」和「没配置」。无重定向、2 MiB 响应上限、15 秒超时、每次请求
+  重跑 SSRF 校验；非 200 只报状态码不回显响应体（响应体可能回显凭据）。审计 detail 只含
+  路径，Cookie 值不进日志、审计、异常文本中的任何一处。
+- **双模可用**：进程内走 `ctx.bilibili`；隔离模式经 `bilibili.request` surface
+  （`ALLOWED_SURFACES` + `_SURFACE_TABLE` + 子进程 shim 同步接线），宿主侧
+  `SurfaceRouter._bilibili` **重新校验能力**——子进程没有 guard，路由器就是边界。
+- **示例插件 `examples/plugins/bili/`**：`/bili-history`（登录态看历史）、
+  `/bili-look`（公开元数据摘要）、`/bili-forget`（清空加密 storage 里的去重列表）。
+  manifest 按社区仓库要求写明「读了什么、发到哪里、留不留副本」；只声明
+  `command`/`bilibili`/`storage` 三项。
+- 测试 8 项：未授权拒绝、Cookie 只上钉死主机的线且不进审计、未配置的专属报错、
+  路径逃逸全部拒绝、非 200 不回显响应体、子进程 shim 只发 path/params 且不含
+  Cookie 字样、路由表接线。插件 IPC（66 项）与安全边界（89/89）门禁保持全绿。
 ### 可测试安装包落地：Android APK 与 Windows 桌面安装包
 
 原来错在哪：手机端交付的只有 Dart 源码——连 `android/` 平台目录都没有，「装到手机上

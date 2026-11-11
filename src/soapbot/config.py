@@ -176,6 +176,18 @@ class Settings(BaseSettings):
     screen, per-adapter rate limit) as a QQ message.
     """
 
+    bili_cookie: SecretStr = SecretStr("")
+    """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
+    capability.
+
+    ``SecretStr`` and empty by default: a plugin with the capability gets a clear
+    "not configured" error rather than unauthenticated 401s it would read as data.
+    The value never leaves the host — it is injected into requests on the fixed
+    ``api.bilibili.com`` allow-list and stays out of logs, audit details and error
+    messages. This is the L3 capability the built-in (cookie-less) bilibili module
+    deliberately does not have.
+    """
+
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 
