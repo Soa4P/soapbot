@@ -7,7 +7,7 @@
 | 角色 | 是什么 | 你要准备 |
 |---|---|---|
 | **soapbot** | 本体：收消息、调模型、回消息、带面板 | 本仓库 |
-| **协议端** | NapCat / Lagrange，登录你的 QQ，把消息转成 WebSocket | 自己装一个 |
+| **QQ 接入** | 官方 Bot（推荐），或自建 OneBot 协议端（NapCat / LLOneBot / Lagrange） | 见第 3 步二选一 |
 | **模型端点** | DeepSeek / 通义等，负责「说什么」 | 一个 API Key |
 
 ---
@@ -80,24 +80,55 @@ ssh -p 22 -i <你的密钥> -N -L 6185:127.0.0.1:6185 <用户>@<服务器IP>
 
 ## 第 3 步：配 QQ 接入（5 分钟）
 
-先在你的协议端（以 NapCat 为例）打开 WebSocket：
+有两条路线，先选一条：
+
+| 路线 | 适合谁 | 代价 |
+|---|---|---|
+| **A. 官方 Bot（推荐）** | 新部署、想要长期可维护 | 需要开放平台审核；能力受开放范围限制，见 [qq-official-setup.md](qq-official-setup.md) |
+| **B. 自建 OneBot 协议端** | 已有 NapCat / LLOneBot / Lagrange | 协议端生态在退场：NapCat 2026-11-10 停止功能维护，SnowLuma 已不可见 |
+
+### 路线 A：官方 Bot
+
+1. 在 [QQ 开放平台](https://q.qq.com/) 创建机器人，拿 AppID / AppSecret，并把测试群加进沙箱；
+2. 装可选依赖：`pip install ".[qq-official]"`；
+3. 在 `config/adapters.yaml` 写入：
+
+```yaml
+adapters:
+  - kind: qq_official
+    account_id: "你的AppID"
+    app_id: "你的AppID"
+    app_secret: env:QQ_BOT_SECRET
+    enabled: true
+```
+
+4. `.env` 里设置 `QQ_BOT_SECRET=...`，重启，检查 02 页适配器在线。
+
+完整步骤、配额与能力上限见 [qq-official-setup.md](qq-official-setup.md)。
+
+### 路线 B：自建 OneBot 协议端
+
+> NapCat 自 2026-11-10 起只保留版本更新（上游提交 `docs: ending`）；SnowLuma 已不可见。
+> 已装好的 NapCat 可以继续用，新部署优先考虑 LLOneBot 或 Lagrange。
+
+先在你的协议端打开 WebSocket：
 
 - 进 NapCat 的「网络配置」→ 新建 **WebSocket 服务器**（正向）或 **WebSocket 客户端**（反向）
 - 记下端口和 access token
 
 然后回到面板 **07 页 → 协议接入（adapters）**，点「新增接入」：
 
-### 情况 A：让 soapbot 主动连 NapCat（forward，最简单）
+#### B-1：让 soapbot 主动连协议端（forward，最简单）
 
 | 字段 | 填什么 |
 |---|---|
 | 类型 | `onebot11` |
 | 连接方式 | `forward` |
 | 机器人 QQ | 你的机器人 QQ 号 |
-| 反连地址 | NapCat 的 WebSocket 地址，如 `ws://127.0.0.1:3001` |
-| 令牌 | NapCat 里设的 access token（没设就留空） |
+| 反连地址 | 协议端的 WebSocket 地址，如 `ws://127.0.0.1:3001` |
+| 令牌 | 协议端里设的 access token（没设就留空） |
 
-### 情况 B：让 NapCat 主动连 soapbot（reverse，适合机器人跑在 NAT 后）
+#### B-2：让协议端主动连 soapbot（reverse，适合机器人跑在 NAT 后）
 
 | 字段 | 填什么 |
 |---|---|

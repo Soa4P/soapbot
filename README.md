@@ -105,7 +105,10 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 - Provider 响应正文不进 `last_error`、不进日志环；用户消息正文不写日志。
 - 正则匹配前截断输入，不是硬超时：标准库 `re` 没有超时参数，我们没有为此加依赖。
 - 插件熔断不自动恢复，worker 巡检只读报告，不重启进程。
-- 个人号经第三方协议端接入有被平台风控的风险，本项目只实现协议客户端。
+- 接入优先走 QQ 官方机器人（`kind: qq_official`），不触碰个人号协议；个人号经第三方
+  协议端接入有被平台风控的风险，本项目只实现协议客户端。协议端生态正在退场
+  （NapCat 2026-11-10 停止功能维护、SnowLuma 已不可见），新部署请按
+  [docs/qq-official-setup.md](docs/qq-official-setup.md) 配置。
   官方机器人审核、B 站数据合规、支付边界见 [SECURITY.md](SECURITY.md) 与
   [docs/provenance.md](docs/provenance.md)。
 
