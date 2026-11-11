@@ -3087,6 +3087,24 @@
             { "path": "tests/test_accounts_api.py", "status": "done" },
             { "path": "tests/test_chat_api.py", "status": "done" }
           ]
+        },
+        {
+          "id": "ph42-t9",
+          "name": "补上账号停用/启用入口",
+          "status": "done",
+          "note": "上一轮补完文档后，还剩一处「文档承诺、代码没有」：guide、public-user-guide、chat-archive 三处都写「账号怎么停用」，但 accounts 路由只有 owner/register/login/me/invites/memberships，没有任何停用入口——运维要么改库要么无计可施。补 POST /api/accounts/{id}/status（仅 owner，body {\"status\": \"active\"|\"disabled\"}），服务层 set_account_status 拒绝停用最后一个活动 owner（否则谁也开不回来，只能改库）。没有做删除接口：删号会连同会话授权一起消失，停用保留历史且随时能开回来。新增四条用例（owner 可停用与启用、停用后旧 cookie 立刻 401、成员无权停用、最后一个 owner 不可停用），全量 2130 passed / 12 skipped。",
+          "files": [
+            { "path": "src/soapbot/accounts/service.py", "status": "done" },
+            { "path": "src/soapbot/accounts/__init__.py", "status": "done" },
+            { "path": "src/soapbot/api/accounts.py", "status": "done" },
+            { "path": "tests/test_accounts_api.py", "status": "done" },
+            { "path": "docs/chat-archive.md", "status": "done" },
+            { "path": "docs/capabilities.md", "status": "done" },
+            { "path": "docs/guide.md", "status": "done" },
+            { "path": "docs/verification-matrix.md", "status": "done" },
+            { "path": "docs/delivery-readiness-v2.md", "status": "done" },
+            { "path": "docs/progress/progress.json", "status": "done" }
+          ]
         }
       ]
     }
@@ -3184,7 +3202,7 @@
     }
   ],
   "verification": {
-    "pytest": "2126 passed, 12 skipped",
+    "pytest": "2130 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
