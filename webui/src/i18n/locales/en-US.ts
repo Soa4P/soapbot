@@ -988,6 +988,7 @@ export default {
   'overview.runtimeOffHint':
     'That is a setting from install time: `SOAPBOT_ENABLE_RUNTIME=false`. The panel works, edits config and can show the login QR, but it will not connect to QQ or answer messages. To make it work: set that line to `true` in `.env`, restart the service, then fill in the Provider and QQ adapter on page 07.',
 
+  'config.modelsLiteralOnly': 'Listing models needs a literal key: env: and enc:v1: references are never resolved or sent',
   'config.modelsList': 'List models',
   'config.modelsSendsKey': '(this one sends the key to the provider, which is what verifies it)',
   'config.modelsKeyShort':

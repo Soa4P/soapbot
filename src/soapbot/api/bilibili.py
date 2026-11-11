@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from soapbot.api.auth import require_api_auth, require_role
 from soapbot.api.errors import safe_detail
@@ -29,10 +29,20 @@ from soapbot.bilibili.client import (
 )
 from soapbot.config import settings
 from soapbot.security.principal import Role
+from soapbot.security.ratelimit import SlidingWindowLimiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/bilibili", tags=["bilibili"], dependencies=[Depends(require_role(Role.MEMBER))]
+)
+
+#: ``/impression`` runs the whole watch pipeline: fetch comments, then one model call.
+#: Three per minute is generous for a human checking a tier, and stops the endpoint from
+#: becoming an unmetered model proxy that sidesteps the chat quota entirely.
+IMPRESSION_LIMIT = 3
+IMPRESSION_WINDOW_SECONDS = 60.0
+_impression_limiter = SlidingWindowLimiter(
+    limit=IMPRESSION_LIMIT, window_seconds=IMPRESSION_WINDOW_SECONDS
 )
 
 
@@ -103,10 +113,27 @@ async def bilibili_preview(
 
 @router.get("/impression")
 async def bilibili_impression(
+    request: Request,
     target: str = Query(..., min_length=1, max_length=200),
     _: dict = Depends(require_api_auth),
 ) -> dict:
-    """Full watch pipeline, including the model-generated impression."""
+    """Full watch pipeline, including the model-generated impression.
+
+    Rate-limited before anything else: an unbounded version of this endpoint is a way to
+    spend the operator's model budget without going through the chat quota.
+    """
+    verdict = _impression_limiter.check(
+        request.client.host if request.client else "-"
+    )
+    if not verdict.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"观后感调用过于频繁：每分钟最多 {IMPRESSION_LIMIT} 次，"
+                f"请 {int(verdict.retry_after) + 1} 秒后重试"
+            ),
+            headers={"Retry-After": str(int(verdict.retry_after) + 1)},
+        )
     client = _client()
     from soapbot.bilibili.watcher import VideoWatcher
 

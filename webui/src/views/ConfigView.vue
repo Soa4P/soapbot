@@ -258,6 +258,14 @@ const modelError = ref<Record<number, string>>({})
 async function listModels(row: { base_url: string; api_key: string }, index: number): Promise<void> {
   modelBusy.value = { ...modelBusy.value, [index]: true }
   modelError.value = { ...modelError.value, [index]: '' }
+  // Credential references are refused server-side as well; stopping here keeps the
+  // operator from clicking a button that can only fail, and says why it cannot work.
+  const secret = (row.api_key ?? '').trim()
+  if (secret.startsWith('env:') || secret.startsWith('enc:v1:')) {
+    modelBusy.value = { ...modelBusy.value, [index]: false }
+    modelError.value = { ...modelError.value, [index]: t('config.modelsLiteralOnly') }
+    return
+  }
   try {
     const body = await api.configProviderModels({ base_url: row.base_url, api_key: row.api_key })
     if (body.ok) {

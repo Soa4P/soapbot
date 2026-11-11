@@ -1297,16 +1297,21 @@ async def memory_skill_delete(
 
 @router.get("/budget")
 async def budget_view(
+    request: Request,
     status: str = Query("", description="pending / approved / denied / expired / reserved"),
     limit: int = Query(100, ge=1, le=500),
     session_key: str = Query("", max_length=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
-    """Spend requests across scopes, plus the policy in force.
+    """Spend requests, plus the policy in force.
 
-    Only reachable with an operator credential; see ``BudgetStore.list_requests`` for
-    why the store method is separate from the chat-scoped ones.
+    Naming one ``session_key`` is a scoped read that a MEMBER may make. Leaving it empty
+    is the cross-scope audit view: it names requesters, purposes and decision notes, so
+    it needs ``MANAGE_CONFIG``. Without that split, an unauthenticated loopback reader
+    could enumerate every conversation's spending.
     """
+    if not session_key:
+        _require_permission(auth, request, Permission.MANAGE_CONFIG, "budget.list")
     runtime = _runtime()
     if runtime.budget is None:
         return {"enabled": False, "requests": [], "policy": {}}
