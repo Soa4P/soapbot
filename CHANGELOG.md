@@ -10,6 +10,44 @@
 
 ## [Unreleased]
 
+### 接入层只有一个身份：拿到令牌的人能看到一切
+
+原来错在哪：前 41 轮把机器人本体做完了，接入层却始终是「一条 `init_token` 就是 operator」。
+`TokenService.issue("operator")` 固定签发同一个角色，`messages` 表有会话列和两个索引，却
+**没有任何按会话授权的查询，也没有 `/api/chat/*` 端点**。于是「网页优先、手机只读」这件事
+没有落脚点：想给第二个人只看某个群，唯一的办法是把面板令牌给他，而他随即能看到全部。
+
+现在：
+
+- **三张表**：`accounts` / `account_invites` / `chat_memberships`。密码用标准库
+  `hashlib.scrypt(n=2**14, r=8, p=1)`，salt 与 hash 分列，比较走 `hmac.compare_digest`；
+  邀请码只存 SHA-256，明文仅在创建响应里出现一次，一次性、默认 72 小时过期（`hours` 可调，上限 30 天）。三张表声明为
+  ORM 模型随 `create_all` 落库，所以是纯增量加表，`SCHEMA_VERSION` 仍是 5。
+- **首个所有者必须带 bootstrap token**：`POST /api/accounts/owner`，账号表非空后固定 409。
+  「账号表为空」的检查放在写事务**内部**——原先放在外面，两个并发 bootstrap 会都读到 0。
+- **会话隔离在 SQL 里**，不是取完 200 条再在 Python 里筛：后者会让只被授权一个冷清群号的
+  成员看到空列表，而页面上写的是「还没有被授权的会话」——一个权限问题被伪装成了没数据。
+  越权访问未授权会话返回 404 而不是 403，因为 403 会确认「这个会话存在」。
+- **消息按 `after_id` 游标增量拉**，不用 offset：归档只在尾部增长，offset 在并发写入时会
+  重复或漏行。SSE 是 1.5 秒轮询同一游标的 async generator。
+- **输入只写备注**：落库 `role=note`、`adapter=web`、`delivered=false`，整条路径不 import
+  适配器——「不发送」由调用图保证，不由注释和提示语保证。
+- **端开关**：`SOAPBOT_CHAT_{WEB,APP,DESKTOP}_ENABLED`，默认只有 web 开；全关时
+  `/api/chat/*` 返回 404 而不是 403。
+- 网页端第 13 页（登录、会话、消息流、备注，移动优先 / 桌面三栏），`mobile/` 只有 Flutter
+  源码骨架与构建说明，**未在真机构建**。
+
+同一轮里被打回的三处，都是「测试先绿、真机上无效」的形状：
+
+1. 三个端开关最初用 `os.getenv` 读，而 `.env` 是 pydantic-settings 消费的、**从不写进
+   `os.environ`**——运维改 `.env` 会静默无效，测试因为 `monkeypatch.setenv` 反而通过。改为
+   读 `Settings`，默认值用例改成构造真实 `Settings(_env_file=None)`。
+2. `check_security_boundaries.py` 的 s11 抓住 `detail=str(exc)`：即使当下消息是手写的，这条
+   写法会让下一次「把 `repr(exc)` 塞进去」变成零成本。`AccountError` 增加 `.message`，备注的
+   `ValueError` 改成固定文案 + 服务端日志。
+3. 部署文档写了不存在的 `soapbot serve`（CLI 只有 start/token/doctor/setup/migrate/version），
+   `tests/test_cli_documented_commands.py` 直接把这条漂移报了出来。
+
 ### 两条「已经写好」的契约，其实都没生效
 
 原来错在哪：两处都是上一轮自己写的，两处都没测到自己写的那句话。

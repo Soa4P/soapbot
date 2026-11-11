@@ -88,9 +88,28 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 [模型接入指南](docs/model-providers.md)。
 
 三条路径的细节、常见失败、验证命令和卸载在
-[部署文档](docs/deploy-quickstart.md)。面板 12 页、群范围、语音、远程访问和登录在
+[部署文档](docs/deploy-quickstart.md)。面板 13 页、群范围、语音、远程访问和登录在
 [使用指南](docs/guide.md)。第一次使用、Windows 重启令牌、Linux SSH、模型和插件的复制式步骤见
 [公开用户指南](docs/public-user-guide.md)。
+
+## 第 13 页：多人看存档
+
+面板的令牌只有一个身份：拿到它的人能看到一切。要让**别人**只看自己该看的群，用第 13 页
+「聊天存档」的账号体系，它和面板令牌是两套凭据，互不继承：
+
+1. 所有者用一次性 bootstrap 令牌（`data/init_token.txt`）建第一个账号：
+   `POST /api/accounts/owner`。账号表非空后这个端点固定 409，所以它不会变成公开注册。
+   密码至少 8 位，库里只有 scrypt 哈希。令牌本身只被 `POST /api/auth/login` 消费——直接当
+   Bearer 用不会消费它，所以在拿到账号后应立刻登录一次，或直接删掉那个文件。
+2. 所有者在第 13 页生成邀请码，邀请码一次性、默认 72 小时过期（`hours` 可调，上限 30 天），库里只存 SHA-256。
+3. 成员用邀请码注册并登录，只看得到被授权的会话；越权访问别人的会话返回 404 而不是
+   403——403 会确认「这个会话存在」。
+
+存档是**只读**的：输入框写的是备注，落库为 `role=note`、`adapter=web`，响应里带
+`delivered=false`，调用图上没有任何适配器——「不发送」由代码结构保证，不由提示语保证。
+手机端和桌面壳默认关闭（`SOAPBOT_CHAT_APP_ENABLED` / `SOAPBOT_CHAT_DESKTOP_ENABLED`），
+因为它们是装到别人设备上的二进制；三个开关全关时 `/api/chat/*` 返回 404，像这个部署从没有过
+这些路由。完整语义见 [docs/chat-archive.md](docs/chat-archive.md)。
 
 ## 边界
 
@@ -193,7 +212,9 @@ HTTP 错误、超时、非法 JSON、非对象 JSON 不重试——那些重试�
 | 三种装法、Windows 与 Linux 的差别、卸载 | [docs/deploy-quickstart.md](docs/deploy-quickstart.md) |
 | 十家模型厂商怎么填、表里没有的怎么加 | [docs/model-providers.md](docs/model-providers.md) |
 | 桌面端安装包与签名 | [docs/desktop-signing.md](docs/desktop-signing.md) |
-| 12 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
+| 13 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
+| 多用户账号、邀请码、只读存档与端开关 | [docs/chat-archive.md](docs/chat-archive.md) |
+| 443 被占用、内存只有 341 MB 时怎么部署 | [docs/deployment-web-chat.md](docs/deployment-web-chat.md) |
 | 配置项与环境变量 | [docs/configuration.md](docs/configuration.md) |
 | 部署形态、容器加固、远程验收 | [docs/deploy-layer.md](docs/deploy-layer.md) |
 | 备份、巡检、排障、升级 | [docs/operations.md](docs/operations.md) |

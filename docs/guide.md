@@ -19,7 +19,7 @@ dedup → guard → whitelist → wake → strip → sanitize
 `persist` 排在 `skip_reply` 前面：先记事，再决定要不要开口。所以「只在 A 群采集、
 在 B 群回复」才成立——没被 @ 的消息照样进记忆，只是不会得到回复。
 
-## 面板 12 页
+## 面板 13 页
 
 编号固定，加了新页面也不重排，所以「第 04 页」这个说法可以一直用。
 
@@ -37,6 +37,7 @@ dedup → guard → whitelist → wake → strip → sanitize
 | 10 运行指标 | 延迟分位、累计计数、结果分布 |
 | 11 插件包安装 | 上传 zip 安装（不等于批准）、能力风险分级 |
 | 12 系统设置 | 界面语言、回复语言、语音、MCP 连接状态、运行时信息 |
+| 13 聊天存档 | 登录、会话列表、消息流、备注；账号与邀请码在[存档文档](chat-archive.md) |
 
 ## 只在哪些群说话、在哪些群记事
 
@@ -54,6 +55,26 @@ dedup → guard → whitelist → wake → strip → sanitize
 「听懂语音」和「用语音回答」，音色也可选。合成失败自动退回文字，不让整条回复丢掉。
 缺后端时页面会写明缺什么，不静默降级。环境变量见
 [configuration.md](configuration.md)。
+
+## 聊天存档与多人查看
+
+第 13 页是**只读**存档：QQ 仍是消息来源，这一页只负责回看。它有一套独立于面板令牌的
+账号体系，因为面板令牌是「拿到就全见」，不适合给第二个人。
+
+| 你是谁 | 怎么进来 | 看得到什么 |
+|---|---|---|
+| 所有者 | 用邀请码注册的 owner 账号，或首次在服务器本机用 bootstrap 令牌建的第一个账号 | 全部会话 |
+| 成员 | 所有者发的一次性邀请码注册 | 只有被授权的那几个会话 |
+
+三个要点：
+
+- **输入只写备注**，落库 `role=note`、`adapter=web`、`delivered=false`，整条路径不 import
+  适配器。所以页面上写的东西对方在 QQ 里永远看不到；这不是提示语，是代码结构。
+- **越权返回 404 而不是 403**：403 等于确认「这个会话存在」，把别人的群名也漏出去了。
+- **端开关**：`SOAPBOT_CHAT_WEB_ENABLED`（默认开）、`SOAPBOT_CHAT_APP_ENABLED`、
+  `SOAPBOT_CHAT_DESKTOP_ENABLED`（默认关）。全关时 `/api/chat/*` 404，像没装过。
+
+邀请码怎么发、账号怎么停用、会话怎么授权，见 [chat-archive.md](chat-archive.md)。
 
 ## 远程看面板
 
@@ -105,6 +126,7 @@ PowerShell 命令，以及用 `/api/auth/status` 查真实路径和状态的方�
 | 部署、备份、故障排查、升级 | [operations.md](operations.md) |
 | 写插件、能力授权、进程隔离 | [plugins.md](plugins.md) |
 | 每个平台支持什么、群管命令 | [capabilities.md](capabilities.md) |
+| 多用户账号、邀请码、只读存档、端开关 | [chat-archive.md](chat-archive.md) |
 | 20 项边界逐条证据 | [security-boundaries.md](security-boundaries.md) |
 | 参考了哪些外部设计、有哪些没抄 | [reference-ecosystem.md](reference-ecosystem.md) |
 | 威胁模型与已加固项 | [security-model.md](security-model.md) |
