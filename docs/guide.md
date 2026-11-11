@@ -74,7 +74,8 @@ dedup → guard → whitelist → wake → strip → sanitize
 - **端开关**：`SOAPBOT_CHAT_WEB_ENABLED`（默认开）、`SOAPBOT_CHAT_APP_ENABLED`、
   `SOAPBOT_CHAT_DESKTOP_ENABLED`（默认关）。全关时 `/api/chat/*` 404，像没装过。
 
-邀请码怎么发、账号怎么停用、会话怎么授权，见 [chat-archive.md](chat-archive.md)。
+邀请码怎么发、账号怎么停用、会话怎么授权，见 [chat-archive.md](chat-archive.md)。账号管理
+目前只有 API，第 13 页还没有管理账号的按钮。
 
 ## 远程看面板
 
