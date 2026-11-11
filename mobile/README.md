@@ -1,20 +1,31 @@
-# 手机端骨架（Flutter）
+# 手机端（Flutter）
 
-只做一件事：读取云端存档。QQ 仍是消息来源，App 不发送任何消息，输入只写备注。
+读云端存档，写备注；被授权对话后，可以在自己的会话里和机器人对话。QQ 仍是 `qq:*`
+会话的消息来源，App 不发送任何 QQ 消息。
 
 ## 状态
 
-源码骨架，**未在真机或模拟器上构建验证过**——本轮没有安装 Flutter SDK。以下命令是
-按 `pubspec.yaml` 写的，第一次跑请以 `flutter doctor` 的输出为准。
+**2026-11-12 起过了本机验证**：Flutter 3.50.0 下 `flutter analyze` 0 错误（仅 7 条
+`material.dart` 弃用提示——新 SDK 把 Material 挪进了 `package:material_ui`，但本仓库
+pubspec 声明的下限是 3.22，换 import 之前旧 SDK 会装不上，先保留），`flutter test`
+12 项全过（模型解析、翻页参数、对话发送、会话/聊天两屏的备注与对话模式）。
+`flutter build apk` 仍未跑过——需要 Android SDK，装好后请以构建输出为准。
 
 ## 四屏
 
 | 文件 | 作用 |
 | --- | --- |
 | `lib/screens/login_screen.dart` | 用户名密码登录，或邀请码注册 |
-| `lib/screens/sessions_screen.dart` | 被授权的会话列表 |
-| `lib/screens/chat_screen.dart` | 消息流（轮询 `after_id` 游标） |
+| `lib/screens/sessions_screen.dart` | 被授权的会话列表（30 秒自动刷新 + 下拉刷新） |
+| `lib/screens/chat_screen.dart` | 消息流（轮询 `after_id` 游标 + 「加载更早」向前翻页） |
 | `lib/screens/note_sheet.dart` | 备注输入，返回文本，不发消息 |
+
+## 对话模式
+
+服务端设 `SOAPBOT_CHAT_TALK_ENABLED=true` 且所有者给你的账号授权了
+`web:private:account-<id>` 会话后，打开那个会话，底部输入框从「写一条备注」变成
+消息输入框：发一条，机器人在同一会话里回答。其余会话仍是备注按钮，右上角横幅
+「这里只记录，不发送」只在备注会话显示。
 
 ## 构建
 
@@ -22,6 +33,7 @@
 cd mobile
 flutter pub get
 flutter analyze
+flutter test
 flutter build apk --dart-define=SOAPBOT_BASE_URL=https://your.domain
 ```
 
@@ -37,6 +49,7 @@ flutter build apk --dart-define=SOAPBOT_BASE_URL=https://your.domain
 
 ## 不做什么
 
-- 不实现发送、撤回、转发；没有对应的 API 可以调。
+- 不实现发送到 QQ、撤回、转发；没有对应的 API 可以调——对话回复也只存在于
+  云端会话里。
 - 不做应用商店签名与上架配置。
 - 不缓存消息到本地数据库：存档在云端，本地只保留登录 Cookie。
