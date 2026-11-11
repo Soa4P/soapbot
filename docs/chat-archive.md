@@ -26,7 +26,10 @@ POST /api/chat/notes                    写一行 role="note"
 
 - 缺行即拒绝，不是「默认可见」；
 - 越权读取返回 **404 而不是 403**，因为 403 等于确认「这个会话存在」；
-- 列表接口在 SQL 之后还要按成员表过滤（`api/chat.py::sessions`），前端隐藏行不算边界。
+- 列表接口把成员表当**查询条件**下推（`MemoryStore.list_sessions(session_keys=...)`，走
+  `session_key IN (...)`），不是取 200 条再在 Python 里筛。这一点是被打回后改的：先取后筛
+  会让只被授权一个冷清群号的成员看到空列表，把权限问题伪装成「还没有被授权的会话」。
+  前端隐藏行从来不算边界。
 
 `role="owner"` 的账号跳过成员表。因此创建所有者是一次性操作：`create_owner` 在账号表
 非空时直接拒绝，第二次调用不可能成功（`tests/test_accounts.py` 有对应用例）。
@@ -45,11 +48,16 @@ POST /api/chat/notes                    写一行 role="note"
 ## 账号
 
 - 登录：`POST /api/accounts/login`，用户名 + 密码，签发与面板相同的会话 Cookie。
-- 注册：`POST /api/accounts/register`，必须带邀请码；邀请码只存 SHA-256，一次性消耗。
+- 注册：`POST /api/accounts/register`，必须带邀请码；邀请码只存 SHA-256，一次性消耗，默认
+  72 小时过期（`hours` 可调，上限 30 天）。明文只在创建响应里出现一次，发错只能作废重发。
 - 首个所有者：`POST /api/accounts/owner`，需要面板的一次性 bootstrap token，且仅当账号表
-  为空时可用。
+  为空时可用。空表检查在写事务**内部**，否则两个并发 bootstrap 会都读到 0。
 - 密码：`hashlib.scrypt(n=2**14, r=8, p=1)`，存 `salt` 与 `hash` 两个字段，比较用
-  `hmac.compare_digest`。
+  `hmac.compare_digest`。密码至少 8 位；用户名 3-32 位，只允许 `[A-Za-z0-9_.-]`。
+- bootstrap token 不是存档钥匙：拿它请求 `/api/chat/*` 返回 **401**，不是「以所有者身份
+  读全部」。它只用来建第一个账号，建完就该被 `POST /api/auth/login` 消费掉（删除
+  `init_token.txt` 并留下 `init_token.redeemed` 标记）；只当 Bearer 用并不算消费。
+- 停用账号后，已经签发出去的 token 立即失效：鉴权每次按 subject 回查账号状态。
 
 不引入 argon2 是有意的：scrypt 已在标准库里提供内存困难特性，为它加一个依赖不值得。
 
