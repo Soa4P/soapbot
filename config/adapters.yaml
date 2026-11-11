@@ -34,7 +34,8 @@ adapters: []
 #     port: 6700
 #     access_token: env:ONEBOT_ACCESS_TOKEN
 #
-# 示例 C：QQ 官方机器人（需 pip install ".[qq-official]" 并在开放平台完成审核）
+# 示例 C：QQ 官方机器人（推荐主路径；需 pip install ".[qq-official]" 并在开放平台完成审核）
+# 官方优先，OneBot 兼容：kind: onebot11 仍然可用，但第三方协议端生态正在退场。
 #
 # adapters:
 #   - kind: qq_official

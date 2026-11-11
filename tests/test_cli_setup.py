@@ -233,3 +233,53 @@ def test_adapter_patch_sends_only_the_keys_the_mode_uses() -> None:
     assert reverse["host"] == "0.0.0.0"
     assert reverse["port"] == 6700
     assert "ws_url" not in reverse
+
+
+def test_official_adapter_patch_has_no_onebot_keys() -> None:
+    entry = cli_setup.adapter_patch(
+        kind="qq_official",
+        mode="",
+        account_id="",
+        app_id="102000000",
+        app_secret="env:QQ_BOT_SECRET",
+    )[0]
+
+    assert entry["kind"] == "qq_official"
+    assert entry["app_id"] == "102000000"
+    assert entry["app_secret"] == "env:QQ_BOT_SECRET"
+    # account_id falls back to the AppID: the official bot has no separate numeric id.
+    assert entry["account_id"] == "102000000"
+    assert "mode" not in entry and "ws_url" not in entry and "access_token" not in entry
+
+
+def test_official_flow_writes_the_app_id_and_an_env_reference(config_dir: Path) -> None:
+    code = _run(
+        [
+            "--kind",
+            "qq_official",
+            "--app-id",
+            "102000000",
+            "--app-secret-env",
+            "QQ_BOT_SECRET",
+            "--skip-provider",
+        ]
+    )
+
+    assert code == cli_setup.EXIT_OK
+    text = (config_dir / "adapters.yaml").read_text(encoding="utf-8")
+    assert "qq_official" in text
+    assert "app_id" in text and "102000000" in text
+    assert "env:QQ_BOT_SECRET" in text
+    assert "ws_url" not in text, "official bots do not connect to a protocol end"
+
+
+@pytest.mark.parametrize("argv", [[], ["--app-id", "102000000"]])
+def test_official_flow_refuses_to_write_without_both_credentials(
+    config_dir: Path, argv: list[str], capsys
+) -> None:
+    code = _run(["--kind", "qq_official", "--skip-provider", *argv])
+
+    assert code == cli_setup.EXIT_BAD_INPUT
+    assert not (config_dir / "adapters.yaml").exists(), "a rejected input must write nothing"
+    err = capsys.readouterr().err
+    assert "app-id" in err or "AppSecret" in err
