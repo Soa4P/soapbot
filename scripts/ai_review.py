@@ -28,6 +28,7 @@ into a shell):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -144,6 +145,114 @@ def truncate(text: str) -> tuple[str, bool, str]:
     return joined, bool(parts), " + ".join(parts)
 
 
+#: Changed-file prefix → 子系统。顺序即匹配顺序，更具体的在前。写在这里而不是让模型
+#: 自己从路径猜，是因为「改了哪些面」是个文件名问题，确定性代码答得比模型稳——即使
+#: 模型调用整个失败，影响面也要出现在 PR 评论里（这正是把它抽成本模块的原因）。
+SUBSYSTEMS: tuple[tuple[str, str], ...] = (
+    ("src/soapbot/security/", "安全层（审计/限流/授权）"),
+    ("src/soapbot/plugins/", "插件系统（沙箱/审批/IPC）"),
+    ("src/soapbot/api/", "面板 API"),
+    ("src/soapbot/adapters/", "平台适配器"),
+    ("src/soapbot/providers/", "模型接入层"),
+    ("src/soapbot/memory/", "记忆与存档"),
+    ("src/soapbot/core/", "核心管线"),
+    ("src/soapbot/gateway/", "OneBot 网关"),
+    ("src/soapbot/accounts/", "账号体系"),
+    ("src/soapbot/budget/", "额度审批"),
+    ("src/soapbot/ai/", "AI 编排"),
+    ("src/soapbot/webui/", "面板构建产物"),
+    ("webui/src/", "面板前端源码"),
+    ("mobile/", "手机端"),
+    ("desktop/", "桌面壳"),
+    ("scripts/check_", "静态门禁"),
+    ("scripts/", "运维脚本"),
+    (".github/workflows/", "CI 工作流"),
+    (".github/", "仓库治理文件"),
+    ("deploy/", "部署配置"),
+    ("tests/", "测试"),
+    ("docs/", "文档"),
+    ("config/", "配置模板"),
+)
+
+#: 命中即列出的安全关键面。这是「影响面」里最重要的一行：一个人（或一个模型）可能
+#: 看完几百行 diff 也没意识到自己改的是审批授权点；文件名不会骗人。
+SECURITY_CRITICAL: tuple[str, ...] = (
+    "src/soapbot/security/",
+    "src/soapbot/plugins/surfaces.py",
+    "src/soapbot/plugins/dispatch.py",
+    "src/soapbot/plugins/sandbox",
+    "src/soapbot/api/auth.py",
+    "src/soapbot/api/accounts.py",
+    "src/soapbot/api/security.py",
+    "src/soapbot/accounts/",
+    ".github/workflows/",
+    "scripts/check_security_boundaries.py",
+    "scripts/check_plugin_ipc.py",
+    "deploy/",
+    "desktop/src-tauri/tauri.conf.json",
+)
+
+
+def analyse_impact(changed_files: list[str]) -> dict:
+    """Deterministic blast-radius read from file paths alone.
+
+    Deliberately dumb: substring prefix matching, no git, no model. The value is that
+    it always runs — the model can misread a diff, but a PR that touches
+    ``api/auth.py`` lands in ``security_hits`` whether or not the review call
+    succeeds, and the comment says so with the file list.
+    """
+    subsystems: dict[str, int] = {}
+    security_hits: list[str] = []
+    unknown = 0
+    for name in changed_files:
+        name = name.replace("\\", "/").strip()
+        if not name:
+            continue
+        for prefix, label in SUBSYSTEMS:
+            if name.startswith(prefix):
+                subsystems[label] = subsystems.get(label, 0) + 1
+                break
+        else:
+            unknown += 1
+        if any(name.startswith(crit) or name == crit for crit in SECURITY_CRITICAL):
+            security_hits.append(name)
+    return {
+        "total": len(changed_files),
+        "subsystems": subsystems,
+        "security_hits": security_hits,
+        "unknown": unknown,
+    }
+
+
+def render_impact(impact: dict, *, for_model: bool = False) -> str:
+    """One-line-per-fact rendering shared by the model prompt and the PR comment.
+
+    ``for_model`` adds the sentence that keeps the model from over-claiming credit
+    for this analysis: the list came from filenames, not from reading the diff.
+    """
+    subsystems: dict[str, int] = impact.get("subsystems") or {}
+    hits: list[str] = impact.get("security_hits") or []
+    unknown = int(impact.get("unknown") or 0)
+    lines = ["影响面（按文件路径归类，不来自模型判断）："]
+    if not subsystems and not unknown:
+        lines.append("- 无文件信息")
+        return "\n".join(lines)
+    ranked = sorted(subsystems.items(), key=lambda kv: (-kv[1], kv[0]))
+    lines.extend(f"- {label}：{count} 个文件" for label, count in ranked)
+    if unknown:
+        lines.append(f"- 其他/未归类：{unknown} 个文件")
+    if hits:
+        lines.append(f"- ⚠ 触及安全关键面：{', '.join(f'`{h}`' for h in hits)}")
+    else:
+        lines.append("- 未触及安全关键面")
+    if for_model:
+        lines.append(
+            "以上影响面由文件名统计得出，供你交叉核对 diff：如果 diff 的实际改动与"
+            "影响面不符（例如声称改文档却改了鉴权），这本身就是 needs_review 的理由。"
+        )
+    return "\n".join(lines)
+
+
 def build_prompt(diff: str, meta: dict, truncated: bool, dropped: str = "") -> str:
     files = meta.get("files", "")
     head = [
@@ -154,6 +263,13 @@ def build_prompt(diff: str, meta: dict, truncated: bool, dropped: str = "") -> s
     if meta.get("body"):
         body = str(meta["body"])[:2000]
         head.append(f"描述：\n{body}")
+    impact = meta.get("impact")
+    if impact:
+        head.append(render_impact(impact, for_model=True))
+    commits = meta.get("commits")
+    if commits:
+        head.append("提交信息（每个提交的标题，按仓库历史顺序）：")
+        head.extend(f"- {line}" for line in str(commits).splitlines()[:20])
     if truncated:
         head.append(
             f"注意：diff 已被截断（未提供 {dropped or '部分内容'}），你看到的不是全部改动。"
@@ -437,6 +553,17 @@ def render_comment(result: dict, meta: dict) -> str:
         ]
     if result.get("degraded"):
         lines += ["", "> 模型调用失败，本条不是对代码的判断。请人工审查。"]
+    impact = meta.get("impact")
+    if impact and (impact.get("total") or impact.get("unknown")):
+        # Below the verdict, before the concerns: the blast radius stands even when
+        # the model had nothing useful to say, which is the point of computing it
+        # outside the model call.
+        lines += ["", render_impact(impact)]
+    if meta.get("commits"):
+        subjects = [s for s in str(meta["commits"]).splitlines() if s.strip()][:20]
+        if subjects:
+            lines += ["", f"### 提交（{len(subjects)} 个）", ""]
+            lines.extend(f"- {s}" for s in subjects)
     if result["concerns"]:
         lines += ["", "### 具体关注点", ""]
         for item in result["concerns"]:
@@ -446,7 +573,7 @@ def render_comment(result: dict, meta: dict) -> str:
         "",
         "---",
         "",
-        "本评论由 AI 生成，只作参考；合并决定仍由确定性检查与维护者做出。",
+        "本评论由 AI 生成，只作辅助审批的参考意见，不构成批准；合并决定仍由确定性检查与维护者做出。",
     ]
     return "\n".join(lines)
 
@@ -461,6 +588,28 @@ def _write_output(name: str, value: str) -> None:
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # 影响面与提交标题在拿到 diff 之前就可能需要（缺 Key 的降级评论也该带影响面），
+    # 所以先于 diff 分支读取。
+    impact: dict | None = None
+    commits: str | None = None
+    files_path = os.environ.get("PR_CHANGED_FILES_PATH")
+    if files_path:
+        try:
+            names = [
+                line.strip()
+                for line in Path(files_path).read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+                if line.strip()
+            ]
+            impact = analyse_impact(names)
+        except OSError:
+            pass
+    commits_path = os.environ.get("PR_COMMITS_PATH")
+    if commits_path:
+        with contextlib.suppress(OSError):
+            commits = Path(commits_path).read_text(encoding="utf-8", errors="replace")
 
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
@@ -496,6 +645,8 @@ def main() -> int:
                 "body": os.environ.get("PR_BODY", ""),
                 "files": os.environ.get("PR_FILES", ""),
                 "model": model,
+                "impact": impact,
+                "commits": commits,
             }
             try:
                 result = review(diff, meta, api_key=api_key, model=model, base_url=base_url)
@@ -517,6 +668,8 @@ def main() -> int:
         "title": os.environ.get("PR_TITLE", ""),
         "author": os.environ.get("PR_AUTHOR", ""),
         "model": result.get("model", os.environ.get("AI_REVIEW_MODEL", DEFAULT_MODEL)),
+        "impact": impact,
+        "commits": commits,
     }
     comment = render_comment(result, meta)
 
