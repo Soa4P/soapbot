@@ -252,3 +252,86 @@ def test_restore_refuses_a_traversing_entry(tmp_path: Path) -> None:
     with pytest.raises(restore.RestoreError, match="越界"):
         restore.restore(archive, data_dir=tmp_path / "d", config_dir=tmp_path / "c")
     assert not (tmp_path.parent / "evil.txt").exists()
+
+
+def _rebuild(source: Path, target: Path, replace: dict[str, bytes]) -> None:
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(target, "w") as dst:
+        for name in src.namelist():
+            dst.writestr(name, replace.get(name, src.read(name)))
+
+
+def test_backup_manifest_carries_per_file_checksums(tmp_path: Path) -> None:
+    backup = _load_script("backup")
+    data_dir, config_dir = tmp_path / "data", tmp_path / "config"
+    _make_db(data_dir / "soapbot.db", "x")
+    config_dir.mkdir()
+    (config_dir / "adapters.yaml").write_text("adapters: []\n", encoding="utf-8")
+
+    archive = tmp_path / "b.zip"
+    backup.build(data_dir, config_dir, archive)
+
+    with zipfile.ZipFile(archive) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    assert manifest["format"] == backup.ARCHIVE_FORMAT
+    assert set(manifest["checksums"]) == {"data/soapbot.db", "config/adapters.yaml"}
+
+
+def test_restore_refuses_an_archive_whose_file_was_replaced(tmp_path: Path) -> None:
+    """A zip CRC proves the byte was not corrupted, not that it is the right file.
+
+    Config is what gets restored — a swapped ``adapters.yaml`` re-points the bot at an
+    attacker's adapter. So the manifest's sha256 is checked, and nothing is written when
+    it does not match.
+    """
+    backup = _load_script("backup")
+    restore = _load_script("restore")
+    data_dir, config_dir = tmp_path / "data", tmp_path / "config"
+    _make_db(data_dir / "soapbot.db", "before")
+    config_dir.mkdir()
+    (config_dir / "adapters.yaml").write_text("adapters: []\n", encoding="utf-8")
+
+    archive = tmp_path / "b.zip"
+    backup.build(data_dir, config_dir, archive)
+
+    tampered = tmp_path / "tampered.zip"
+    _rebuild(archive, tampered, {"config/adapters.yaml": b"adapters: [evil]\n"})
+
+    with pytest.raises(restore.RestoreError, match="校验失败"):
+        restore.restore(tampered, data_dir=data_dir, config_dir=config_dir)
+    assert (config_dir / "adapters.yaml").read_text(encoding="utf-8") == "adapters: []\n"
+
+
+def test_restore_refuses_a_corrupt_database_before_replacing(tmp_path: Path) -> None:
+    """Checksums can be right and the database still unusable.
+
+    The staged copy is opened and run through ``PRAGMA integrity_check`` *before* the
+    live database is moved aside; otherwise the failure surfaces at startup, with the
+    working file already renamed.
+    """
+    import hashlib
+
+    backup = _load_script("backup")
+    restore = _load_script("restore")
+    data_dir, config_dir = tmp_path / "data", tmp_path / "config"
+    _make_db(data_dir / "soapbot.db", "keep-me")
+    config_dir.mkdir()
+
+    archive = tmp_path / "b.zip"
+    backup.build(data_dir, config_dir, archive)
+
+    garbage = b"SQLite format 3\x00" + b"\x00" * 200
+    with zipfile.ZipFile(archive) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    manifest["checksums"]["data/soapbot.db"] = hashlib.sha256(garbage).hexdigest()
+
+    broken = tmp_path / "broken.zip"
+    _rebuild(
+        archive,
+        broken,
+        {"data/soapbot.db": garbage, "manifest.json": json.dumps(manifest).encode("utf-8")},
+    )
+
+    with pytest.raises(restore.RestoreError, match=r"完整性|无法打开"):
+        restore.restore(broken, data_dir=data_dir, config_dir=config_dir)
+    assert _notes(data_dir / "soapbot.db") == ["keep-me"]
+    assert not list(data_dir.glob("soapbot.db.pre-restore-*")), "失败时不应挪走原库"

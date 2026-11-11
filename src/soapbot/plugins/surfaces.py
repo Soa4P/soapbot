@@ -40,6 +40,7 @@ body.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from soapbot.plugins.manifest import Capability
@@ -48,9 +49,18 @@ from soapbot.plugins.memory_api import (
     PluginMemoryAPI,
     build_session_view,
 )
-from soapbot.plugins.sandbox import CapabilityDeniedError, CapabilityGuard
+from soapbot.plugins.sandbox import (
+    CapabilityDeniedError,
+    CapabilityGuard,
+    StorageUnavailable,
+)
 
 logger = logging.getLogger(__name__)
+
+#: A rolling one-minute budget for ``log.write``. The surface is not privileged, but
+#: an unbounded writer is a log-flooding primitive: it can bury a denial from another
+#: plugin in noise, which is a way of hiding an unauthorised action.
+LOG_WRITES_PER_MINUTE = 60
 
 
 class SurfaceRouter:
@@ -82,6 +92,7 @@ class SurfaceRouter:
         self._audit = audit
         self._http = http_client
         self._storage = storage
+        self._log_writes: list[float] = []
 
     def _audit_denied(self, surface: str, reason: str) -> None:
         if self._audit is None:
@@ -204,7 +215,13 @@ class SurfaceRouter:
     async def _storage_set(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.STORAGE, detail="storage.set")
         if self._storage is None:
-            raise RuntimeError("host has no storage installed")
+            # Same refusal as the in-process path (``PluginContext.storage``), so a
+            # plugin behaves identically whether or not it was isolated: no key
+            # material means no store, never a plaintext one.
+            raise StorageUnavailable(
+                "plugin storage is disabled: no master key is loaded. Set "
+                "SOAPBOT_MASTER_KEY or let the bot create data/secret.key, then restart."
+            )
         self._storage.set(str(args.get("key") or ""), args.get("value"))
         return True
 
@@ -215,14 +232,27 @@ class SurfaceRouter:
         return bool(self._storage.delete(str(args.get("key") or "")))
 
     async def _log(self, args: dict[str, Any], caller) -> Any:
-        # Deliberately ungated: a plugin writing to its own log line is not a
-        # privileged operation, and gating it would push plugins toward ``print``,
-        # which lands in the host's stdout unredacted.
-        logger.info(
-            "plugin message plugin=%s msg=%s",
-            self._plugin,
-            str(args.get("message") or "")[:300],
-        )
+        # Still deliberately not capability-gated: a plugin writing to its own log
+        # line is not a privileged operation, and gating it would push plugins toward
+        # ``print``, which lands in the host's stdout unredacted. But "not privileged"
+        # is not "unobserved": every write is audited with the plugin name, and a
+        # deterministic rate limit keeps one plugin from burying another's denial.
+        now = time.monotonic()
+        self._log_writes = [ts for ts in self._log_writes if now - ts < 60.0]
+        if len(self._log_writes) >= LOG_WRITES_PER_MINUTE:
+            self._audit_denied("log.write", "rate limited")
+            return False
+        self._log_writes.append(now)
+        message = str(args.get("message") or "")[:300]
+        logger.info("plugin message plugin=%s msg=%s", self._plugin, message)
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:log.write",
+                outcome="allow",
+                detail=f"plugin={self._plugin} chars={len(message)}",
+                plugin=self._plugin,
+            )
         return True
 
 

@@ -30,7 +30,7 @@ providers: []
 #     label: DeepSeek
 #     base_url: https://api.deepseek.com/v1
 #     api_key: env:DEEPSEEK_API_KEY
-#     model: deepseek-chat
+#     model: deepseek-flash
 #     priority: 10
 #
 #   - id: qwen-vision

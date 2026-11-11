@@ -4,7 +4,6 @@
 soapbot.api.bilibili
 soapbot.api.pipeline
 soapbot.bilibili.wbi
-soapbot.core.bus
 soapbot.core.progressive
 soapbot.core.session
 soapbot.examples.plugins.admin.main

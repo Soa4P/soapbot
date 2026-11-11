@@ -35,11 +35,17 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
 from soapbot.i18n import t
+
+#: Process-lifetime identity for the in-memory trace window. A restarted process
+#: gets a new value, so a saved screenshot of the panel can never be mistaken for a
+#: continuation of the previous run's trajectory set.
+_BOOT_ID = uuid.uuid4().hex
 
 logger = logging.getLogger(__name__)
 
@@ -163,17 +169,17 @@ class MessageTrace:
     stream: dict[str, Any] = field(default_factory=dict)
     """Progressive-delivery timings: first token, first send, interruption."""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_conversation: bool = True) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "ts": self.ts,
-            "session_key": self.session_key,
+            "session_key": self.session_key if include_conversation else "",
             "total_ms": round(self.total_ms, 3),
             "halted": self.halted,
             "halt_reason": self.halt_reason,
             "stages": [s.to_dict() for s in self.stages],
             "slowest": self.slowest(),
-            "chunks": list(self.chunks),
+            "chunks": list(self.chunks) if include_conversation else [],
             "stream": dict(self.stream),
         }
 
@@ -244,6 +250,11 @@ class TraceStore:
         self._durations: deque[float] = deque(maxlen=capacity)
         self._last_sample = 0.0
         self.counters = {"handled": 0, "halted": 0, "failed": 0}
+        # One identity per process, not per store: two stores in this process belong
+        # to the same recoverability window, while a restart produces a new value.
+        # Naming the boot makes "this window cannot be replayed from before the
+        # restart" explicit in the payload rather than something a reader infers.
+        self.boot_id = _BOOT_ID
 
     # ------------------------------------------------------------- ingestion
 
@@ -410,7 +421,13 @@ class TraceStore:
             # Stated in the payload rather than only in the docs: a consumer that
             # renders "0 ms" without this would report a missing feature as a fast one.
             "historical": False,
-            "note": "仅保留最近若干条，重启即清空；历史查询请用审计日志",
+            # Trajectory-level recoverability signal: there is no replay, no persisted
+            # event stream, and no way to reconstruct a window from a previous boot.
+            # Say so in the payload instead of leaving "0 traces" to look like a fast,
+            # healthy system with nothing to report.
+            "recoverable": False,
+            "boot_id": self.boot_id,
+            "note": "仅保留最近若干条，重启即清空；本窗口不可回放，历史查询请用审计日志",
         }
 
     def clear(self) -> None:

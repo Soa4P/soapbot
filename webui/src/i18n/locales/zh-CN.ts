@@ -303,6 +303,20 @@ export default {
   'plugins.communityHint': '索引只列出名称与版本；安装请下载包后从上方上传。',
 
   // ---------------------------------------------------------------- 04 security
+  'security.integrityTitle': '完整性信号',
+  'security.integrityHint': '批准时的定义与运行时实际观察到的内容，分开显示',
+  'security.integrityUnavailable': '机器人运行时未启动，无完整性信号可报告（不是全部通过）',
+  'security.integrityBoot': '轨迹窗口 {boot}',
+  'security.integrityNotRecoverable': '不可回放',
+  'security.integrityRecoverable': '可回放',
+  'security.integrityMcp': '外部工具元数据',
+  'security.integrityServer': '服务端',
+  'security.integrityMetadata': '元数据批准状态',
+  'security.integrityApproved': '已批准且一致',
+  'security.integrityNotApproved': '未批准或已变化',
+  'security.integrityPlugins': '插件证明重验',
+  'security.integrityGate': '判定由确定性门禁给出，AI 审查只作参考',
+
   'security.eventsInWindow': '事件（窗口内）',
   'security.denied': '拒绝',
   'security.blocked': '阻断 / 隔离',

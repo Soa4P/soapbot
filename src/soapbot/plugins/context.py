@@ -38,6 +38,7 @@ from soapbot.plugins.sandbox import (
     EncryptedPluginStorage,
     PluginStorage,
     SafeHttpClient,
+    StorageUnavailable,
     scrub_plugin_output,
     validate_command_name,
 )
@@ -451,16 +452,35 @@ class PluginContext:
     # ------------------------------------------------------------------ services
     @property
     def storage(self) -> PluginStorage:
-        """Key-value storage, namespaced to this plugin.
+        """Key-value storage, namespaced to this plugin, encrypted at rest.
 
-        Encrypted when a crypto box is available: plugin storage is where a plugin
-        puts the API token it needs, and that token must not be readable from a
-        database dump.
+        Raises when there is no crypto box. The previous version fell back to the
+        plaintext ``PluginStorage`` here, which is the one fallback that must not
+        exist: from the plugin's side the two are indistinguishable, so a deployment
+        with a missing master key kept accepting API tokens into a database that any
+        dump, backup or ``git add data/`` would hand over in the clear. Refusing is
+        visible immediately; writing plaintext is visible only after the incident.
         """
         self._guard.check(Capability.STORAGE, detail="storage access")
-        if self._crypto is not None:
-            return EncryptedPluginStorage(self.plugin, self._storage_backend, self._crypto)
-        return PluginStorage(self.plugin, self._storage_backend)
+        storage = self.storage_if_available()
+        if storage is None:
+            raise StorageUnavailable(
+                "plugin storage is disabled: no master key is loaded. Set "
+                "SOAPBOT_MASTER_KEY or let the bot create data/secret.key, then restart."
+            )
+        return storage
+
+    def storage_if_available(self) -> PluginStorage | None:
+        """The encrypted store, or ``None`` when no key material is loaded.
+
+        Separate from ``storage`` because the isolated dispatch path has to pass
+        *something* to the worker's router without raising during load: the raise
+        belongs on the first actual write, where the plugin and the operator can both
+        see which call failed.
+        """
+        if self._crypto is None:
+            return None
+        return EncryptedPluginStorage(self.plugin, self._storage_backend, self._crypto)
 
     @property
     def http(self) -> SafeHttpClient:

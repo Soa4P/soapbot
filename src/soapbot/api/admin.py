@@ -610,10 +610,12 @@ async def write_persona(
 
 @router.get("/memory/sessions")
 async def memory_sessions(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Archived conversations, most recent first."""
+    _require_archive_auth(auth, request)
     runtime = _runtime()
     if runtime.memory is None:
         return {"sessions": [], "count": 0}
@@ -623,17 +625,12 @@ async def memory_sessions(
 
 @router.get("/memory/timeline")
 async def memory_timeline(
+    request: Request,
     session_key: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(50, ge=1, le=200),
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
-    """Messages of one session.
-
-    ``session_key`` is a query parameter here — unlike the chat command of the same
-    name, which pins it to the caller's own conversation. Reading another group's
-    history is exactly what the operator token is for; the chat path must never gain
-    that ability, which is why the two code paths do not share a helper.
-    """
+    _require_archive_auth(auth, request)
     runtime = _runtime()
     if runtime.memory is None:
         return {"session_key": session_key, "messages": [], "count": 0}
@@ -815,8 +812,11 @@ async def delete_memory(
 
 
 @router.get("/knowledge")
-async def list_knowledge(_: dict = Depends(require_api_auth)) -> dict:
+async def list_knowledge(
+    request: Request, auth: dict = Depends(require_api_auth)
+) -> dict:
     """Uploaded documents and their chunk counts (titles only, no bodies)."""
+    _require_permission(auth, request, Permission.READ_KNOWLEDGE, "knowledge_list")
     runtime = _runtime()
     if runtime.kb is None:
         return {"documents": [], "count": 0}
@@ -837,7 +837,7 @@ class KnowledgeDocumentIn(BaseModel):
 async def upsert_knowledge(
     body: KnowledgeDocumentIn,
     request: Request,
-    _: dict = Depends(require_api_auth),
+    auth: dict = Depends(require_api_auth),
 ) -> dict:
     """Create or replace a knowledge document.
 
@@ -851,6 +851,7 @@ async def upsert_knowledge(
     document is embedded in one call, and an unbounded upload is a way to make a
     single HTTP request occupy the embedding provider (and the bill) for minutes.
     """
+    _require_permission(auth, request, Permission.MANAGE_KNOWLEDGE, "knowledge_upsert")
     locale = request_locale(request)
     runtime = _runtime()
     if runtime.kb is None:
@@ -871,8 +872,9 @@ async def upsert_knowledge(
 
 @router.delete("/knowledge/{doc_id}")
 async def delete_knowledge(
-    doc_id: str, request: Request, _: dict = Depends(require_api_auth)
+    doc_id: str, request: Request, auth: dict = Depends(require_api_auth)
 ) -> dict:
+    _require_permission(auth, request, Permission.MANAGE_KNOWLEDGE, "knowledge_delete")
     locale = request_locale(request)
     doc_id = _require_doc_id(doc_id, locale)
     runtime = _runtime()
@@ -886,8 +888,9 @@ async def delete_knowledge(
 
 @router.get("/knowledge/{doc_id}")
 async def knowledge_detail(
-    doc_id: str, request: Request, _: dict = Depends(require_api_auth)
+    doc_id: str, request: Request, auth: dict = Depends(require_api_auth)
 ) -> dict:
+    _require_permission(auth, request, Permission.READ_KNOWLEDGE, "knowledge_detail")
     locale = request_locale(request)
     doc_id = _require_doc_id(doc_id, locale)
     runtime = _runtime()
@@ -922,35 +925,42 @@ async def knowledge_detail(
 #   guessing.
 
 
+def _require_archive_auth(auth: dict[str, Any], request: Request) -> None:
+    """Archive contents require an actual operator credential, not loopback trust."""
+    if auth.get("mode") == "token":
+        _require_permission(auth, request, Permission.RECALL_ANY, "memory_archive_read")
+        return
+    get_audit_log().record(
+        kind="authz",
+        action="memory_archive_read",
+        outcome="deny",
+        role=_role_of(auth).value,
+        detail=f"from={request.client.host if request.client else '-'}",
+    )
+    raise HTTPException(
+        status_code=401,
+        detail="a credential is required to read archived conversations",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _require_permission(auth: dict[str, Any], request: Request, permission: Permission, action: str) -> Role:
+    role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(permission, Role.OWNER)
+    if role.rank < minimum.rank:
+        get_audit_log().record(
+            kind="authz", action=action, outcome="deny", role=role.value,
+            detail=f"from={request.client.host if request.client else '-'}",
+        )
+        raise HTTPException(status_code=403, detail=t("api.role_required", request_locale(request), role=minimum.value))
+    return role
+
+
 def _require_scene_access(
     auth: dict[str, Any], request: Request, *, action: str = "scene_read"
 ) -> Role:
-    """Gate every scene/skill endpoint on the config permission.
-
-    The reasoning mirrors :func:`_require_persona_access`, and the conclusion is stronger:
-    a persona card is text the operator wrote, while a scene card is a summary of what a
-    group actually said and a skill body is quoted memory content. If the former needs
-    ``MANAGE_CONFIG`` to read, the latter cannot need less.
-
-    Reads are gated too, not just writes. ``/memory/scenes`` lists every scope, so a
-    read-only leak is one request away from a full enumeration — gating only the mutation
-    endpoints would leave the enumeration open.
-    """
-    role = _role_of(auth)
-    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
-    if role.rank < minimum.rank:
-        get_audit_log().record(
-            kind="authz",
-            action=action,
-            outcome="deny",
-            role=role.value,
-            detail=f"from={request.client.host if request.client else '-'}",
-        )
-        raise HTTPException(
-            status_code=403,
-            detail=t("api.role_required", request_locale(request), role=minimum.value),
-        )
-    return role
+    """Gate every scene/skill endpoint on the config permission."""
+    return _require_permission(auth, request, Permission.MANAGE_CONFIG, action)
 
 
 def _scene_pair_or_503():

@@ -301,7 +301,7 @@ def _one_provider(base_url: str) -> str:
         "  - id: primary\n"
         "    kind: openai_compat\n"
         f"    base_url: {base_url}\n"
-        "    model: deepseek-chat\n"
+        "    model: test-model\n"
     )
 
 

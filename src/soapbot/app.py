@@ -161,7 +161,7 @@ def get_startup_errors() -> list[str]:
 
 
 # -------------------------------------------------------------------------- auth
-def _init_auth() -> None:
+def _init_auth(app: Any = None) -> None:
     """Create the token service and the one-time bootstrap credential."""
     from soapbot.security.revocation import RevocationStore, default_path
 
@@ -208,7 +208,9 @@ def _init_auth() -> None:
     else:
         logger.info("reusing the unredeemed bootstrap token at %s", path)
 
-    configure_auth(service=service, bootstrap=bootstrap, revocations=revocations)
+    configure_auth(
+        service=service, bootstrap=bootstrap, revocations=revocations, app=app
+    )
     logger.info("auth ready (jwt secret from %s)", service.secret_source)
 
 
@@ -484,7 +486,7 @@ async def lifespan(app: FastAPI):
     _STARTUP_ERRORS.clear()
 
     _audit_env_file()
-    _init_auth()
+    _init_auth(app)
     _clean_stale_temp()
 
     # Seed regardless of the runtime switch. The panel edits providers/adapters whether or

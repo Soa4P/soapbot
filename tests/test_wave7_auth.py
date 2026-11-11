@@ -267,11 +267,13 @@ def test_cross_site_post_with_token_is_allowed(service: TokenService) -> None:
 def app_client(tmp_path, monkeypatch):
     from soapbot.app import create_app
 
-    reset_auth()
+    app = create_app()
     monkeypatch.setattr(settings, "init_token", SecretStr("bootstrap-abc"))
-    with TestClient(create_app()) as client:
+    with TestClient(app) as client:
         yield client
-    reset_auth()
+    # Scoped to this app on purpose: the teardown must not reach into another
+    # instance's auth state, which is exactly what the per-app state buys.
+    reset_auth(app)
 
 
 def test_login_exchanges_bootstrap_token(app_client: TestClient) -> None:
@@ -338,15 +340,36 @@ def test_generated_bootstrap_token_is_written_to_a_private_file(
     from soapbot.app import create_app
     from soapbot.security.files import is_owner_only
 
-    reset_auth()
+    app = create_app()
     monkeypatch.setattr(settings, "init_token", SecretStr(""))
-    with TestClient(create_app()):
+    with TestClient(app):
         path = settings.data_dir / "init_token.txt"
         assert path.exists()
         assert is_owner_only(path)
         token = path.read_text(encoding="utf-8")
         assert len(token) >= 20
-    reset_auth()
+    reset_auth(app)
+
+
+def test_auth_state_is_not_shared_between_app_instances(monkeypatch) -> None:
+    """Two apps in one process must not observe each other's credentials.
+
+    The auth objects used to be module globals, so the last ``create_app()`` to run its
+    lifespan owned the token service for *every* app in the process. A test fixture
+    built alongside the app under test, or a panel that restarts its own runtime, could
+    then revoke with one service while requests were verified against another.
+    """
+    from soapbot.api.auth import _state_for
+    from soapbot.app import create_app
+
+    monkeypatch.setattr(settings, "init_token", SecretStr("bootstrap-abc"))
+    first = create_app()
+    second = create_app()
+    with TestClient(first):
+        assert _state_for(first).token_service is not None
+        # The second app never ran its lifespan. It must not have inherited the first
+        # app's service just because a process-wide global happened to be set.
+        assert _state_for(second).token_service is None
 
 
 def test_refresh_requires_a_token(app_client: TestClient) -> None:
@@ -362,6 +385,35 @@ def test_refresh_reissues_for_a_valid_token(app_client: TestClient) -> None:
     )
     assert refreshed.status_code == 200
     assert refreshed.json()["access_token"]
+
+
+def test_refresh_revokes_the_credential_it_consumed(app_client: TestClient) -> None:
+    """Refresh is a rotation, not an unlimited extension.
+
+    Minting a fresh 72h token while leaving the old one valid for its full 72h meant a
+    stolen credential stayed useful for days after the operator "refreshed" it. The
+    jti we just consumed must be in the revocation set, and the replacement must work.
+    """
+    login = app_client.post("/api/auth/login", json={"init_token": "bootstrap-abc"}).json()
+    old = login["access_token"]
+    refreshed = app_client.post(
+        "/api/auth/refresh", headers={"Authorization": f"Bearer {old}"}
+    )
+    assert refreshed.status_code == 200
+    body = refreshed.json()
+    assert body["previous_credential_revoked"] is True
+    assert body["access_token"] != old
+
+    headers = {"Authorization": f"Bearer {old}"}
+    assert app_client.get("/api/security/permissions", headers=headers).status_code == 401
+    assert app_client.post("/api/auth/refresh", headers=headers).status_code == 401
+    assert (
+        app_client.get(
+            "/api/security/permissions",
+            headers={"Authorization": f"Bearer {body['access_token']}"},
+        ).status_code
+        == 200
+    )
 
 
 def test_protected_routes_reject_bad_tokens(app_client: TestClient) -> None:

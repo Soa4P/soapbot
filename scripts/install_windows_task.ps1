@@ -13,17 +13,23 @@
 # Measured on a real box: started 19:29 from WinRM, last log line 21:28:50, IdleTimeout
 # 7200000 ms. The two-hour mark landed inside that window.
 #
-# A scheduled task under SYSTEM has no such parent: its ancestry is
+# A scheduled task under LocalService has no such parent: its ancestry is
 # python.exe -> cmd.exe -> svchost.exe -> services.exe, so closing every remote session
 # leaves it alone. It also starts at boot, which the manual start never did.
 #
+# LocalService rather than SYSTEM: `plugins/supervisor.py` refuses to start a plugin
+# worker as LocalSystem, so a SYSTEM task runs with every plugin silently disabled. The
+# ACLs that let this account read the install are set by scripts\harden-windows.ps1,
+# which this script does not run — call it first if the directory was never hardened.
+#
 # Usage (elevated):
-#   powershell -ExecutionPolicy Bypass -File scripts\install_windows_task.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\harden-windows.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\install_windows_task.ps1 -Start
 
 param(
     [string]$InstallDir = 'C:\soapbot',
     [string]$TaskName = 'SoapbotBot',
+    [string]$AccountSid = 'S-1-5-19',
     [switch]$Start
 )
 
@@ -40,7 +46,7 @@ $xml = @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>soapbot QQ bot. Runs under SYSTEM so it is not a child of a remote shell.</Description>
+    <Description>soapbot QQ bot. Runs under LocalService so it is not a child of a remote shell, and so plugins have nothing to inherit.</Description>
   </RegistrationInfo>
   <Triggers>
     <BootTrigger>
@@ -50,8 +56,9 @@ $xml = @"
   </Triggers>
   <Principals>
     <Principal id="Author">
-      <UserId>S-1-5-18</UserId>
-      <RunLevel>HighestAvailable</RunLevel>
+      <UserId>$AccountSid</UserId>
+      <LogonType>ServiceAccount</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
   <Settings>

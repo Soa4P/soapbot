@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from soapbot.api.auth import require_api_auth, require_role
@@ -28,9 +28,7 @@ from soapbot.i18n import t
 from soapbot.security.principal import Role
 
 logger = logging.getLogger(__name__)
-# Metrics and traces are read-only views. MEMBER is enough; the panel already hides
-# the technical detail fields from non-admins, so a second gate here would remove
-# the summary those users are supposed to see.
+# Members can view diagnostics. Conversation data requires a credential and admin role.
 router = APIRouter(
     prefix="/api/pipeline", tags=["pipeline"], dependencies=[Depends(require_role(Role.MEMBER))]
 )
@@ -115,13 +113,22 @@ def build_topology_names() -> set[str]:
 
 @router.get("/traces")
 async def traces(
+    response: Response,
     limit: int = Query(50, ge=1, le=200),
-    _: dict[str, Any] = Depends(require_api_auth),
+    auth: dict[str, Any] = Depends(require_api_auth),
 ) -> dict[str, Any]:
-    """Recent traces, newest first, with a per-stage breakdown."""
+    """Recent trace diagnostics, with conversation data for authenticated admins."""
+    response.headers["Cache-Control"] = "no-store"
+    include_conversation = auth.get("mode") == "token" and auth.get("role") in {
+        Role.ADMIN.value,
+        Role.OWNER.value,
+    }
     store = _traces()
     return {
-        "traces": [t.to_dict() for t in store.recent(limit)],
+        "traces": [
+            trace.to_dict(include_conversation=include_conversation)
+            for trace in store.recent(limit)
+        ],
         "summary": store.summary(),
     }
 
@@ -130,8 +137,10 @@ async def traces(
 async def trace_detail(
     trace_id: str,
     request: Request,
-    _: dict[str, Any] = Depends(require_api_auth),
+    response: Response,
+    _: dict[str, Any] = Depends(require_role(Role.ADMIN, require_credential=True)),
 ) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
     if len(trace_id) > 128:
         raise HTTPException(status_code=422, detail=t("api.trace_too_long", request_locale(request)))
     store = _traces()

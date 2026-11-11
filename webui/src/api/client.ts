@@ -235,6 +235,8 @@ export const api = {
     }),
 
   plugins: () => request<any>('/api/plugins'),
+  /** Read-only integrity signals: approved vs. observed, with an explicit unavailable state. */
+  integrity: () => request<IntegritySignals>('/api/security/integrity'),
 
   // --- token lifecycle ------------------------------------------------------
   //
@@ -524,6 +526,20 @@ export interface RevocationList {
   revoked_before: number
   count: number
   tokens: RevokedToken[]
+}
+
+/** Read-only integrity view. `available: false` is a distinct state, never a pass. */
+export interface IntegritySignals {
+  available: boolean
+  trace: { boot_id: string; recoverable: boolean; historical: boolean } | null
+  mcp: Array<{
+    name: string
+    pinned_tools_digest: string
+    tools_digest: string
+    metadata_approved: boolean
+  }>
+  plugins: Record<string, { ok: boolean; reason: string }>
+  verification: { deterministic_gate: string; ai_review_is_gate: boolean }
 }
 
 export interface StageInfo {

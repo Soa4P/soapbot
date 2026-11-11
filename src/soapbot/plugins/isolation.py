@@ -491,6 +491,10 @@ class IsolatedRunner:
         # Allowlist, not the inherited environ: see ``sanitize_env``. This is the
         # difference between "a plugin process" and "a plugin process holding the
         # master key".
+        from soapbot.plugins.supervisor import _running_as_windows_system
+
+        if _running_as_windows_system():
+            raise IsolationError("refusing plugin execution under Windows SYSTEM")
         env = sanitize_env(extra={"SOAPBOT_PLUGIN_MEM_BYTES": str(self.memory_bytes)})
 
         if not isinstance(attr, str) or not attr.isidentifier():

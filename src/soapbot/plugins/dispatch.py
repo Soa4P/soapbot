@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 
 from soapbot.config import settings
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
+from soapbot.mcp.client import NAME_PREFIX
 from soapbot.plugins.context import (
     CallerContext,
     PluginContext,
@@ -54,6 +55,12 @@ from soapbot.security.provenance import vet_arguments
 logger = logging.getLogger(__name__)
 
 _HANDLER_TIMEOUT = 8.0
+
+#: External tools own this prefix. A plugin must not be able to register a name that
+#: the dispatcher would route to a third-party process, and two sources must not be
+#: able to offer the same name — the model resolves by name, so a collision is an
+#: ambiguity it can be steered into.
+EXTERNAL_PREFIX = f"{NAME_PREFIX}__"
 
 
 def _resource_allowed(value: str) -> bool:
@@ -368,10 +375,25 @@ class PluginToolRegistry:
         """
         role = principal.role if principal else Role.ANONYMOUS
         out: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for name, meta in self.loader.all_tools().items():
+            if name.startswith(EXTERNAL_PREFIX):
+                # Reserved for third-party tools. Letting a plugin own it would let a
+                # local handler answer a name the dispatcher routes to an MCP server.
+                self.audit.record(
+                    kind="plugin",
+                    action="tool:register",
+                    outcome="deny",
+                    principal=principal,
+                    detail=f"plugin={meta['plugin']} reserved prefix: {name}",
+                    plugin=meta["plugin"],
+                )
+                logger.warning("plugin tool uses reserved external prefix: %s", name)
+                continue
             required: Role = meta.get("min_role") or Role.MEMBER
             if role.rank < required.rank:
                 continue
+            seen.add(name)
             out.append(
                 {
                     "name": name,
@@ -381,9 +403,33 @@ class PluginToolRegistry:
             )
         for source in self._sources:
             try:
-                out.extend(source.schemas(principal))
+                schemas = source.schemas(principal)
             except Exception as exc:  # pragma: no cover - a source must not break chat
                 logger.warning("tool source failed to list: %s", exc)
+                continue
+            for schema in schemas:
+                name = str(schema.get("name", ""))
+                if not name.startswith(EXTERNAL_PREFIX):
+                    self.audit.record(
+                        kind="plugin",
+                        action="tool:register",
+                        outcome="deny",
+                        principal=principal,
+                        detail=f"external tool missing reserved prefix: {name}",
+                    )
+                    continue
+                if name in seen:
+                    self.audit.record(
+                        kind="plugin",
+                        action="tool:register",
+                        outcome="deny",
+                        principal=principal,
+                        detail=f"duplicate tool name: {name}",
+                    )
+                    logger.warning("duplicate tool name suppressed: %s", name)
+                    continue
+                seen.add(name)
+                out.append(schema)
         return out
 
     async def _invoke_external(
@@ -396,6 +442,7 @@ class PluginToolRegistry:
         land in the same audit stream as plugin calls, so an operator does not need a
         second place to look.
         """
+        failed = False
         for source in self._sources:
             try:
                 result = await source.call(name, arguments, principal=principal)
@@ -408,7 +455,10 @@ class PluginToolRegistry:
                     detail=f"external tool failed: {exc}",
                 )
                 logger.warning("external tool failed name=%s: %s", name, exc)
-                return "错误：外部工具调用失败。"
+                # One broken server must not decide the answer for all of them. The
+                # first source returning early used to hide every later match.
+                failed = True
+                continue
             if result is None:
                 continue
             self.audit.record(
@@ -419,6 +469,8 @@ class PluginToolRegistry:
                 detail="external tool",
             )
             return str(result)
+        if failed:
+            return "错误：外部工具调用失败。"
         return "错误：没有这个工具。"
 
     async def invoke(
@@ -444,7 +496,23 @@ class PluginToolRegistry:
             )
             return f"错误：参数来源未通过校验（{admission.reason}）。"
 
-        if name.startswith("mcp__"):
+        # Exact namespace parsing, not a prefix test: ``mcp__anything`` used to be
+        # routed to a third-party process even when no such server existed, and a
+        # plugin could shadow a name the model had learned from an MCP tool list.
+        parts = name.split("__")
+        if len(parts) >= 3 and parts[0] == NAME_PREFIX:
+            if getattr(arguments, "provenance", None) is None:
+                # Nobody marked where these arguments came from. For a third-party
+                # process "unmarked" must mean unknown, not "host-constructed and
+                # therefore safe" — the default admission above is for local tools.
+                self.audit.record(
+                    kind="plugin",
+                    action=f"tool:{name}",
+                    outcome="deny",
+                    principal=principal,
+                    detail="external tool called with unmarked arguments",
+                )
+                return "错误：外部工具参数缺少来源标记。"
             return await self._invoke_external(name, arguments, principal=principal)
 
         meta = self.loader.all_tools().get(name)
@@ -799,7 +867,13 @@ class PluginManager:
 
     def attach_surface_router(self, plugin: str, *, guard, ledger, storage=None) -> None:
         """Create the per-plugin router. Called by the loader right before a worker
-        starts, so the guard and ledger are the ones that belong to this plugin."""
+        starts, so the guard and ledger are the ones that belong to this plugin.
+
+        ``storage`` is the plugin's own encrypted store (``PluginContext.storage_if_available``)
+        and has to be forwarded: this used to pass ``None`` unconditionally, which made
+        every isolated plugin's ``ctx.storage.set`` fail while the same call worked
+        in-process — a difference no plugin author can debug from the plugin side.
+        """
         from soapbot.plugins.surfaces import SurfaceRouter
 
         if not hasattr(self, "_surfaces"):
@@ -812,7 +886,7 @@ class PluginManager:
             sender=getattr(self, "_sender", None),
             ledger=ledger,
             audit=self.loader.audit,
-            storage=None,
+            storage=storage,
         )
         # The sender may be installed after the first plugin loads; keep the router's
         # view current so a later ``install_sender`` is not silently ignored.

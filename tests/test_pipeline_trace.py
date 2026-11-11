@@ -407,8 +407,6 @@ def test_missing_stages_are_skipped_not_crashed() -> None:
 
 def _client_with(tmp_path, monkeypatch, seed):
     """A TestClient whose runtime exposes a store filled by ``seed``."""
-    from fastapi.testclient import TestClient
-
     from soapbot.app import create_app
     from soapbot.config import settings
 
@@ -428,7 +426,18 @@ def _client_with(tmp_path, monkeypatch, seed):
         traces = store
 
     monkeypatch.setattr(app_module, "_RUNTIME", _Runtime())
-    return TestClient(create_app())
+    # Entered as a context manager so the lifespan runs: auth state is installed by
+    # ``_init_auth`` on the app instance, and a client that never started would answer
+    # "auth is not initialised" instead of the 200/401/403 this file is about.
+    return _started(create_app())
+
+
+def _started(app):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    client.__enter__()
+    return client
 
 
 @pytest.fixture
@@ -489,13 +498,39 @@ def test_traces_endpoint_returns_recent(traced_client) -> None:
     assert body["summary"]["historical"] is False
 
 
-def test_traces_endpoint_exposes_stream_stats_and_chunks(stream_client) -> None:
+@pytest.fixture
+def trace_token_headers(stream_client):
+    """Tokens issued by the app under test, not by a process-wide stand-in.
+
+    This used to monkeypatch a module global on ``soapbot.api.auth``. Auth state now
+    lives on the app instance, so the honest thing is to read the service the app
+    actually installed: a token signed by anything else would not be the thing the
+    routes verify.
+    """
+    from soapbot.api.auth import _state_for
+    from soapbot.security.tokens import TokenService
+
+    service = _state_for(stream_client.app).token_service
+    if service is None:
+        service = TokenService(secret="pipeline-test-signing-key-only-used-in-tests")
+        _state_for(stream_client.app).token_service = service
+
+    def headers(role: str) -> dict[str, str]:
+        token, _ = service.issue(role=role)
+        return {"Authorization": f"Bearer {token}"}
+
+    return headers
+
+
+def test_traces_endpoint_exposes_stream_stats_and_chunks(stream_client, trace_token_headers) -> None:
     """The 09 panel reads these two fields off the wire, not off ``extras``.
 
     Asserting the snapshot is not enough: ``to_dict`` is a separate step and the panel
     has no other route to the data, so a dropped key here is an invisible UI regression.
     """
-    body = stream_client.get("/api/pipeline/traces?limit=10").json()
+    body = stream_client.get(
+        "/api/pipeline/traces?limit=10", headers=trace_token_headers("admin")
+    ).json()
     streamed = next(t for t in body["traces"] if t["trace_id"] == "streamed")
     assert streamed["chunks"] == ["第一句。", "第二句。"]
     assert streamed["stream"]["first_token_ms"] == 120.5
@@ -509,14 +544,36 @@ def test_traces_endpoint_exposes_stream_stats_and_chunks(stream_client) -> None:
     assert single["stream"] == {}
 
 
-def test_trace_detail_returns_the_same_chunks(stream_client) -> None:
-    body = stream_client.get("/api/pipeline/traces/streamed").json()
+@pytest.mark.parametrize(("role", "status"), [(None, 401), ("member", 403)])
+def test_trace_conversation_hidden_from_unprivileged_clients(
+    stream_client, trace_token_headers, role, status
+) -> None:
+    headers = trace_token_headers(role) if role else {}
+    response = stream_client.get("/api/pipeline/traces", headers=headers)
+    assert response.status_code == 200
+    streamed = next(trace for trace in response.json()["traces"] if trace["trace_id"] == "streamed")
+    assert streamed["session_key"] == ""
+    assert streamed["chunks"] == []
+    assert streamed["stream"]["count"] == 2
+    detail = stream_client.get("/api/pipeline/traces/streamed", headers=headers)
+    assert detail.status_code == status
+
+
+@pytest.mark.parametrize("role", ["admin", "owner"])
+def test_trace_detail_returns_the_same_chunks(stream_client, trace_token_headers, role) -> None:
+    response = stream_client.get("/api/pipeline/traces/streamed", headers=trace_token_headers(role))
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    body = response.json()
+    assert body["session_key"]
     assert body["chunks"][0] == "第一句。"
     assert body["stream"]["count"] == 2
 
 
-def test_trace_detail_404_for_evicted(traced_client) -> None:
-    response = traced_client.get("/api/pipeline/traces/does-not-exist")
+def test_trace_detail_404_for_evicted(traced_client, trace_token_headers) -> None:
+    response = traced_client.get(
+        "/api/pipeline/traces/does-not-exist", headers=trace_token_headers("admin")
+    )
     assert response.status_code == 404
     assert "缓冲区" in response.json()["detail"]
 

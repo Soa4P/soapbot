@@ -205,7 +205,7 @@ def _setup_provider(args: Any, interactive: bool) -> int:
     if interactive:
         provider_id = provider_id or _ask("Provider ID", "deepseek")
         base_url = base_url or _ask("base_url（含 /v1）", "https://api.deepseek.com/v1")
-        model = model or _ask("模型 ID", "deepseek-chat")
+        model = model or _ask("模型 ID", "deepseek-flash")
         if not key:
             key = _ask_api_key()
 

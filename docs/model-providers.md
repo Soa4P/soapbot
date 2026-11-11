@@ -52,9 +52,10 @@ Key，就能接。所以 Claude、Gemini 这里用的是它们各自的 OpenAI �
 手改配置文件才用得到的，面板预设不依赖它们。
 
 **模型名可能过期**：预设里的模型名只是起点。点「测试」旁边的**拉取模型列表**可以拿到
-厂商当前真实可用的模型 ID，选一个再保存。举例，仓库模板 `config/providers.yaml` 里
-DeepSeek 写的是 `deepseek-chat`，面板预设写的是 `deepseek-flash`——两者不是一个东西，
-以拉取到的列表为准。
+厂商当前真实可用的模型 ID，选一个再保存。DeepSeek 官方当前文档列出的模型包括
+`deepseek-flash` 和 `deepseek-v4-pro`；模型会随厂商调整，最终以拉取到的列表和
+[DeepSeek 官方模型文档](https://api-docs.deepseek.com/quick_start/pricing)为准。
+仓库模板和面板默认使用 `deepseek-flash`；如果你的旧配置仍写着其他模型名，请点击「拉取模型列表」后选择官方返回的可用 ID。
 
 ## 表里没有的厂商：MiniMax、混元、Nemotron、seed、Llama / Meta、Muse……
 
@@ -122,7 +123,7 @@ providers:
     label: DeepSeek
     base_url: https://api.deepseek.com/v1
     api_key: env:DEEPSEEK_API_KEY
-    model: deepseek-chat
+    model: deepseek-flash
     priority: 10
 
   - id: qwen-vision

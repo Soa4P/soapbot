@@ -46,6 +46,23 @@ from soapbot.security.audit import AuditLog
 PLUGIN_SRC = bundled_plugins_dir()
 
 
+class _CryptoBox:
+    """Minimal stand-in for ``SecretBox``.
+
+    ``builder.py`` always hands the loader a real crypto box; a test that builds
+    ``PluginLoader`` directly has to do the same, because ``ctx.storage`` now refuses
+    to fall back to an unencrypted store when no key is available.
+    """
+
+    def encrypt(self, text: str) -> str:
+        return "enc:v1:" + text[::-1]
+
+    def decrypt(self, text: str) -> str:
+        if not text.startswith("enc:v1:"):
+            raise ValueError("not an encrypted value")
+        return text[len("enc:v1:") :][::-1]
+
+
 # ============================================================ R1/R2/R3: SSRF
 
 
@@ -398,7 +415,7 @@ async def test_review_notice_hook_is_dispatched(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    loader = PluginLoader(plugins_dir=plugins_dir, audit=AuditLog())
+    loader = PluginLoader(plugins_dir=plugins_dir, audit=AuditLog(), crypto=_CryptoBox())
     # Approve exactly what the manifest declares, so the grant covers both
     # capabilities. Calling approve() with only {"notice"} here would (correctly)
     # deny the storage write and the hook would fail — which is the capability model
@@ -447,7 +464,7 @@ async def test_review_cron_job_is_executed_and_audited(tmp_path: Path) -> None:
     )
 
     audit = AuditLog()
-    loader = PluginLoader(plugins_dir=plugins_dir, audit=audit)
+    loader = PluginLoader(plugins_dir=plugins_dir, audit=audit, crypto=_CryptoBox())
     loader.approve_from_manifest(
         next(m for m in loader.discover().found if m.name == "ticker")
     )

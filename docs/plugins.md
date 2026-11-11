@@ -33,10 +33,17 @@
 | `admin` | 敏感能力（`storage`）与角色门槛 |
 | `remind` | `cron` 定时任务 + 发消息 |
 
-它们**不会被自动启用**。把它们复制到 `data/plugins/` 后在面板里批准即可：
+它们**不会被自动启用**。把它们复制到 `data/plugins/` 后在面板里逐项检查能力并批准：
 
 ```bash
 cp -r src/soapbot/examples/plugins/* data/plugins/
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory -Force data\plugins | Out-Null
+Copy-Item -Recurse -Force src\soapbot\examples\plugins\* data\plugins\
 ```
 
 ### 最小插件

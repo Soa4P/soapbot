@@ -24,7 +24,6 @@ from soapbot.api.auth import (
     CSRF_COOKIE,
     CSRF_HEADER,
     SESSION_COOKIE,
-    get_token_service,
     reset_auth,
 )
 from soapbot.config import settings
@@ -36,13 +35,15 @@ INIT_TOKEN = "bootstrap-strict-tests"
 def strict_client(tmp_path, monkeypatch):
     from soapbot.app import create_app
 
-    reset_auth()
+    app = create_app()
     monkeypatch.setattr(settings, "strict_loopback_auth", True)
     monkeypatch.setattr(settings, "cookie_secure", False)
     monkeypatch.setattr(settings, "init_token", SecretStr(INIT_TOKEN))
-    with TestClient(create_app()) as client:
+    with TestClient(app) as client:
         yield client
-    reset_auth()
+    # Scoped to this app: auth state is per instance now, so a blanket reset would be
+    # reaching into state this test never touched.
+    reset_auth(app)
 
 
 def _login(client: TestClient):
@@ -133,7 +134,9 @@ def test_refresh_with_csrf_rotates_the_session(strict_client: TestClient) -> Non
 
 def test_member_cannot_install_a_plugin(strict_client: TestClient) -> None:
     """A MEMBER who could load worker code but not edit config is an inversion."""
-    service = get_token_service()
+    from soapbot.api.auth import _state_for
+
+    service = _state_for(strict_client.app).token_service
     assert service is not None
     token, _ = service.issue("member-user", role="member")
     strict_client.cookies.set(SESSION_COOKIE, token)
@@ -187,7 +190,9 @@ def test_role_floor_blocks_a_member_from_config_routes(strict_client: TestClient
     # Build a member-role session directly with the app's own signer. A second
     # TokenService would produce a signature the app rejects with 401, which would
     # prove nothing about the role floor.
-    service = get_token_service()
+    from soapbot.api.auth import _state_for
+
+    service = _state_for(strict_client.app).token_service
     assert service is not None
     token, _ = service.issue("member-user", role="member")
     strict_client.cookies.set(SESSION_COOKIE, token)

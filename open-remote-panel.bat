@@ -2,36 +2,41 @@
 setlocal
 cd /d "%~dp0"
 
-echo ============================================================
-echo   soapbot - open the panel running on the server
-echo ============================================================
-echo.
-echo   Server : root@189.105.68.245   (ssh on port 443; port 22 is blocked here)
-echo   Key    : %USERPROFILE%\.ssh\soapbot_deploy
-echo   Tunnel : localhost:6185  ->  server 127.0.0.1:6185
-echo.
-echo   The panel on the server listens on its own loopback only, so a tunnel
-echo   is the intended way in - not a workaround around something unfinished.
-echo.
+if "%~1"=="" goto usage
+if "%~2"=="" goto usage
+if "%~3"=="" goto usage
 
-where ssh >nul 2>nul
-if errorlevel 1 (
-    echo [x] ssh.exe not found. It ships with Windows 10/11 as "OpenSSH Client".
-    pause
-    exit /b 1
-)
+set "HOST=%~1"
+set "USER=%~2"
+set "KEY=%~3"
+set "SSH_PORT=%~4"
+set "LOCAL_PORT=%~5"
+set "REMOTE_PORT=%~6"
+if not defined SSH_PORT set "SSH_PORT=22"
+if not defined LOCAL_PORT set "LOCAL_PORT=6185"
+if not defined REMOTE_PORT set "REMOTE_PORT=6185"
 
-if not exist "%USERPROFILE%\.ssh\soapbot_deploy" (
-    echo [x] private key not found: %USERPROFILE%\.ssh\soapbot_deploy
-    pause
-    exit /b 1
-)
+rem This file used to assemble the OpenSSH command line itself, expanding every
+rem variable into one string that cmd parsed. A value containing &, |, > or a quote
+rem then became part of the command instead of part of an argument.
+rem Now it only forwards to scripts\connect-linux.ps1, which binds parameters
+rem (PowerShell quotes them) and validates host, user and ports before ssh starts.
+rem Keep it that way: no command construction in this file.
 
-start "soapbot tunnel" ssh -p 443 -i "%USERPROFILE%\.ssh\soapbot_deploy" -N -L 6185:127.0.0.1:6185 root@189.105.68.245
-echo   tunnel window opened, waiting for it to come up ...
-timeout /t 6 >nul
-
-start "" http://127.0.0.1:6185
+echo Connecting %USER%@%HOST%:%SSH_PORT%
+echo Tunnel: localhost:%LOCAL_PORT% -^> server 127.0.0.1:%REMOTE_PORT%
+start "soapbot tunnel" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\connect-linux.ps1" -HostName "%HOST%" -User "%USER%" -KeyPath "%KEY%" -Port "%SSH_PORT%" -Tunnel -LocalPort "%LOCAL_PORT%" -RemotePort "%REMOTE_PORT%"
+timeout /t 3 >nul
+start "" "http://127.0.0.1:%LOCAL_PORT%"
 echo.
-echo   Close the "soapbot tunnel" window to disconnect.
-timeout /t 10 >nul
+echo Close the "soapbot tunnel" window to disconnect.
+exit /b 0
+
+:usage
+echo Usage: open-remote-panel.bat HOST USER KEY_PATH [SSH_PORT] [LOCAL_PORT] [REMOTE_PORT]
+echo Example: open-remote-panel.bat 203.0.113.10 ubuntu "%%USERPROFILE%%\.ssh\id_ed25519" 22 6185 6185
+echo.
+echo The panel stays on the Linux server's loopback and is reached through an SSH tunnel.
+echo Ports default to 22 / 6185 / 6185. Same thing, without the bat:
+echo   powershell -ExecutionPolicy Bypass -File scripts\connect-linux.ps1 -HostName HOST -User USER -KeyPath KEY -Tunnel
+exit /b 2

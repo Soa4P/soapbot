@@ -385,6 +385,12 @@ def checks() -> list[Result]:
     add(_require(AUTH, "if not host:", "s12", "high", "opaque Origin is refused"))
     add(_require(SETTINGS_API, "safe_detail(", "s12", "high",
                  "settings endpoint no longer echoes validation errors"))
+    # These two files compute their role floor inline rather than through the router
+    # dependency. The s12 sweep above would not notice if either check disappeared.
+    add(_require(SETTINGS_API, "_require_config_permission(", "s12", "high",
+                 "settings writes keep their inline permission floor"))
+    add(_require(AUTH, "Role.OWNER", "s12", "high",
+                 "revoke-all keeps its inline OWNER floor"))
 
     # 13 — swallowed exceptions
     add(_no_silent_catch("s13", "medium", "no except block whose entire body is pass"))
@@ -449,6 +455,18 @@ def checks() -> list[Result]:
     ):
         add(_require(SRC / rel, "from soapbot.core.text import INVISIBLE", "s20", "critical",
                      f"{rel} reads the shared invisible-character table"))
+
+    # The AI reviewer is advisory by construction. Its verdict must never substitute
+    # for a deterministic gate, and its own self-description must not quietly become
+    # a claim that it decides anything. Pin the two sentences and the absence of any
+    # AI verdict wiring in the backend jobs.
+    add(_require(ROOT / "scripts" / "ai_review.py", "What this is *not*: a gate",
+                 "wire", "high", "AI review states it is not a gate"))
+    add(_require(ROOT / ".github" / "workflows" / "ai-review.yml",
+                 "This job never approves and never merges",
+                 "wire", "high", "AI review never approves or merges"))
+    add(_forbid_in([CI], "AI_REVIEW_MODE", "wire", "high",
+                   "the backend gates never consult the AI verdict"))
 
     # Wiring: the gate must run in CI and locally, or it decays into a script nobody calls.
     add(_require(CI, "scripts/check_security_boundaries.py", "wire", "medium", "CI runs this gate"))

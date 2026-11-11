@@ -5,9 +5,10 @@ Windows 和 Linux 各有自己的一键命令，都是「一条命令装完」�
 
 | 你的机器 | 用哪条 | 前提 |
 | --- | --- | --- |
-| Windows | [Windows](#windows) | Python 3.12+，管理员 PowerShell |
+| Windows（已有 Python） | [Windows](#windows) | 管理员 PowerShell、Python 3.12+ |
+| Windows（没有 Python） | [Windows 无 Python](#windows-无-python) | 管理员 PowerShell |
 | Linux | [Linux](#linux) | Python 3.12+ |
-| Linux（容器加固） | [Docker](#docker) | Docker |
+| Linux（容器加固） | [Docker](#docker) | Docker、Git |
 
 > 三条路径的差别不只是「用什么装」：容器路径有非 root、只读根、`cap_drop: ALL`、
 > seccomp、tini、`0600` 权限位；Windows / Linux 原生路径是普通进程 + 计划任务 /
@@ -15,38 +16,66 @@ Windows 和 Linux 各有自己的一键命令，都是「一条命令装完」�
 
 ## Windows
 
+### Windows 已安装 Python
+
 在管理员 PowerShell 里：
 
 ```powershell
-irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 -OutFile "$env:TEMP\soapbot-install.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1"
 ```
 
-它会做五件事：找 Python 3.12、建 `.venv`、装依赖、注册计划任务 `SoapbotBot`、等到
-`/api/health` 返回 200 才算完成。默认装在 `C:\soapbot`。
+### Windows 无 Python
 
-改目录和端口：
+在管理员 PowerShell 里：
 
 ```powershell
-.\install.ps1 -Dir D:\soapbot -Port 7000
+irm https://raw.githubusercontent.com/Soa4P/soapbot/master/deploy/windows-bootstrap.ps1 -OutFile "$env:TEMP\soapbot-bootstrap.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-bootstrap.ps1" -Start
 ```
 
-重复执行是安全的：已有 `data\` 不动、已有 `.venv` 复用、已有计划任务不覆盖（要替换加
-`-Force`）。
+这条路径会自动安装 Python 3.12、创建虚拟环境、安装依赖并注册 `SoapbotBot` 计划任务。
+两条 Windows 路径默认都安装到 `C:\soapbot`，并且都需要管理员权限。
+
+改目录和端口时，先下载脚本再传参数：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1" -Dir D:\soapbot -Port 7000
+```
+
+重复执行是安全的：已有 `data\` 不动、已有 `.venv` 复用，计划任务每次都被重写成同一份定义
+（同一个名字、同一个账号）。任务**不再以 SYSTEM 运行**，而是 `NT AUTHORITY\LocalService`：
+插件隔离层拒绝在 LocalSystem 下启动 worker，用 SYSTEM 装出来的机器会静默失去所有插件。升级
+旧机器只要重跑一次安装脚本，脚本会把目录权限收敛成「管理员/SYSTEM 全控、服务账号只读 + 四个
+可写位置」，并自动把任务迁到低权限账号；也可以单独执行
+`powershell -ExecutionPolicy Bypass -File scripts\harden-windows.ps1`。
 
 ## Linux
 
+已有 Python 3.12+ 时，在服务器上执行：
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.sh -o /tmp/soapbot-install.sh
+bash /tmp/soapbot-install.sh
 ```
 
 默认 `/opt/soapbot`，以 root 运行时注册 `soapbot.service` 并 `systemctl enable --now`。
 非 root 或加 `--no-service` 时只把服务放到后台并写 `panel.log`。
 
+修改目录或端口：
+
 ```bash
-./install.sh --dir ~/soapbot --port 7000 --no-service
+bash /tmp/soapbot-install.sh --dir "$HOME/soapbot" --port 7000 --no-service
 ```
 
 ## Docker
+
+先在服务器上获取仓库并进入根目录：
+
+```bash
+git clone https://github.com/Soa4P/soapbot.git
+cd soapbot
+```
 
 compose 文件在 `deploy/` 下，**不在仓库根目录**，所以必须带 `-f`：
 
@@ -75,9 +104,24 @@ Python 进程 + 计划任务，功能一致，但不含上述内核加固。这�
 `scripts/check_deploy.py` 里那条已知告警是 `image.mirror-unknown`（没配镜像加速、直连
 Docker Hub 超时），与 Windows 无关。
 
-## 装完之后
+## 远程云服务器怎么打开面板
 
-打开 `http://127.0.0.1:6185`。第一次登录要一枚**一次性令牌**。
+如果 soapbot 装在 Linux 或 Windows 云服务器上，`127.0.0.1` 指的是**服务器自己**，不是你本地电脑。
+在你自己的 Windows PowerShell 或 Linux/macOS 终端执行 SSH 隧道：
+
+```bash
+ssh -N -L 6185:127.0.0.1:6185 用户名@服务器IP
+```
+
+服务器 SSH 不是 22 端口时加 `-p`，使用私钥时加 `-i`：
+
+```bash
+ssh -p 443 -i ~/.ssh/id_ed25519 -N -L 6185:127.0.0.1:6185 用户名@服务器IP
+```
+
+保持这个终端不要关闭，然后在你自己的电脑打开 `http://127.0.0.1:6185`。
+Windows 也可以运行仓库中的 `scripts/connect-linux.ps1 -Tunnel`。如果你已经通过 RDP 登录到 Windows 云服务器，直接在**云服务器桌面里的浏览器**打开 `http://127.0.0.1:6185`，不要在本地电脑打开。
+
 
 ### 第一次登录：令牌在哪、找不到怎么办
 
@@ -193,9 +237,9 @@ File /a "/oname=binaries\soapbot-backend.exe" "...\binaries\soapbot-backend.exe"
 完整构建顺序（改代码时）：
 
 ```bash
-cd webui && npm ci && npm run build      # 面板产物
-python desktop/sidecar/build.py          # 冻结后端并 staging 到 src-tauri/binaries/
-cd desktop && npm ci && npm run build    # 出 NSIS 安装包
+(cd webui && npm ci && npm run build)  # 面板产物
+python desktop/sidecar/build.py          # 从仓库根冻结后端并 staging 到 src-tauri/binaries/
+(cd desktop && npm ci && npm run build)   # 出 NSIS 安装包
 ```
 
 冻结与托管这两段各踩过一个坑，写在代码注释里：SQLAlchemy 的 `sqlite+aiosqlite` dialect

@@ -49,6 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/instal
 
 ```bash
 # Docker（仅 Linux）
+git clone https://github.com/Soa4P/soapbot.git
+cd soapbot
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
@@ -87,7 +89,8 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 
 三条路径的细节、常见失败、验证命令和卸载在
 [部署文档](docs/deploy-quickstart.md)。面板 12 页、群范围、语音、远程访问和登录在
-[使用指南](docs/guide.md)。
+[使用指南](docs/guide.md)。第一次使用、Windows 重启令牌、Linux SSH、模型和插件的复制式步骤见
+[公开用户指南](docs/public-user-guide.md)。
 
 ## 边界
 
@@ -171,9 +174,10 @@ HTTP 错误、超时、非法 JSON、非对象 JSON 不重试——那些重试�
 没有用到 16000 那一档。`block` 模式也在真实降级（故意把模型名设错）下验过——job 变红，
 而评论仍然先出现在 PR 上。
 
-配置：仓库 secret `DEEPSEEK_API_KEY`（必需）；variable `AI_REVIEW_MODEL`（可选，
-默认 `deepseek-chat`，本仓库设为 `deepseek-flash`）、`AI_REVIEW_MODE`（可选，默认
-`observe`）。没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成审查过、没问题。
+配置：仓库 secret `DEEPSEEK_API_KEY`（必需）；variable `AI_REVIEW_MODEL`（可选，默认
+`deepseek-flash`）、`AI_REVIEW_MODE`（可选，默认
+`observe`）。DeepSeek 官方当前模型以[模型文档](https://api-docs.deepseek.com/quick_start/pricing)为准；
+没配 key 时它会在 PR 上写明「本次没有审查」，而不是装成审查过、没问题。
 
 工作流按设计 checkout `base.sha`，所以**改脚本的那个 PR 跑的还是旧脚本**——修复的
 效果要在合并后的下一个 PR 上才看得到。

@@ -1,21 +1,13 @@
-"""The PR template is a checklist, and an unchecked one is worthless.
+"""The PR template is short enough for a first-time contributor to fill in.
 
 Why this exists
 ---------------
-The template used to be five sections with a two-row table and four checkboxes.
-It never rendered anything about the blast radius, the test-count baseline, the
-AI review verdict, or how to roll the change back — so those questions were
-answered (or not) depending on who opened the PR.
+The template must ask for the small set of facts a maintainer needs to review a
+public contribution: purpose, user instructions, breaking changes, verification,
+and Agent participation. It should not turn every PR into an internal audit report.
 
-Two failure modes are silent and both happened or nearly happened here:
-
-* ``gh pr create --fill`` writes the commit message into the body and never
-  loads the template, so editing the template changes nothing on the PR.
-* A section can be deleted and the file still looks fine, because Markdown has
-  no schema. The next author then assumes the missing question was irrelevant.
-
-These tests pin the section list and the ``--fill`` prohibition. They cannot
-judge whether an author filled the sections in honestly.
+A removed question must fail here, not silently vanish from future PRs. These tests
+pin the contributor-facing section list and the ``--fill`` prohibition.
 """
 
 from __future__ import annotations
@@ -29,23 +21,13 @@ TEMPLATE = ROOT / ".github" / "pull_request_template.md"
 CONTRIBUTING = ROOT / "CONTRIBUTING.md"
 
 REQUIRED_SECTIONS = (
-    "改了什么",
-    "为什么",
-    "影响面",
-    "验证",
-    "数字基线",
-    "AI 审查",
-    "安全影响",
-    "回滚",
-    "检查",
-)
-
-# Baselines whose numbers must move together with the test count.
-BASELINE_FILES = (
-    "docs/verification-matrix.md",
-    "docs/delivery-readiness-v2.md",
-    "docs/architecture.md",
-    "docs/progress/progress.json",
+    "该 PR 作用的地图（仅英文小写）",
+    "为什么要增加/修改这个东西",
+    "用户怎么使用",
+    "破坏性变更",
+    "在提交 PR 前确认已经完成以下工作",
+    "验证结果",
+    "Agent 参与声明",
 )
 
 
@@ -61,15 +43,12 @@ def template_problems(text: str) -> list[str]:
         if section not in headings:
             out.append(f"模板缺少小节：{section}")
 
-    if "不适用的小节直接删掉" not in text:
+    if "不适用的小节直接删除" not in text:
         out.append("模板没有说明「不适用就删掉，不要留空」")
-    for name in BASELINE_FILES:
-        if name not in text:
-            out.append(f"数字基线小节没有点名 {name}")
-    if "`make check` 未整体跑过" not in text:
-        out.append("模板没有要求 make check 未跑时说明原因")
-    if "degraded" not in text:
-        out.append("AI 审查小节没有说明降级结论要人工复核")
+    if "none" not in text or "实际使用的模型" not in text:
+        out.append("模板没有要求声明 Agent 参与情况")
+    if "未验证" not in text:
+        out.append("模板没有要求标注未验证内容")
     if text.count("- [ ]") < 5:
         out.append("检查项少于 5 条，勾选清单退化了")
     return out

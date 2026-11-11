@@ -25,6 +25,17 @@ const AUDIT_MAX = 1000
 const auditLimit = ref(AUDIT_STEP)
 const audit = useAsync(() => api.audit(auditLimit.value, kind.value))
 const access = useAsync(() => api.access())
+// Approved definitions vs. what the runtime is actually observing. Read-only: this
+// page reports drift, it does not decide whether a change is acceptable.
+const integrity = useAsync(() => api.integrity())
+const integrityServers = computed<any[]>(() => integrity.data.value?.mcp ?? [])
+const pluginVerdicts = computed(
+  () =>
+    Object.entries(integrity.data.value?.plugins ?? {}) as [
+      string,
+      { ok: boolean; reason: string },
+    ][],
+)
 
 const canLoadMoreAudit = computed(() => auditLimit.value < AUDIT_MAX)
 
@@ -462,6 +473,56 @@ async function revokeEveryToken(): Promise<void> {
           :action="t('security.noEventsAction')"
         />
       </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('security.integrityTitle') }}</h2>
+      <span class="hint">{{ t('security.integrityHint') }}</span>
+    </div>
+    <div class="panel__body stack">
+      <p v-if="!integrity.data.value?.available" class="hint">
+        {{ t('security.integrityUnavailable') }}
+      </p>
+      <template v-else>
+        <p class="hint">
+          {{ t('security.integrityBoot', { boot: integrity.data.value?.trace?.boot_id || '—' }) }}
+          · {{ integrity.data.value?.trace?.recoverable ? t('security.integrityRecoverable') : t('security.integrityNotRecoverable') }}
+        </p>
+        <table v-if="integrityServers.length" class="data">
+          <caption class="visually-hidden">{{ t('security.integrityMcp') }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{{ t('security.integrityServer') }}</th>
+              <th scope="col">{{ t('security.integrityMetadata') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in integrityServers" :key="row.name">
+              <td class="key">{{ row.name }}</td>
+              <td>
+                <span class="tag" :class="row.metadata_approved ? '' : 'lamp'">
+                  {{ row.metadata_approved ? t('security.integrityApproved') : t('security.integrityNotApproved') }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="pluginVerdicts.length" class="hint">
+          {{ t('security.integrityPlugins') }}:
+          <span
+            v-for="[name, verdict] in pluginVerdicts"
+            :key="name"
+            class="tag"
+            :class="verdict.ok ? '' : 'lamp'"
+          >{{ name }} · {{ verdict.reason }}</span>
+        </p>
+        <p class="hint">{{ t('security.integrityGate') }}</p>
+      </template>
+      <p v-if="integrity.error.value" class="hint" role="alert" style="color: var(--danger)">
+        {{ integrity.error.value }}
+      </p>
     </div>
   </section>
 

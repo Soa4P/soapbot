@@ -714,6 +714,37 @@ _CHILD_WORKER = _CHILD_WORKER.replace("__MAX_FRAME_BYTES__", str(MAX_FRAME_BYTES
 _CHILD_WORKER = _CHILD_WORKER.replace("__MAX_JSON_DEPTH__", str(settings.max_json_depth))
 
 
+def _running_as_windows_system() -> bool:
+    """Inspect the process token; never trust environment-derived account names."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi.IsWellKnownSid.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    token = wintypes.HANDLE()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+        raise IsolationError("cannot inspect Windows process token; refusing plugin execution")
+    try:
+        size = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
+        if not size.value:
+            raise IsolationError("cannot inspect Windows token identity")
+        buffer = ctypes.create_string_buffer(size.value)
+        if not advapi.GetTokenInformation(token, 1, buffer, size.value, ctypes.byref(size)):
+            raise IsolationError("cannot inspect Windows token identity")
+        sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+        return bool(advapi.IsWellKnownSid(sid, 22))
+    finally:
+        kernel.CloseHandle(token)
+
+
 # -------------------------------------------------------------------------- parent
 
 
@@ -837,6 +868,11 @@ class PluginWorker:
         return self._proc is not None and self._proc.returncode is None
 
     async def start(self, *, timeout: float = 20.0) -> None:
+        if _running_as_windows_system():
+            raise IsolationError(
+                "refusing to run plugins from a Windows SYSTEM service; "
+                "run SoapbotBot under a dedicated least-privilege account"
+            )
         if self.alive:
             return
         # A worker object can be started again after its process died (the supervisor
