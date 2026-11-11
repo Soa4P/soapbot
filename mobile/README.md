@@ -5,11 +5,16 @@
 
 ## 状态
 
-**2026-11-12 起过了本机验证**：Flutter 3.50.0 下 `flutter analyze` 0 错误（仅 7 条
-`material.dart` 弃用提示——新 SDK 把 Material 挪进了 `package:material_ui`，但本仓库
-pubspec 声明的下限是 3.22，换 import 之前旧 SDK 会装不上，先保留），`flutter test`
-12 项全过（模型解析、翻页参数、对话发送、会话/聊天两屏的备注与对话模式）。
-`flutter build apk` 仍未跑过——需要 Android SDK，装好后请以构建输出为准。
+**2026-11-12 起过了完整本机验证**（Flutter 3.50.0 + JDK 17 + Android SDK 36）：
+
+- `flutter analyze` 0 错误（仅 7 条 `material.dart` 弃用提示——新 SDK 把 Material 挪进了
+  `package:material_ui`，但 pubspec 声明的下限是 3.22，换 import 之前旧 SDK 会装不上，
+  保留；CI 的 mobile job 同样按默认把 info 保持非致命）
+- `flutter test` 12 项全过（模型解析、翻页参数、对话发送、会话/聊天两屏的备注与对话模式）
+- `flutter build apk --debug` 实测通过（Gradle assembleDebug 536s），产物
+  `build/app/outputs/flutter-apk/app-debug.apk`——**可测试安装包**，直接
+  `adb install` 或传到手机点开安装（系统会提示未知来源，允许一次即可）。
+  applicationId 是 `dev.soapbot.archive`；release 签名与上架配置仍不做（见「不做什么」）。
 
 ## 四屏
 
@@ -39,6 +44,9 @@ flutter build apk --dart-define=SOAPBOT_BASE_URL=https://your.domain
 
 `SOAPBOT_BASE_URL` 默认 `http://127.0.0.1:16700`，只适合模拟器；真机必须指向部署的
 域名，且服务端需要设置 `SOAPBOT_CHAT_APP_ENABLED=true`，否则 `/api/chat/*` 返回 404。
+首次构建前需要 `flutter create . --project-name soapbot_archive --platforms android`
+生成过的 `android/` 目录已在仓库里，新克隆直接 `flutter pub get` 即可；Gradle 需要
+JDK 17 与 `ANDROID_HOME` 指向的 Android SDK。
 
 ## 与网页端的两点差异
 

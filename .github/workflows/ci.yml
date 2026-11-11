@@ -245,6 +245,37 @@ jobs:
       - name: Build panel
         run: cd webui && npm run build
 
+  mobile:
+    # Dart-level signal only (analyze + test). The APK build needs an Android SDK the
+    # free runners install slowly, and the artifact is built on demand; what must
+    # never silently rot is the client code itself — the same promise the `frontend`
+    # job makes for the panel. `flutter analyze` defaults keep deprecation infos
+    # non-fatal: the codebase targets Flutter >= 3.22, where `package:material_ui`
+    # does not exist yet.
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned to the version the SDK verification ran against: `channel: stable`
+          # floats, and a newer Flutter turned 7 deprecation *infos* into exit-code-1
+          # (material.dart -> package:material_ui). mobile/README records the same
+          # decision; bump the two together.
+          flutter-version: 3.50.0
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: cd mobile && flutter pub get
+
+      - name: Analyze
+        run: cd mobile && flutter analyze
+
+      - name: Unit tests
+        run: cd mobile && flutter test
+
   desktop:
     # This job stays a `cargo check`: the fast signal that the Rust side still matches
     # the Tauri 2 API, on every push, on the cheapest runner.
