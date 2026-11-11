@@ -120,6 +120,28 @@ class Settings(BaseSettings):
     """Port the protocol end listens on. The panel binds this when it starts the container
     itself, and connects to it when someone else started NapCat."""
 
+    onebot_gateway_enabled: bool = False
+    """Expose the official QQ bot to OneBot 11 clients.
+
+    Off by default: this opens a listening socket that can send messages as the bot.
+    Enabled only together with a token — the gateway refuses to start without one.
+    """
+
+    onebot_gateway_host: str = "127.0.0.1"
+    """Bind address. Loopback by default; changing it is an explicit exposure decision."""
+
+    onebot_gateway_port: int = 6700
+    onebot_gateway_path: str = "/onebot/v11/ws"
+    """Path the client connects to. Informational for the panel; the server accepts
+    the socket first and then authenticates, so a wrong path is a client-side mistake."""
+
+    onebot_gateway_token: SecretStr = SecretStr("")
+    """Bearer token shared with the OneBot client.
+
+    ``SecretStr`` and no default: an empty value is a configuration error, not an
+    "open to everyone" mode.
+    """
+
     config_template_dir: Path = PROJECT_ROOT / "config"
     """Read-only defaults shipped with the code. Seeded into :attr:`config_dir`."""
 
