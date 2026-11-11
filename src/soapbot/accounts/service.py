@@ -356,3 +356,18 @@ async def account_from_claims(db: Database, auth: dict[str, Any]) -> Account | N
     except (TypeError, ValueError):
         return None
     return await account_by_id(db, account_id)
+
+
+async def active_account_from_claims(db: Database, auth: dict[str, Any]) -> Account | None:
+    """Like :func:`account_from_claims`, but a disabled account is not a principal.
+
+    ``authenticate`` already refuses to *issue* a cookie for a disabled account. That is
+    only half the job: a cookie issued before the account was disabled stays valid until
+    it expires, so the session it started would keep reading archived conversations —
+    "disable" would mean "no new logins" while the incumbent keeps reading. Every route
+    that turns a claim into an identity goes through here for that reason.
+    """
+    account = await account_from_claims(db, auth)
+    if account is None or account.status != "active":
+        return None
+    return account

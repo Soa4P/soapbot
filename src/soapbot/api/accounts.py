@@ -30,7 +30,7 @@ from soapbot.accounts import (
     list_memberships,
     redeem_invite,
 )
-from soapbot.accounts.service import account_from_claims
+from soapbot.accounts.service import active_account_from_claims
 from soapbot.api.auth import (
     _auth_state,
     _client_host,
@@ -158,7 +158,7 @@ async def me(
     auth: dict[str, Any] = Depends(require_api_auth),
 ) -> dict[str, Any]:
     db = _db(request)
-    account = await account_from_claims(db, auth)
+    account = await active_account_from_claims(db, auth)
     if account is None:
         raise HTTPException(status_code=401, detail="account no longer exists")
     sessions = await list_memberships(db, account.id) if account.id else []
@@ -176,7 +176,7 @@ async def create_invite_code(
     request: Request,
     auth: dict[str, Any] = Depends(require_role(Role.OWNER, require_credential=True)),
 ) -> dict[str, Any]:
-    account = await account_from_claims(_db(request), auth)
+    account = await active_account_from_claims(_db(request), auth)
     if account is None or not account.is_owner:
         raise HTTPException(status_code=403, detail="owner only")
     code = await create_invite(
@@ -211,7 +211,7 @@ async def grant(
     request: Request,
     auth: dict[str, Any] = Depends(require_role(Role.OWNER, require_credential=True)),
 ) -> dict[str, Any]:
-    account = await account_from_claims(_db(request), auth)
+    account = await active_account_from_claims(_db(request), auth)
     if account is None or not account.is_owner:
         raise HTTPException(status_code=403, detail="owner only")
     try:

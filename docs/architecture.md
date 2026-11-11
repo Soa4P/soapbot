@@ -218,20 +218,22 @@ soapbot/
 │   ├── providers/      # 模型层：能力槽、OpenAI 兼容实现、故障转移路由
 │   ├── ai/             # 智能层：人格卡、上下文压缩、视觉、引擎、AI Stage
 │   ├── memory/         # 数据层：消息归档、三层记忆、知识库、检索、命令 Stage
+│   ├── accounts/       # 存档账号：scrypt 密码、邀请码、会话授权（不引用任何适配器）
 │   ├── security/       # 防护层：主体与权限、审计、注入防护、密钥、令牌
 │   ├── plugins/        # 扩展层：清单、沙箱、加载器、进程隔离、命令/工具分发
 │   ├── budget/         # 可选：额度账本与二次审批
 │   ├── bilibili/       # 可选：公开元数据、wbi 签名、观后感
-│   ├── api/            # 对外：FastAPI 路由（鉴权 / 管理 / 插件 / B 站 / 安全 / 配置写入 / 流水线）
+│   ├── api/            # 对外：FastAPI 路由（鉴权 / 账号 / 存档 / 管理 / 插件 / B 站 / 安全 / 配置写入 / 流水线）
 │   ├── examples/       # 随包发布的示例插件（不是内置功能，仍需批准）
 │   └── webui/dist/     # 前端构建产物（随 wheel 发布）
 ├── webui/              # 前端源码（Vite + Vue 3 + TypeScript）
+├── mobile/             # Flutter 源码骨架，默认关闭的端；只交付源码，未在真机构建
 ├── config/             # **模板**（providers/adapters/mcp/personas），首次启动播种到 data/config，之后不再读它
 ├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录，以及 data/config（面板真正编辑的那份，gitignore）
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose
 ├── docs/               # 设计记录、安全模型、交付评估
 ├── scripts/            # check_deps.py 等仓库工具
-└── tests/              # pytest（2123 项通过 / 12 项跳过）
+└── tests/              # pytest（2126 项通过 / 12 项跳过）
 ```
 
 ### 各模块的功能定位与实现要点
@@ -283,6 +285,15 @@ soapbot/
   （FTS5 与向量双路融合 + RRF）、`KnowledgeBase`（`ingest_document` 覆盖语义）。
 - `extractor.py` / `stages.py`：记忆抽取、`PersistStage`、`RecallStage`、
   `KnowledgeStage`、以及全部斜杠命令（含群管）。
+
+**`accounts/` — 存档账号**
+
+- `service.py`：密码 `scrypt(n=2**14, r=8, p=1)`（salt 与 hash 分列、`compare_digest`）、
+  邀请码只存 SHA-256（一次性、默认 72 小时）、`chat_memberships` 授权、`account_from_claims`
+  把令牌 subject 还原成账号。
+- `active_account_from_claims`：停用账号不是主体。`authenticate` 只挡住**下一次**登录，
+  老 cookie 在过期前仍有效，所以每个读存档的入口都要走这里，否则「停用」只是「不许再登录」。
+- 这一层**不 import 适配器**：存档能读不能发，靠调用图而不是注释保证。
 
 **`security/` — 防护层**
 

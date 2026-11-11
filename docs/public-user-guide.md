@@ -76,6 +76,42 @@ curl.exe -s http://127.0.0.1:6185/api/auth/status
 
 返回的 `bootstrap_path` 就是实际路径。
 
+## 2.5 让第二个人只看他自己该看的群
+
+面板令牌是「拿到就全见」，第二个人不该拿它。用**第 13 页「聊天存档」**的账号体系：
+
+1. 先建第一个所有者。`init_token` 只能干这一件事——它建不了存档会话，第 13 页会回 401：
+
+  ```bash
+  curl.exe -s -X POST http://127.0.0.1:6185/api/accounts/owner \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $(cat data/init_token.txt)" \
+    -d '{"username": "owner", "password": "换成至少 8 位的密码"}'
+  ```
+
+  Windows 上把 `$(cat data/init_token.txt)` 换成 `(Get-Content data\init_token.txt)`，或者
+  直接把令牌内容粘进去。密码用标准库 scrypt 存哈希，库里没有明文；用户名 3-32 位，
+  只允许字母、数字、`_`、`.`、`-`。
+
+  建完之后**立刻**用 `POST /api/auth/login` 把令牌消费掉（它会删掉 `init_token.txt` 并留一个
+  `init_token.redeemed` 标记）。原因很直接：直接拿它当 Bearer 调 API 并不算消费，在被消费
+  之前它一直是一把管理员钥匙。想省事就直接删 `data/init_token.txt`。
+
+2. 打开 `http://127.0.0.1:6185/chat/login`，用刚建的账号登录。
+3. 在第 13 页或 API 里生成邀请码，发给要加入的人；**邀请码只显示一次**，发错只能作废重发。
+4. 对方访问同一个地址，用邀请码注册，登录后只看得到被授权的会话。
+
+三个容易踩的点：
+
+- 这一页只能看和写备注，**不会往 QQ 发任何东西**。备注落库为 `delivered=false`，对方在
+  QQ 里看不到。
+- 访问别人的会话会得到 **404**，不是「无权限」——403 等于告诉你这个群存在。
+- 手机端和桌面壳默认关着（`SOAPBOT_CHAT_APP_ENABLED=false`、
+  `SOAPBOT_CHAT_DESKTOP_ENABLED=false`）。要在手机上用，先在自己机器上把对应开关打开，
+  再重启服务；三个开关全关时这些接口直接 404。
+
+完整的账号、邀请、授权与停用说明见 [chat-archive.md](chat-archive.md)。
+
 ## 3. 从 Windows 连接 Linux
 
 Windows 10/11 自带 OpenSSH Client。先测试：
