@@ -53,6 +53,7 @@ _INTERNAL = {
     "master_key_file": "documented as MASTER_KEY / MASTER_KEY_FILE",
     "jwt_secret": "internal: rotated automatically, never operator-chosen",
     "jwt_ttl_hours": "internal default",
+    "jwt_idle_hours": "advanced token tuning; off by default, documented in docs/security-model.md",
     "init_token": "internal: printed at startup and written to data/init_token.txt",
     "first_run_owner": "internal bookkeeping for the first login",
     "trust_protocol_roles": "internal: only meaningful for the QQ official adapter",

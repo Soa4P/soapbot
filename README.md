@@ -122,9 +122,10 @@ python -m soapbot.cli doctor --strict      # 部署前
 
 `make check` 跑的是 CI `backend` 任务里**能在本机跑的全部**门禁：lint、version、
 check-deps、console-encoding、deploy-check、contrast、a11y、gaps、doclinks、
-ipc-audit、boundary-audit、desktop-check、pytest。只有两项不在其中，原因是它们
-依赖本机没有的东西——`check_secrets.py --committed` 要读待审提交的 git 历史，
-`pip-audit` 要联网。这个差集由 `tests/test_gate_parity.py` 断言，两边再漂移就会红。
+ipc-audit、boundary-audit、desktop-check、pytest。只有三项不在其中，原因是它们依赖
+本机没有的东西——`check_secrets.py --committed` 要读待审提交的 git 历史，`pip-audit`
+要联网，`check_pr_title.py` 校验的是 pull request 的标题（工作区和直推都没有标题可
+检查）。这个差集由 `tests/test_gate_parity.py` 断言，两边再漂移就会红。
 
 三个静态门禁值得单独说：`scripts/check_plugin_ipc.py` 守插件进程边界，
 `scripts/check_security_boundaries.py` 守 20 项安全与错误日志契约，

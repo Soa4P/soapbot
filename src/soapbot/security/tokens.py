@@ -40,6 +40,7 @@ import hmac
 import logging
 import secrets
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -111,6 +112,7 @@ class TokenService:
         *,
         secret: str = "",
         ttl_hours: int = 72,
+        idle_hours: int = 0,
         secret_file: Path | None = None,
         revocations: RevocationStore | None = None,
     ) -> None:
@@ -133,6 +135,15 @@ class TokenService:
             self._key = _read_or_create_secret(self._secret_file)
             self.secret_source = f"file:{self._secret_file}"
         self.ttl_seconds = int(max(1, ttl_hours) * 3600)
+        #: Inactivity window. ``0`` disables the check, which keeps every existing
+        #: deployment byte-for-byte unchanged: a signed, unexpired token behaves exactly
+        #: as it did before this option existed.
+        self.idle_seconds = int(max(0, idle_hours) * 3600)
+        #: ``jti -> last use`` for the idle check. Bounded: a long-running process must
+        #: not grow a dictionary of every token it has ever seen, and an evicted entry
+        #: only means the token starts its idle window again on next use.
+        self._last_used: OrderedDict[str, float] = OrderedDict()
+        self._idle_capacity = 1024
 
     # ------------------------------------------------------------------ issuance
     def issue(self, subject: str = "operator", *, role: str = "owner") -> tuple[str, TokenClaims]:
@@ -153,11 +164,15 @@ class TokenService:
         claims = TokenClaims(
             subject=subject, role=role, issued_at=now, expires_at=exp, token_id=jti
         )
+        if self.idle_seconds > 0:
+            # Issuance is the first use: a token nobody touches starts ageing now
+            # rather than at whatever moment someone first presents it.
+            self._remember_use(jti, float(now))
         logger.info("issued admin token subject=%s expires_in=%ds", subject, self.ttl_seconds)
         return token, claims
 
     # ------------------------------------------------------------- verification
-    def verify(self, token: str) -> TokenClaims:
+    def verify(self, token: str, *, now: float | None = None) -> TokenClaims:
         """Decode and validate a token, or raise :class:`TokenError`.
 
         ``require`` is not decoration: without it a token minted by an older version
@@ -198,7 +213,37 @@ class TokenService:
             claims.token_id, claims.issued_at
         ):
             raise TokenError("token revoked")
+
+        if self.idle_seconds > 0:
+            self._check_idle(claims, time.time() if now is None else now)
         return claims
+
+    # ------------------------------------------------------------------- idle window
+    def _check_idle(self, claims: TokenClaims, now: float) -> None:
+        """Refuse a token that has gone unused for longer than the idle window.
+
+        Checked *after* signature, claims and revocation for the same reason revocation
+        is: a caller must not be able to tell a forged token from one we issued and then
+        let go idle.
+
+        Limitation, stated rather than hidden: the map is per process. A restart forgets
+        every last-use timestamp, so the window restarts on the next use. Pair this with
+        a bounded ``ttl_hours`` rather than relying on it across restarts.
+        """
+        previous = self._last_used.get(claims.token_id)
+        if previous is not None and now - previous > self.idle_seconds:
+            # Deliberately *not* removed: dropping the entry would make the next
+            # request look like a first use and revive a token that already timed out.
+            # The stale timestamp stays, so every later attempt keeps failing, and the
+            # map is bounded anyway.
+            raise TokenError("token idle timeout")
+        self._remember_use(claims.token_id, now)
+
+    def _remember_use(self, jti: str, now: float) -> None:
+        self._last_used[jti] = now
+        self._last_used.move_to_end(jti)
+        while len(self._last_used) > self._idle_capacity:
+            self._last_used.popitem(last=False)
 
 
 BOOTSTRAP_FILE = "init_token.txt"
