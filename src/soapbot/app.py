@@ -54,10 +54,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from soapbot import __version__
+from soapbot.api.accounts import router as accounts_router
 from soapbot.api.admin import router as admin_router
 from soapbot.api.auth import configure_auth, require_api_auth
 from soapbot.api.auth import router as auth_router
 from soapbot.api.bilibili import router as bilibili_router
+from soapbot.api.chat import router as chat_router
 from soapbot.api.config_adapters import router as config_adapters_router
 from soapbot.api.config_probe import router as config_probe_router
 from soapbot.api.config_write import router as config_write_router
@@ -887,6 +889,8 @@ def create_app() -> FastAPI:
     from soapbot.api.system import router as system_router
 
     app.include_router(auth_router)
+    app.include_router(accounts_router)
+    app.include_router(chat_router)
     app.include_router(security_router)
     app.include_router(admin_router)
     # After the admin router: both serve /api/personas, and the growth routes add a

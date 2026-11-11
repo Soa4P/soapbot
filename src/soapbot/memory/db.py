@@ -338,6 +338,64 @@ class SpendRequestRow(Base):
     )
 
 
+class AccountRow(Base):
+    """A human account that may read the archive.
+
+    Separate from ``principal``/``Role``: those describe *chat participants*
+    (QQ users), this describes *operators of the web/app clients*. Conflating them
+    would let a QQ group admin silently become a panel administrator.
+    """
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(128), default="")
+    salt: Mapped[str] = mapped_column(String(64), default="")
+    #: ``owner`` or ``member``. Mapped to the existing Role enum when signing tokens.
+    role: Mapped[str] = mapped_column(String(16), default="member")
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    created_by: Mapped[int] = mapped_column(Integer, default=0)
+    last_login_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class AccountInviteRow(Base):
+    """Invite-only registration. Only the hash is stored, never the code."""
+
+    __tablename__ = "account_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(16), default="member")
+    expires_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0)
+    #: Comma-separated session keys granted on redemption. Empty means "no sessions
+    #: yet" — the owner must grant later; never "all sessions".
+    session_keys: Mapped[str] = mapped_column(Text, default="")
+
+
+class ChatMembershipRow(Base):
+    """Which archive sessions an account may read.
+
+    The archive is the bot's own conversation history; without this table every
+    logged-in account could page through every group. Absence of a row is denial.
+    """
+
+    __tablename__ = "chat_memberships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(Integer, index=True)
+    session_key: Mapped[str] = mapped_column(String(128), index=True)
+    created_by: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+    __table_args__ = (Index("uq_chat_membership", "account_id", "session_key", unique=True),)
+
+
 class SchemaVersion(Base):
     __tablename__ = "schema_version"
 
