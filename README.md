@@ -92,7 +92,7 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 [使用指南](docs/guide.md)。第一次使用、Windows 重启令牌、Linux SSH、模型和插件的复制式步骤见
 [公开用户指南](docs/public-user-guide.md)。
 
-## 第 13 页：多人看存档
+## 第 13 页：多人看存档，第 15 页管账号
 
 面板的令牌只有一个身份：拿到它的人能看到一切。要让**别人**只看自己该看的群，用第 13 页
 「聊天存档」的账号体系，它和面板令牌是两套凭据，互不继承：
@@ -217,8 +217,8 @@ HTTP 错误、超时、非法 JSON、非对象 JSON 不重试——那些重试�
 | 三种装法、Windows 与 Linux 的差别、卸载 | [docs/deploy-quickstart.md](docs/deploy-quickstart.md) |
 | 十家模型厂商怎么填、表里没有的怎么加 | [docs/model-providers.md](docs/model-providers.md) |
 | 桌面端安装包与签名 | [docs/desktop-signing.md](docs/desktop-signing.md) |
-| 13 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
-| 多用户账号、邀请码、只读存档与端开关 | [docs/chat-archive.md](docs/chat-archive.md) |
+| 15 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
+| 多用户账号、邀请码、多端对话、只读存档与端开关 | [docs/chat-archive.md](docs/chat-archive.md) |
 | 443 被占用、内存只有 341 MB 时怎么部署 | [docs/deployment-web-chat.md](docs/deployment-web-chat.md) |
 | 配置项与环境变量 | [docs/configuration.md](docs/configuration.md) |
 | 部署形态、容器加固、远程验收 | [docs/deploy-layer.md](docs/deploy-layer.md) |
