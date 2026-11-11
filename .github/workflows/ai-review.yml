@@ -51,6 +51,8 @@ jobs:
         run: |
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/pr.diff"
           wc -c "$RUNNER_TEMP/pr.diff"
+          gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only > "$RUNNER_TEMP/pr-files.txt"
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json commits --jq '.commits[].messageHeadline' > "$RUNNER_TEMP/pr-commits.txt"
 
       - name: Ask the model
         id: review
@@ -58,6 +60,8 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL || 'deepseek-chat' }}
           PR_DIFF_PATH: ${{ runner.temp }}/pr.diff
+          PR_CHANGED_FILES_PATH: ${{ runner.temp }}/pr-files.txt
+          PR_COMMITS_PATH: ${{ runner.temp }}/pr-commits.txt
           AI_REVIEW_COMMENT_PATH: ${{ runner.temp }}/comment.md
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
