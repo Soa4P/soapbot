@@ -121,5 +121,5 @@ botpy.Intents(public_messages=True, direct_message=True)
 官方适配器是**主路径**；`kind: onebot11` 仍然保留，用于已经自建协议端的部署。两者可以
 同时存在于配置文件里，但运行时只启用一个（按 `enabled` 与 `kind` 选择）。
 
-如果你需要让其他 OneBot 生态工具接入同一个官方机器人，阶段二会提供 OneBot 11 网关；
-本轮尚未交付，因此这里不给出链接，避免文档指向一个还不存在的文件。
+如果你需要让其他 OneBot 生态工具接入同一个官方机器人，见
+[onebot-gateway.md](onebot-gateway.md)。它只做协议翻译，不增加平台能力。

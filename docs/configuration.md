@@ -96,6 +96,16 @@
 | `DEFAULT_LOCALE` | `zh-CN` | 机器人**对群里说话**的语言（拒绝文案、语音标签）。不影响面板，面板按浏览器语言走；人格卡可用 `locale` 逐群覆盖 |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | `LOG_JSON=false` 便于人读终端 |
 
+OneBot 11 网关（阶段二）用四个变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `ONEBOT_GATEWAY_ENABLED` | `false` | 是否把官方机器人暴露给 OneBot 11 客户端 |
+| `ONEBOT_GATEWAY_HOST` | `127.0.0.1` | 监听地址；默认只回环 |
+| `ONEBOT_GATEWAY_PORT` | `6700` | 监听端口 |
+| `ONEBOT_GATEWAY_PATH` | `/onebot/v11/ws` | 文档与客户端约定的路径（鉴权在握手后按 token 判断，不按路径） |
+| `ONEBOT_GATEWAY_TOKEN` | 空 | 客户端必须携带的 Bearer token；**为空时网关拒绝启动** |
+
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
 > 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的
 > `kind: qq_official` 条目里，AppSecret 建议引用环境变量（例如 `env:QQ_BOT_SECRET`），

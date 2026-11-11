@@ -97,6 +97,9 @@ _CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _PLUGIN_MANAGER: Any = None
 _RUNTIME: Any = None
 _SCHEDULER: Any = None
+_GATEWAY: Any = None
+"""OneBot 11 gateway, when enabled. Stopped before the runtime drains: an action
+arriving during shutdown would send through an adapter that is closing."""
 _STARTUP_ERRORS: list[str] = []
 
 _WEBUI_DIST = Path(__file__).resolve().parent / "webui" / "dist"
@@ -286,9 +289,48 @@ async def _start_runtime() -> None:
     _RUNTIME = runtime
     await runtime.start()
 
+    await _start_onebot_gateway(runtime)
+
     scheduler = RuntimeScheduler(runtime)
     scheduler.start()
     _SCHEDULER = scheduler
+
+
+async def _start_onebot_gateway(runtime: Any) -> None:
+    """Start the OneBot bridge when configured, or say why it did not start.
+
+    A misconfiguration here must not abort boot: the chat works without the bridge,
+    and an operator who cannot open the panel cannot fix a setting that stopped the
+    panel from starting.
+    """
+    global _GATEWAY
+
+    if not settings.onebot_gateway_enabled:
+        return
+
+    adapter = runtime.adapters.get("qq_official")
+    if adapter is None:
+        logger.warning(
+            "onebot gateway is enabled but no qq_official adapter is registered; "
+            "the bridge only speaks for the official bot"
+        )
+        return
+
+    from soapbot.gateway import GatewayError, OneBot11Gateway
+
+    gateway = OneBot11Gateway(
+        adapter,
+        access_token=settings.onebot_gateway_token.get_secret_value(),
+        host=settings.onebot_gateway_host,
+        port=settings.onebot_gateway_port,
+        path=settings.onebot_gateway_path,
+    )
+    try:
+        await gateway.start()
+    except GatewayError as exc:
+        logger.error("onebot gateway refused to start: %s", exc)
+        return
+    _GATEWAY = gateway
 
 
 def _install_plugin_manager(manager) -> None:
@@ -353,7 +395,17 @@ async def _attach_adapters(runtime) -> None:
 
 # --------------------------------------------------------------------- shutdown
 async def _shutdown() -> None:
-    global _PLUGIN_MANAGER, _RUNTIME, _SCHEDULER
+    global _GATEWAY, _PLUGIN_MANAGER, _RUNTIME, _SCHEDULER
+
+    # First, stop accepting new actions. The gateway sends through the same adapter
+    # the runtime is about to close, so draining first would let a queued
+    # ``send_group_msg`` race the adapter's own shutdown.
+    if _GATEWAY is not None:
+        try:
+            await _GATEWAY.stop()
+        except Exception as exc:  # pragma: no cover - shutdown must not raise
+            logger.warning("onebot gateway stop failed: %s", exc)
+        _GATEWAY = None
 
     if _SCHEDULER is not None:
         _SCHEDULER.shutdown()
