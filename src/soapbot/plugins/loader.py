@@ -627,6 +627,23 @@ class PluginLoader:
             return None
         return record.verify(loaded.path)
 
+    def attestation_verdicts(self) -> dict[str, dict[str, Any]]:
+        """Re-verify every loaded plugin, for the operator's integrity view.
+
+        ``verify_attestation`` had no production caller: drift detection ran only in
+        tests, which is a report nobody reads. Results are re-derived on each call
+        rather than cached from load time — an artifact edited *after* loading has to
+        show up as ``artifact_changed`` here. A plugin with no record is omitted, never
+        reported as a pass.
+        """
+        out: dict[str, dict[str, Any]] = {}
+        for name in sorted(self._attestations):
+            verdict = self.verify_attestation(name)
+            if verdict is None:
+                continue
+            out[name] = {"ok": verdict.ok, "reason": verdict.reason}
+        return out
+
     async def _blocked_reason(self, name: str, version: str) -> str:
         """Return why this exact release must not run, or ``""``.
 
@@ -662,6 +679,13 @@ class PluginLoader:
 
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         """Load one plugin by name. Explicit; never triggered by discovery."""
+        from soapbot.plugins.supervisor import _running_as_windows_system
+
+        if _running_as_windows_system():
+            raise PluginLoadError(
+                "refusing to run plugins from a Windows SYSTEM service; "
+                "use a dedicated least-privilege service account"
+            )
         if name in self._loaded:
             raise PluginLoadError(f"plugin {name} is already loaded")
 
@@ -926,7 +950,15 @@ class PluginLoader:
         # mysteriously on first load.
         attach = getattr(self.manager_ref, "attach_surface_router", None)
         if attach is not None:
-            attach(name, guard=context._guard, ledger=self.session_ledger)
+            # No raise on a missing key here: a plugin that never touches storage must
+            # still load. The refusal belongs on the first write, where surfaces.py
+            # reports it with a message the plugin author can act on.
+            attach(
+                name,
+                guard=context._guard,
+                ledger=self.session_ledger,
+                storage=context.storage_if_available(),
+            )
 
         # Wrap worker failures in the loader's own exception type. Callers (the API
         # layer, the CLI, existing tests) catch ``PluginLoadError`` and treat it as

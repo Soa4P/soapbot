@@ -21,6 +21,7 @@ from soapbot.mcp.config import McpConfigError, load_config
 from soapbot.plugins.dispatch import PluginToolRegistry
 from soapbot.plugins.loader import PluginLoader
 from soapbot.security.principal import Role
+from soapbot.security.provenance import MODEL, Provenance, ToolArguments
 
 SERVER = r'''
 import json
@@ -248,8 +249,12 @@ async def test_registry_routes_an_mcp_call(tmp_path: Path) -> None:
     registry.register_source(manager)
     try:
         await manager.ensure_tools()
+        # Model-issued arguments are tagged at the boundary. An untagged dict is
+        # now refused for external tools: "unmarked" must mean unknown, not safe.
         result = await registry.invoke(
-            "mcp__fake__echo", {"text": "hey"}, principal=_principal(Role.MEMBER)
+            "mcp__fake__echo",
+            ToolArguments({"text": "hey"}, provenance=Provenance(origin=MODEL)),
+            principal=_principal(Role.MEMBER),
         )
         assert result == 'got:{"text": "hey"}'
     finally:

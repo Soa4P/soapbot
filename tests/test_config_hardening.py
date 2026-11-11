@@ -202,7 +202,7 @@ def test_a_valid_provider_document_still_parses() -> None:
                     "kind": "openai_compat",
                     "base_url": "https://api.deepseek.com/v1",
                     "api_key": "sk-literal",
-                    "model": "deepseek-chat",
+                    "model": "test-model",
                 }
             ],
         }

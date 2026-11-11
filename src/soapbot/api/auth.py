@@ -24,6 +24,7 @@ from __future__ import annotations
 import hmac
 import logging
 import secrets
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -53,23 +54,77 @@ readable, because the double-submit check needs the page to echo its value in a
 header. Two values, not one: echoing the session cookie itself would put the
 credential back into script-reachable space."""
 
-_token_service: TokenService | None = None
-_bootstrap: BootstrapToken | None = None
-_revocations: Any = None
-"""The store the token service consults. Held here too so the endpoints can revoke
-without reaching through the service's private state."""
-
 def _new_login_limiter() -> SlidingWindowLimiter:
+    """Five attempts per five minutes per client address.
+
+    A bootstrap token is ~32 characters of base64url; the limit is not what makes guessing
+    infeasible, but it is what stops a credential-stuffing script from turning the log
+    into noise while the real operator is trying to log in.
+    """
     return SlidingWindowLimiter(limit=5, window_seconds=300.0)
 
 
-_login_limiter = _new_login_limiter()
-"""Five attempts per five minutes per client address.
+@dataclass
+class AuthState:
+    """The auth objects one app instance owns.
 
-A bootstrap token is ~32 characters of base64url; the limit is not what makes guessing
-infeasible, but it is what stops a credential-stuffing script from turning the log
-into noise while the real operator is trying to log in.
+    These used to be module-level globals. That made "which token service is this
+    request using" a question about import order and the last writer, not about the
+    app: two ``create_app()`` calls in one process (a test fixture plus the app under
+    test, or a panel process that restarts its own runtime) silently shared one token
+    service, one bootstrap credential and one login budget. A revoked token could come
+    back to life because another instance reconfigured the globals.
+
+    Holding them on ``app.state`` keeps the blast radius of a misconfiguration inside
+    the instance that owns it, and makes the object lifetime explicit: it is created in
+    the lifespan and dies with the app.
+    """
+
+    token_service: TokenService | None = None
+    bootstrap: BootstrapToken | None = None
+    #: The store the token service consults. Held here too so the endpoints can revoke
+    #: without reaching through the service's private state.
+    revocations: Any = None
+    login_limiter: SlidingWindowLimiter = field(default_factory=_new_login_limiter)
+
+    #: A fresh bootstrap token means a fresh login budget: carrying a previous app
+    #: instance's failed attempts into this one would lock out the operator for five
+    #: minutes after a restart, which is the opposite of what the limit is for.
+    def reset_login_budget(self) -> None:
+        self.login_limiter = _new_login_limiter()
+
+    def clear(self) -> None:
+        """Forget every installed object, including any login throttling."""
+        self.token_service = None
+        self.bootstrap = None
+        self.revocations = None
+        self.reset_login_budget()
+
+
+_STATE_KEY = "soapbot_auth_state"
+_FALLBACK_STATE = AuthState()
+"""Used when an endpoint is reached without a running app.
+
+Two legitimate cases, both of which want "auth is not initialised" rather than a
+traceback: a unit test that calls a route function directly, and an ASGI server that
+never ran the lifespan (a misconfiguration worth surfacing as 503). Keeping a single
+process-wide fallback for those is deliberately *not* the old behaviour — nothing
+installs objects into it, so no instance can observe another's credentials.
 """
+
+
+def _auth_state(request: Request | None = None) -> AuthState:
+    if request is None:
+        return _FALLBACK_STATE
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
+    if state is None:
+        return _FALLBACK_STATE
+    existing = getattr(state, _STATE_KEY, None)
+    if existing is None:
+        existing = AuthState()
+        setattr(state, _STATE_KEY, existing)
+    return existing
 
 
 def configure_auth(
@@ -77,37 +132,55 @@ def configure_auth(
     service: TokenService | None,
     bootstrap: BootstrapToken | None,
     revocations: Any = None,
-) -> None:
-    """Install the process-wide auth objects (called from the app lifespan)."""
-    global _token_service, _bootstrap, _revocations, _login_limiter
-    _token_service = service
-    _bootstrap = bootstrap
-    _revocations = revocations
-    # A fresh bootstrap token means a fresh login budget: carrying a previous app
-    # instance's failed attempts into this one would lock out the operator for five
-    # minutes after a restart, which is the opposite of what the limit is for.
-    _login_limiter = _new_login_limiter()
+    app: Any = None,
+    request: Request | None = None,
+) -> AuthState:
+    """Install the auth objects for one app instance (called from the app lifespan).
+
+    ``app`` is passed explicitly by the lifespan. Tests that used to call this to set
+    up a route function directly keep working: with no ``app`` and no ``request`` the
+    objects land on the process fallback state, which is exactly what those call sites
+    read back through the accessors below.
+    """
+    state = _state_for(app) if app is not None else _auth_state(request)
+    state.token_service = service
+    state.bootstrap = bootstrap
+    state.revocations = revocations
+    state.reset_login_budget()
+    return state
 
 
-def get_token_service() -> TokenService | None:
-    return _token_service
+def _state_for(app: Any) -> AuthState:
+    state = getattr(app, "state", None)
+    if state is None:
+        return _FALLBACK_STATE
+    existing = getattr(state, _STATE_KEY, None)
+    if existing is None:
+        existing = AuthState()
+        setattr(state, _STATE_KEY, existing)
+    return existing
 
 
-def get_bootstrap() -> BootstrapToken | None:
-    return _bootstrap
+def reset_auth(app: Any = None, request: Request | None = None) -> None:
+    """Test seam: forget the installed objects and any login throttling.
+
+    Scoped to one app when ``app`` is given; otherwise the process fallback, which is
+    what tests that never build an app rely on.
+    """
+    state = _state_for(app) if app is not None else _auth_state(request)
+    state.clear()
 
 
-def reset_auth() -> None:
-    """Test seam: forget the installed objects and any login throttling."""
-    global _token_service, _bootstrap, _revocations, _login_limiter
-    _token_service = None
-    _bootstrap = None
-    _revocations = None
-    _login_limiter = _new_login_limiter()
+def get_token_service(request: Request | None = None) -> TokenService | None:
+    return _auth_state(request).token_service
 
 
-def get_revocations() -> Any:
-    return _revocations
+def get_bootstrap(request: Request | None = None) -> BootstrapToken | None:
+    return _auth_state(request).bootstrap
+
+
+def get_revocations(request: Request | None = None) -> Any:
+    return _auth_state(request).revocations
 
 
 def _client_host(request: Request) -> str:
@@ -254,7 +327,7 @@ def authenticate(request: Request) -> dict[str, Any]:
     token, carrier = _credential(request)
     if token:
         _verify_csrf(request)
-        service = _token_service
+        service = _auth_state(request).token_service
         if service is None:
             raise HTTPException(status_code=503, detail="auth is not initialised")
         try:
@@ -322,7 +395,7 @@ async def require_api_auth(request: Request) -> dict[str, Any]:
     return authenticate(request)
 
 
-def require_role(minimum):
+def require_role(minimum, *, require_credential: bool = False):
     """Build a dependency that authenticates and then checks an authority floor.
 
     Kept as a factory so a router can declare one floor for all its routes while a
@@ -339,6 +412,12 @@ def require_role(minimum):
         # FastAPI's dependency_overrides still work for tests that build a bare app
         # and supply a caller. Calling authenticate() here would ignore those
         # overrides and turn a role test into an "auth not initialised" 503.
+        if require_credential and auth.get("mode") != "token":
+            raise HTTPException(
+                status_code=401,
+                detail="a credential is required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         raw = str(auth.get("role") or "anonymous").lower()
         try:
             role = Role(raw)
@@ -376,7 +455,8 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
     # double-submit check cannot apply. Refuse a cross-site Origin instead.
     _reject_cross_site(request)
     host = _client_host(request)
-    limit = _login_limiter.check(host or "unknown")
+    state = _auth_state(request)
+    limit = state.login_limiter.check(host or "unknown")
     if limit.limited:
         get_audit_log().record(
             kind="login",
@@ -390,8 +470,8 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
             headers={"Retry-After": str(int(limit.retry_after) + 1)},
         )
 
-    bootstrap = _bootstrap
-    service = _token_service
+    bootstrap = state.bootstrap
+    service = state.token_service
     if bootstrap is None or service is None:
         raise HTTPException(status_code=503, detail="auth is not initialised")
 
@@ -411,7 +491,7 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         outcome="allow",
         detail=f"issued operator token from={host} ttl={service.ttl_seconds}s",
     )
-    _login_limiter.reset(host or "unknown")
+    state.login_limiter.reset(host or "unknown")
     _set_session(response, token, service.ttl_seconds)
     # ``access_token`` stays in the body for scripts and the CLI, which cannot use a
     # browser cookie jar. The panel ignores it entirely: its only credential is the
@@ -437,7 +517,8 @@ async def refresh(
     bootstrap secret. A cookie-backed session gets a fresh cookie back.
     """
     token, carrier = _credential(request)
-    service = _token_service
+    state = _auth_state(request)
+    service = state.token_service
     if service is None:
         raise HTTPException(status_code=503, detail="auth is not initialised")
     if not token:
@@ -448,13 +529,29 @@ async def refresh(
         raise HTTPException(status_code=401, detail="invalid or expired token") from exc
 
     new_token, new_claims = service.issue(claims.subject, role=claims.role)
+    # Issuing a fresh 72h token while leaving the old one valid for its full 72h made
+    # refresh an unlimited extension: a stolen credential stayed useful for days after
+    # the operator "refreshed" it. Rotate by revoking the jti we just consumed. The
+    # new token is minted first so a revocation-file failure cannot lock the operator
+    # out; that failure is reported instead of hidden.
+    previous_revoked = False
+    store = state.revocations
+    if store is not None:
+        try:
+            store.revoke(claims.token_id, claims.expires_at)
+            previous_revoked = True
+        except OSError as exc:
+            logger.warning("refresh could not revoke the previous jti: %s", exc)
     if carrier == "cookie":
         _set_session(response, new_token, service.ttl_seconds)
     get_audit_log().record(
         kind="login",
         action="refresh",
         outcome="allow",
-        detail=f"subject={claims.subject} from={_client_host(request)}",
+        detail=(
+            f"subject={claims.subject} from={_client_host(request)} "
+            f"previous_revoked={previous_revoked}"
+        ),
     )
     return {
         "access_token": new_token,
@@ -462,6 +559,7 @@ async def refresh(
         "expires_in": service.ttl_seconds,
         "expires_at": new_claims.expires_at,
         "role": new_claims.role,
+        "previous_credential_revoked": previous_revoked,
     }
 
 
@@ -474,13 +572,14 @@ async def auth_status(request: Request) -> dict:
     beyond "a token is or is not configured".
     """
     token, _carrier = _credential(request)
+    state = _auth_state(request)
     mode = "none"
     subject = ""
     expires_at = 0
     role = "anonymous"
-    if token and _token_service is not None:
+    if token and state.token_service is not None:
         try:
-            claims = _token_service.verify(token)
+            claims = state.token_service.verify(token)
             mode, subject, expires_at = "token", claims.subject, claims.expires_at
             role = claims.role
         except TokenError:
@@ -489,7 +588,7 @@ async def auth_status(request: Request) -> dict:
         mode = "loopback"
         role = _loopback_role()
 
-    bootstrap = _bootstrap
+    bootstrap = state.bootstrap
     return {
         "mode": mode,
         "subject": subject,
@@ -512,7 +611,7 @@ async def auth_status(request: Request) -> dict:
         # returned — putting a live credential on an unauthenticated endpoint would let
         # anyone who can reach the panel log in.
         "bootstrap_path": str(settings.data_dir / BOOTSTRAP_FILE),
-        "ttl_seconds": _token_service.ttl_seconds if _token_service else 0,
+        "ttl_seconds": state.token_service.ttl_seconds if state.token_service else 0,
     }
 
 
@@ -531,7 +630,7 @@ async def logout(
     is nothing to revoke; saying so is better than returning ``ok: true`` and doing
     nothing.
     """
-    store = _revocations
+    store = _auth_state(request).revocations
     claims = getattr(request.state, "claims", None)
     if store is None:
         raise HTTPException(status_code=503, detail="token revocation is not initialised")
@@ -572,7 +671,7 @@ async def revoke_all_tokens(
     from soapbot.api.admin import _role_of
     from soapbot.security.principal import Role
 
-    store = _revocations
+    store = _auth_state(request).revocations
     if store is None:
         raise HTTPException(status_code=503, detail="token revocation is not initialised")
 
@@ -607,7 +706,7 @@ async def revoke_all_tokens(
     # /api/auth/login. The owner is not locked out (no host round-trip, no restart),
     # but returning is an explicit authentication step, not an automatic renewal.
     _clear_session(response)
-    bootstrap = _bootstrap
+    bootstrap = _auth_state(request).bootstrap
     new_bootstrap = bootstrap.regenerate() if bootstrap is not None else ""
 
     # Verify the terminal state rather than assuming the writes above did what they
@@ -654,10 +753,11 @@ async def revoke_all_tokens(
 
 @router.get("/revocations")
 async def list_revocations(
+    request: Request,
     _auth: dict[str, Any] = Depends(require_api_auth),
 ) -> dict[str, Any]:
     """What the panel shows on the security page. Read-only, no secrets."""
-    store = _revocations
+    store = _auth_state(request).revocations
     if store is None:
         return {"revoked_before": 0.0, "count": 0, "tokens": []}
     return store.snapshot()

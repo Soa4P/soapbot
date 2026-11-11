@@ -121,6 +121,9 @@ effective = declared ∩ approved
 ## 6. 敏感数据：加密落库、命名空间隔离、审计脱敏
 
 - **加密**：`EncryptedPluginStorage` 用 Fernet，存储边界即加密。数据库 dump / 备份 / `git add data/` 都拿不到明文
+- **无密钥即拒绝**：主密钥缺失时 `ctx.storage` 抛 `StorageUnavailable`，隔离 worker 的
+  `storage.set` 抛同一异常。**不**回落到明文存储——插件侧区分不出两者，回落只会让
+  密钥静默落进数据库；等发现时备份早已被拷走。缺密钥是加载期可见的运维错误
 - **隔离**：两个插件都写 `token` 互不可见；键名无路径语义，`../other/secret` 无法表达
 - **类型约束**：值必须 JSON 可序列化 —— 防止插件存入活对象引用，让后续代码信任它
 - **审计脱敏**：键名含 `token`/`secret`/`key`/`password` 自动打码；插件的异常消息**只记类型不记内容**（插件控制的消息可能含凭据）

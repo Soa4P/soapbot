@@ -22,6 +22,7 @@ param(
     [string]$Dir = 'C:\soapbot',
     [int]$Port = 6185,
     [string]$HostAddress = '127.0.0.1',
+    [string]$Account = 'NT AUTHORITY\LocalService',
     [switch]$Start
 )
 
@@ -100,17 +101,15 @@ if ($Start) {
     # hidden child of an RDP session dies when the operator closes the window — which for a
     # bot means it stops answering the moment you stop watching it.
     #
-    # Task name, trigger, principal and settings are kept identical to scripts/install.ps1.
-    # Two installers writing the same name with different triggers is worse than two names:
-    # whichever ran last would silently decide whether the bot comes back after a reboot.
-    $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
-        -Argument "/c cd /d `"$Dir`" && `"$python`" -m soapbot.cli start >> `"$Dir\panel.log`" 2>&1"
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName 'SoapbotBot' -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Force | Out-Null
+    # The task definition lives in scripts/harden-windows.ps1, not here. Two installers
+    # writing the same task name with different principals is worse than two names:
+    # whichever ran last would silently decide both who the bot is and whether plugins
+    # can run at all. Harden also sets the ACLs — a task whose account cannot read the
+    # install fails at boot with nothing in panel.log.
+    $harden = Join-Path $Dir 'scripts\harden-windows.ps1'
+    if (-not (Test-Path -LiteralPath $harden)) { Fail "missing $harden; the archive looks incomplete" }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $harden -Dir $Dir -Account $Account
+    if ($LASTEXITCODE -ne 0) { Fail 'hardening failed; fix the message above and re-run' }
     Start-ScheduledTask -TaskName 'SoapbotBot'
     for ($i = 0; $i -lt 45; $i++) {
         Start-Sleep -Seconds 2

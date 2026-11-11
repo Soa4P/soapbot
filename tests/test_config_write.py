@@ -54,7 +54,7 @@ def providers_file(tmp_path: Path) -> Path:
         "    label: 主线路\n"
         "    base_url: https://api.example.com/v1\n"
         f"    api_key: {LITERAL_KEY}\n"
-        "    model: deepseek-chat\n"
+        "    model: test-model\n"
         "    priority: 10\n"
         "  - id: backup\n"
         "    kind: openai_compat\n"
@@ -122,7 +122,7 @@ def test_absent_field_is_not_cleared(providers_file: Path) -> None:
     )
     primary = config_write.provider_index(result.document)["primary"]
     assert primary["base_url"] == "https://api.example.com/v1"
-    assert primary["model"] == "deepseek-chat"
+    assert primary["model"] == "test-model"
     assert primary["priority"] == 5
 
 

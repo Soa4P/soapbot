@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import shutil
@@ -76,6 +77,13 @@ class McpServer:
     #: expects the next start to work.
     pinned_version: str = ""
 
+    #: Optional integrity pin for the *tool metadata* (names, descriptions and input
+    #: schemas) returned by ``tools/list``. A server can change what the model is told
+    #: without changing its implementation version or its argv — that is a silent
+    #: capability change. When set, a digest mismatch refuses the tool list instead of
+    #: treating it as an update; the operator must re-approve the new digest explicitly.
+    pinned_tools_digest: str = ""
+
 
 @dataclass(slots=True)
 class McpTool:
@@ -91,6 +99,23 @@ class McpTool:
     that only appears in the audit log after the model has already been fed the text is
     a post-mortem, not a control.
     """
+    metadata_digest: str = ""
+    """SHA-256 over the *raw* name / description / inputSchema, before scrubbing.
+
+    Scrubbing is a presentation control: two different payloads can sanitise to the
+    same displayed text. Hashing the original is what makes a silent edit detectable.
+    """
+
+
+def _canonical_digest(payload: Any) -> str:
+    """Stable SHA-256 over JSON with sorted keys, independent of dict insertion order.
+
+    Metadata arrives from a third-party process. Hashing its *serialised* form rather
+    than the Python object's repr means the digest is comparable across restarts and
+    across machines, which is what an approval snapshot needs.
+    """
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 class McpClient:
@@ -108,6 +133,10 @@ class McpClient:
         #: configured, so the running set of third-party implementations is observable.
         self.implementation_name = ""
         self.implementation_version = ""
+        #: Digest of the last approved tool metadata set. Empty until ``list_tools``
+        #: has run; exposed in ``McpManager.status()`` so an operator can copy the value
+        #: into ``pinned_tools_digest`` and make a future silent change fail loudly.
+        self.tools_digest = ""
         self._stderr_tail = b""
         self._stderr_task: asyncio.Task[None] | None = None
 
@@ -447,11 +476,39 @@ class McpClient:
     # ------------------------------------------------------------------------ api
     async def list_tools(self) -> list[McpTool]:
         result = await self._request("tools/list", {})
+        raw_tools = result.get("tools") or []
+        # Hash what the server actually sent, not the scrubbed copy. The pin is an
+        # approval of the metadata we were shown; a description that changes into an
+        # instruction-like payload may scrub to the same visible text.
+        digest = _canonical_digest(raw_tools)
+        expected = self.server.pinned_tools_digest
+        if expected and digest != expected:
+            get_audit_log().record(
+                kind="injection",
+                action="mcp_tool_metadata_drift",
+                outcome="block",
+                detail=(
+                    f"server={self.server.name} expected={expected[:16]} "
+                    f"actual={digest[:16]}"
+                ),
+            )
+            raise McpError(
+                f"server {self.server.name}: tool metadata changed since approval "
+                f"(expected {expected[:16]}…, got {digest[:16]}…); re-approve the digest"
+            )
+        self.tools_digest = digest
         tools: list[McpTool] = []
-        for raw in result.get("tools") or []:
+        for raw in raw_tools:
             name = str(raw.get("name") or "")
             if not name:
                 continue
+            per_tool_digest = _canonical_digest(
+                {
+                    "name": raw.get("name"),
+                    "description": raw.get("description"),
+                    "inputSchema": raw.get("inputSchema"),
+                }
+            )
 
             # Tool metadata is written by the server, not by the host, and it lands in
             # the schema the model reads. Sanitised here — at the boundary, before the
@@ -491,6 +548,7 @@ class McpClient:
                     description=description,
                     parameters=parameters if isinstance(parameters, dict) else {},
                     suspicious=suspicious,
+                    metadata_digest=per_tool_digest,
                 )
             )
         return tools
@@ -522,6 +580,10 @@ def _spawn_signature(server: McpServer) -> tuple[Any, ...]:
         server.timeout,
         server.min_role,
         server.pinned_version,
+        # The tool-metadata pin is checked when tools are listed, so changing it on a
+        # live client without reconnecting would leave the previous tool set cached
+        # under a policy that was never applied to it.
+        server.pinned_tools_digest,
     )
 
 
@@ -607,6 +669,11 @@ class McpManager:
                     # claimed, and the wire protocol it negotiated. A version that was
                     # never checked shows up as an empty implementation_version.
                     "pinned_version": server.pinned_version,
+                    # What was approved vs. what the server is currently advertising.
+                    # Equal and non-empty means pinned; different means the list was
+                    # refused and the operator must re-approve.
+                    "pinned_tools_digest": server.pinned_tools_digest,
+                    "tools_digest": self._clients[name].tools_digest,
                     "protocol_version": self._clients[name].protocol_version,
                     "implementation": self._clients[name].implementation_name,
                     "implementation_version": self._clients[name].implementation_version,

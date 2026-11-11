@@ -84,6 +84,29 @@ def test_shell_installer_fails_fast_and_cleans_up() -> None:
     assert "systemctl enable" in sh
 
 
+def test_remote_panel_bat_does_not_build_a_command_line() -> None:
+    """The bat used to expand ``%HOST%``/``%USER%`` into one ssh command string.
+
+    cmd expands variables before ssh sees them, so a host of ``x & calc`` executed calc.
+    The bat must stay a forwarder: parameters, not a concatenated command.
+    """
+    bat = (ROOT / "open-remote-panel.bat").read_text(encoding="utf-8")
+    assert "connect-linux.ps1" in bat
+    body = "\n".join(line for line in bat.splitlines() if not line.strip().lower().startswith("rem"))
+    assert not re.search(r"\bssh(\.exe)?\s+-[piNL]", body), "bat 又自己拼 ssh 命令了"
+    assert body.count('"%') >= 5, "参数没有全部加引号传出去"
+
+
+def test_connect_linux_validates_before_ssh_and_pins_the_host_key() -> None:
+    text = (ROOT / "scripts" / "connect-linux.ps1").read_text(encoding="utf-8")
+    # A leading '-' in the hostname is parsed by ssh as an option (ProxyCommand RCE).
+    assert "is not a hostname" in text
+    assert "is not a valid Linux account name" in text
+    # First connection must record the key; later connections must reject a changed one.
+    assert "StrictHostKeyChecking=accept-new" in text
+    assert "ExitOnForwardFailure=yes" in text
+
+
 def test_readme_leads_with_the_three_paths() -> None:
     """Three ways in — and the Docker one must name a compose file that exists.
 

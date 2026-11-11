@@ -27,7 +27,7 @@ def _module():
 
 
 def _meta() -> dict:
-    return {"title": "t", "author": "a", "body": "", "files": "1", "model": "deepseek-chat"}
+    return {"title": "t", "author": "a", "body": "", "files": "1", "model": "test-model"}
 
 
 # ---------------------------------------------------------------- truncation

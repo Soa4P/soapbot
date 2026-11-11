@@ -110,4 +110,7 @@ def test_the_registry_checks_provenance_before_either_dispatch_path() -> None:
     ).read_text(encoding="utf-8")
     body = dispatch[dispatch.index("    async def invoke(") :]
     assert "vet_arguments(" in body
-    assert body.index("vet_arguments(") < body.index('name.startswith("mcp__")')
+    # Both dispatch paths — local plugin tools and external MCP tools — must be
+    # downstream of the admission gate. Anchoring on the external call rather than a
+    # literal prefix test keeps the assertion true when routing is tightened.
+    assert body.index("vet_arguments(") < body.index("_invoke_external(")

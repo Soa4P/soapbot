@@ -141,9 +141,11 @@ def main() -> int:
     size = binary.stat().st_size / 1_048_576
     print(f"built {binary.relative_to(ROOT)} ({size:.1f} MiB)")
 
-    # `tauri.conf.json` declares `bundle.resources: ["binaries/soapbot-backend.exe"]`,
-    # which is resolved relative to `src-tauri`. Staging here means `tauri build` works
-    # right after this script without the caller remembering a second copy step.
+    # `tauri.conf.json` declares `bundle.resources: ["binaries/"]` (the whole
+    # directory, not one named executable), resolved relative to `src-tauri`. Staging
+    # here means `tauri build` works right after this script without the caller
+    # remembering a second copy step. The `.exe` is gitignored; only `.gitkeep` is
+    # tracked, so a fresh clone must run this script before bundling.
     staged = ROOT / "desktop" / "src-tauri" / "binaries" / binary.name
     staged.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, staged)

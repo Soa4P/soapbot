@@ -496,17 +496,21 @@ def test_plugin_secret_never_appears_in_audit() -> None:
 
 
 def test_encrypted_storage_roundtrip_with_wrong_key_fails() -> None:
-    """Wrong key must raise, not silently return junk that callers might trust."""
+    """Wrong key must raise, not silently substitute the caller's default.
+
+    Returning ``default`` is fail-open: after a key rotation the plugin would see
+    "no secret stored" and carry on with whatever the caller supplied, with only a
+    warning in the log. The refusal is attributable and visible at the call site.
+    """
     box1 = SecretBox(key=TEST_KEY)
     box2 = SecretBox(key=TEST_KEY_2)
     backend: dict[str, dict] = {}
-    from soapbot.plugins.sandbox import EncryptedPluginStorage
+    from soapbot.plugins.sandbox import EncryptedPluginStorage, StorageUnavailable
 
     EncryptedPluginStorage("demo", backend, box1).set("k", "value")
     reader = EncryptedPluginStorage("demo", backend, box2)
-    # get() swallows the failure and returns the default: a plugin must not
-    # receive a half-decrypted value.
-    assert reader.get("k", "fallback") == "fallback"
+    with pytest.raises(StorageUnavailable, match="could not be decrypted"):
+        reader.get("k", "fallback")
     with pytest.raises(ValueError):
         box2.decrypt(backend["demo"]["k"])
 

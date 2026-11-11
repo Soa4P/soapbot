@@ -36,7 +36,7 @@ def client(tmp_path, monkeypatch) -> TestClient:
         "    label: 主线路\n"
         "    base_url: https://api.example.com/v1\n"
         f"    api_key: {LITERAL_KEY}\n"
-        "    model: deepseek-chat\n"
+        "    model: test-model\n"
         "  - id: backup\n"
         "    kind: openai_compat\n"
         "    base_url: https://backup.example.com/v1\n"

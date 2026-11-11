@@ -13,6 +13,7 @@ descriptions, and ``McpManager`` decides when to connect.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,15 @@ def parse_servers(entries: Any) -> list[McpServer]:
                 f"server {name!r}: pinned_version is too long (max 128 characters)"
             )
 
+        # Same idea for the metadata approval: a pin is only meaningful if it is an
+        # exact digest. Accepting a truncated or arbitrary string would let a config
+        # typo look like "pinned" while nothing can ever match it.
+        tools_pin = str(entry.get("pinned_tools_digest") or "").strip().lower()
+        if tools_pin and not re.fullmatch(r"[0-9a-f]{64}", tools_pin):
+            raise McpConfigError(
+                f"server {name!r}: pinned_tools_digest must be a 64-character sha256 hex digest"
+            )
+
         servers.append(
             McpServer(
                 name=name,
@@ -125,6 +135,7 @@ def parse_servers(entries: Any) -> list[McpServer]:
                 min_role=role,
                 description=str(entry.get("description") or ""),
                 pinned_version=pinned,
+                pinned_tools_digest=tools_pin,
             )
         )
 
