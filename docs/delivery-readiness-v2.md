@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `2028 passed, 12 skipped`；CI 六个
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `2036 passed, 12 skipped`；CI 六个
 必需检查全绿（`backend` 两个平台、`frontend`、`desktop`、`package`、`review`），另有两个
 按需 job：`desktop-bundle` 出 Windows 安装包、`release` 在 tag 上发布。
 
@@ -245,7 +245,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 2028 passed, 12 skipped
+python -m pytest -q                 # 2036 passed, 12 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度
