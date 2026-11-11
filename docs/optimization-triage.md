@@ -62,8 +62,10 @@
 - 但工作区有 **63 个未提交改动**（55 个已修改 + 8 个新增），即前几轮加固成果全部只存在于
   本地工作区，任何一台按 `git pull` 更新的机器都拿不到。
 - 当前分支 `fix/public-deployment-and-pr-guidance` **无 upstream**。
-- `CONTRIBUTING.md` 规定走 PR、不直推 master，master 有分支保护与 6 道必需检查。
+- `CONTRIBUTING.md` 当时规定走 PR、不直推 master，master 有分支保护与 6 道必需检查。
   因此本轮推送目标是**新建功能分支并推同名远端分支**，不动 master、不 force push。
+  （2026-11-11 规则已变更：所有者可直推或 `--admin` 合并，其他人仍需 PR 且不能自批；
+  依据是 Repository Ruleset，见 `CONTRIBUTING.md` 的「谁能做什么」。）
 
 **结论**：真正需要担心的不是「未推送的 commit」，而是「63 个根本没提交的改动」。
 
