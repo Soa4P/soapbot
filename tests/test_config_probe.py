@@ -356,9 +356,9 @@ def test_the_probe_is_rate_limited_per_caller(client: TestClient, monkeypatch) -
 
 def test_a_token_below_admin_cannot_probe(client: TestClient) -> None:
     """The probe dials an address the caller chose; that is not a read-only privilege."""
-    from soapbot.api.auth import get_token_service
+    from soapbot.api.auth import _state_for
 
-    service = get_token_service()
+    service = _state_for(client.app).token_service
     assert service is not None, "the app lifespan installs the token service"
     token, _ = service.issue("member", role="member")
 

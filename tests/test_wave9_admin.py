@@ -103,20 +103,26 @@ def test_personas_view_lists_installed_cards(runtime_client: TestClient) -> None
     assert "binding" in body
 
 
-def test_memory_views_start_empty(runtime_client: TestClient) -> None:
-    sessions = runtime_client.get("/api/memory/sessions").json()
-    assert sessions["sessions"] == []
+def test_memory_views_require_authentication(runtime_client: TestClient) -> None:
+    # Read the service off *this* app instance rather than a module global: the test
+    # client shares a process with every other fixture, and a global would let another
+    # app's token service answer for this one.
+    service = runtime_client.app.state.soapbot_auth_state.token_service
 
-    stats = runtime_client.get("/api/memory/stats").json()
-    assert stats["total"] == 0
-    assert isinstance(stats["layers"], dict)
+    assert runtime_client.get("/api/memory/sessions").status_code == 401
+    assert runtime_client.get("/api/memory/timeline", params={"session_key": "a:group:1"}).status_code == 401
+    token, _ = service.issue(subject="operator", role="owner")
+    headers = {"Authorization": f"Bearer {token}"}
+    sessions = runtime_client.get("/api/memory/sessions", headers=headers)
+    assert sessions.status_code == 200
+    assert sessions.json()["sessions"] == []
+    timeline = runtime_client.get("/api/memory/timeline", params={"session_key": "a:group:1"}, headers=headers)
+    assert timeline.status_code == 200
+    assert timeline.json()["messages"] == []
 
 
 def test_memory_timeline_requires_a_session_key(runtime_client: TestClient) -> None:
     assert runtime_client.get("/api/memory/timeline").status_code == 422
-    ok = runtime_client.get("/api/memory/timeline", params={"session_key": "a:group:1"})
-    assert ok.status_code == 200
-    assert ok.json()["messages"] == []
 
 
 def test_knowledge_view_starts_empty(runtime_client: TestClient) -> None:

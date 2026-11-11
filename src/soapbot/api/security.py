@@ -57,6 +57,78 @@ async def denials(
     return {"events": events[-limit:], "count": len(events)}
 
 
+@router.get("/integrity")
+async def integrity_signals(_: dict = Depends(require_api_auth)) -> dict:
+    """One read-only view of the runtime's integrity signals.
+
+    These used to be scattered: trace recoverability in ``core/trace.py``, tool
+    metadata digests in ``McpManager.status()``, attestation drift in a method nobody
+    called. An operator could not answer "what was approved, and is it still true"
+    without reading three code paths. This endpoint only *reports*; every gate behind
+    it stays deterministic and in the host.
+
+    ``available: false`` means the bot runtime is off (panel-only deployment), which is
+    a different state from "everything passed" and must not be flattened into it.
+    """
+    from soapbot.app import get_runtime
+
+    runtime = get_runtime()
+    if runtime is None:
+        return {
+            "available": False,
+            "trace": None,
+            "mcp": [],
+            "plugins": {},
+            "verification": {
+                "deterministic_gate": "scripts/check_security_boundaries.py",
+                "ai_review_is_gate": False,
+            },
+        }
+
+    trace = None
+    traces = getattr(runtime, "traces", None)
+    if traces is not None:
+        summary = traces.summary()
+        trace = {
+            "boot_id": str(summary.get("boot_id") or ""),
+            "recoverable": bool(summary.get("recoverable", False)),
+            "historical": bool(summary.get("historical", False)),
+        }
+
+    mcp: list[dict] = []
+    manager = getattr(runtime, "mcp", None)
+    if manager is not None and hasattr(manager, "status"):
+        for row in manager.status().get("servers", []):
+            pinned = str(row.get("pinned_tools_digest") or "")
+            observed = str(row.get("tools_digest") or "")
+            mcp.append(
+                {
+                    "name": str(row.get("name") or ""),
+                    "pinned_tools_digest": pinned,
+                    "tools_digest": observed,
+                    # Empty pin means "recorded, not approved" — never a pass.
+                    "metadata_approved": bool(pinned) and pinned == observed,
+                }
+            )
+
+    plugins: dict = {}
+    plugin_manager = getattr(runtime, "plugins", None)
+    loader = getattr(plugin_manager, "loader", plugin_manager)
+    if loader is not None and hasattr(loader, "attestation_verdicts"):
+        plugins = loader.attestation_verdicts()
+
+    return {
+        "available": True,
+        "trace": trace,
+        "mcp": mcp,
+        "plugins": plugins,
+        "verification": {
+            "deterministic_gate": "scripts/check_security_boundaries.py",
+            "ai_review_is_gate": False,
+        },
+    }
+
+
 @router.get("/permissions")
 async def permission_matrix(_: dict = Depends(require_api_auth)) -> dict:
     """Declared permission floors, for the WebUI's access-control page.

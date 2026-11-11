@@ -227,6 +227,20 @@ _STORAGE_KEY_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,96}$")
 _SESSION_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}:[a-z]{2,16}:[A-Za-z0-9_\-@.]{1,64}$")
 
 
+# This name is already imported by context.py, surfaces.py, loader.py and tests;
+# renaming it to satisfy N818 would break an established public API for no safety gain.
+class StorageUnavailable(RuntimeError):  # noqa: N818
+    """Plugin storage refused a call rather than inventing an answer.
+
+    Two cases: no key material is loaded, and an existing ciphertext cannot be
+    decrypted (rotated key, tampered value). In both cases the alternative was a
+    plausible-looking value — a plaintext store in the first case, the caller's
+    ``default`` in the second. A plugin storing an API token cannot tell either apart
+    from a working store, so the substitution would only surface later, in a database
+    dump or a backup copied off the machine. A raise is visible at the call site.
+    """
+
+
 class PluginStorage:
     """Per-plugin key-value namespace with no path component at all.
 
@@ -320,11 +334,17 @@ class EncryptedPluginStorage(PluginStorage):
             return default
         try:
             return json.loads(self._crypto.decrypt(raw))
-        except Exception:
+        except Exception as exc:
+            # Returning ``default`` here is fail-open: a rotated key or a tampered
+            # value would look like "no secret stored", and the plugin would carry on
+            # with whatever the caller supplied. Refuse instead, with an attributable
+            # error the operator can act on.
             logger.warning(
                 "plugin secret decrypt failed plugin=%s key=%s", self._plugin, key
             )
-            return default
+            raise StorageUnavailable(
+                f"plugin secret could not be decrypted: plugin={self._plugin} key={key}"
+            ) from exc
 
 
 # ------------------------------------------------------------------------ http

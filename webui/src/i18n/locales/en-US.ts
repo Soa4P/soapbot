@@ -289,6 +289,20 @@ export default {
   'plugins.communityHint': 'The index lists names and versions only; download a package and upload it above to install.',
 
   // ---------------------------------------------------------------- 04 security
+  'security.integrityTitle': 'Integrity signals',
+  'security.integrityHint': 'What was approved, shown separately from what is running',
+  'security.integrityUnavailable': 'Bot runtime is off; no integrity signals to report (this is not "all clear")',
+  'security.integrityBoot': 'Trace window {boot}',
+  'security.integrityNotRecoverable': 'not replayable',
+  'security.integrityRecoverable': 'replayable',
+  'security.integrityMcp': 'External tool metadata',
+  'security.integrityServer': 'Server',
+  'security.integrityMetadata': 'Metadata approval',
+  'security.integrityApproved': 'approved and unchanged',
+  'security.integrityNotApproved': 'unapproved or changed',
+  'security.integrityPlugins': 'Plugin attestation re-verification',
+  'security.integrityGate': 'Decisions come from deterministic gates; AI review is advisory',
+
   'security.eventsInWindow': 'Events (in window)',
   'security.denied': 'Denied',
   'security.blocked': 'Blocked / quarantined',

@@ -18,7 +18,6 @@ import base64
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from soapbot.ai.compressor import CompressionConfig, ContextCompressor
@@ -456,20 +455,21 @@ def _dict_to_chat_message(m: dict[str, Any]) -> ChatMessage:
 
 
 def _load_image_bytes(seg: MessageSegment) -> bytes | None:
+    """Load only inline image bytes supplied by the adapter.
+
+    A protocol-provided ``path`` is attacker-controlled input, not a permission to
+    read the bot host filesystem. Adapters must download or explicitly allow files
+    before constructing a segment. The cap also prevents an oversized message from
+    consuming unbounded memory before image decoding.
+    """
     b64 = seg.data.get("base64")
-    if b64:
-        try:
-            return base64.b64decode(str(b64))
-        except Exception:
-            return None
-    path = seg.data.get("path")
-    if path:
-        try:
-            return Path(str(path)).read_bytes()
-        except OSError:
-            return None
-    # URL-based images: downloading is the caller's job (adapter-specific).
-    return None
+    if not isinstance(b64, str) or not b64 or len(b64) > 4 * ((10 * 1024 * 1024 + 2) // 3):
+        return None
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        return None
+    return raw if 0 < len(raw) <= 10 * 1024 * 1024 else None
 
 
 def summarize_segments(segments: list[MessageSegment]) -> str:

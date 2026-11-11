@@ -106,5 +106,7 @@ docker inspect --format '{{.State.Health.Status}}' $(docker compose ps -q soapbo
    **未在真实容器里验证过**。
 2. **主密钥默认写入 `/data/secret.key`**（在数据卷内，可持久）。挂载独立密钥文件的做法
    写在 compose 注释里，但当前默认关闭——因为 bind mount 源不存在时 Docker 会创建一个
-   空目录，应用读目录当密钥文件会失败，然后静默退化为明文存储。宁可先用「数据卷内的
-   密钥」，也不要一个看起来更安全、实际退化成明文的状态。
+   空目录，应用读目录当密钥文件会失败。宁可先用「数据卷内的密钥」，也不要一个看起来
+   更安全、实际指向空目录的状态。（应用侧现在不会退化成明文：没有主密钥时插件存储
+   直接拒绝写入并抛 `StorageUnavailable`，所以最坏结果是插件存不了东西，而不是
+   明文落库。见 `SECURITY.md` 与 `src/soapbot/plugins/context.py`。）

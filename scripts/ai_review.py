@@ -37,7 +37,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "deepseek-flash"
 MAX_DIFF_BYTES = 200_000
 MAX_DIFF_LINES = 4_000
 REQUEST_TIMEOUT = 60.0

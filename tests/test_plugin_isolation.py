@@ -50,6 +50,7 @@ from soapbot.plugins.sandbox import (
     CapabilityGuard,
     EncryptedPluginStorage,
     PluginStorage,
+    StorageUnavailable,
 )
 from soapbot.security.audit import AuditLog
 
@@ -108,14 +109,52 @@ def test_i1_escalation_attempt_leaves_grants_intact() -> None:
 
 def test_i2_context_holds_only_own_namespace() -> None:
     """``ctx._storage_backend`` must never contain another plugin's namespace."""
+
+    class _Box:
+        def encrypt(self, s: str) -> str:
+            return "enc:v1:" + s[::-1]
+
+        def decrypt(self, s: str) -> str:
+            return s[len("enc:v1:") :][::-1]
+
     backend: dict = {}
-    a = PluginContext(plugin="plugin_a", guard=_guard({Capability.STORAGE}), storage_backend=backend)
-    b = PluginContext(plugin="plugin_b", guard=_guard({Capability.STORAGE}), storage_backend=backend)
+    a = PluginContext(
+        plugin="plugin_a",
+        guard=_guard({Capability.STORAGE}),
+        storage_backend=backend,
+        crypto=_Box(),
+    )
+    b = PluginContext(
+        plugin="plugin_b",
+        guard=_guard({Capability.STORAGE}),
+        storage_backend=backend,
+        crypto=_Box(),
+    )
     a.storage.set("api_token", "sk-live-A")
 
     assert "plugin_a" not in b._storage_backend
     with pytest.raises(KeyError):
         _ = b._storage_backend["plugin_a"]["api_token"]
+
+
+def test_i2_storage_refuses_to_fall_back_to_plaintext() -> None:
+    """No crypto box means no store — not an unencrypted one.
+
+    The two are indistinguishable from a plugin's side: ``set`` succeeds either way and
+    the token lands somewhere. The only difference appears later, when that somewhere
+    turns out to be the SQLite file in a backup. So the missing-key case has to fail at
+    the call, and it has to fail even for a plugin that holds the STORAGE capability.
+    """
+    backend: dict = {}
+    context = PluginContext(
+        plugin="plugin_a", guard=_guard({Capability.STORAGE}), storage_backend=backend
+    )
+
+    assert context.storage_if_available() is None
+    with pytest.raises(StorageUnavailable):
+        _ = context.storage
+    # The context pre-creates an empty namespace; what must stay empty is the content.
+    assert all(not values for values in backend.values()), "拒绝之后仍然写出了明文"
 
 
 def test_i2_storage_view_cannot_reach_outer_mapping() -> None:

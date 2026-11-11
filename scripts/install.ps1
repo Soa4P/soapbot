@@ -5,7 +5,9 @@
 
 .DESCRIPTION
     Idempotent: an existing data directory is never overwritten, an existing virtual
-    environment is reused, and an existing scheduled task is left alone unless -Force.
+    environment is reused, and the scheduled task is re-registered with the same
+    definition — same name, same account — so re-running an old install migrates it
+    instead of leaving two policies behind.
 
     The script does not print the bootstrap token. It prints the path, because a token
     in a console transcript outlives the token.
@@ -16,8 +18,13 @@
 .PARAMETER Port
     Panel port, bound to 127.0.0.1. Default 6185.
 
-.PARAMETER Force
-    Re-register the scheduled task and reinstall dependencies.
+.PARAMETER Account
+    Account the scheduled task runs as. Default NT AUTHORITY\LocalService.
+
+    Not SYSTEM, and not for a cosmetic reason: `plugins/supervisor.py` refuses to start a
+    plugin worker under LocalSystem, so a SYSTEM install runs with every plugin silently
+    disabled. LocalService is non-admin, needs no stored password and still reaches the
+    network for provider calls.
 
 .EXAMPLE
     irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 | iex
@@ -29,7 +36,7 @@
 param(
     [string]$Dir = 'C:\soapbot',
     [int]$Port = 6185,
-    [switch]$Force
+    [string]$Account = 'NT AUTHORITY\LocalService'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,22 +129,20 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     Write-Ok "keeping existing $envFile"
 }
 
-Write-Step "registering scheduled task $TaskName"
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existing -and -not $Force) {
-    Write-Ok "task already registered (use -Force to replace)"
-} else {
-    if ($existing) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }
-    $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
-        -Argument "/c cd /d `"$Dir`" && `"$venvPython`" -m soapbot.cli start >> `"$Dir\panel.log`" 2>&1"
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Force | Out-Null
-    Write-Ok "registered"
-}
+Write-Step "locking down $Dir and registering $TaskName"
+# ACLs and the task principal are one unit: a task running as an account that cannot read
+# the install would fail silently at every restart, and an account that can write the
+# install can patch the program it is running inside. scripts/harden-windows.ps1 owns
+# both, so an existing install is migrated off SYSTEM by simply re-running this script.
+#
+# Spawned as a separate process on purpose: the script ends with `exit 1` on failure, and
+# `irm ... | iex` runs this file inside the caller's session, where a bare `exit` would
+# close the operator's console instead of reporting one error.
+$harden = Join-Path $Dir 'scripts\harden-windows.ps1'
+if (-not (Test-Path -LiteralPath $harden)) { throw "missing $harden; the archive looks incomplete" }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $harden -Dir $Dir -Account $Account -TaskName $TaskName
+if ($LASTEXITCODE -ne 0) { throw "hardening failed; fix the message above and re-run this script" }
+Write-Ok "restricted to $Account"
 
 Write-Step "starting the service"
 # Start-ScheduledTask on an already-running task is a no-op, so an update would keep
