@@ -217,10 +217,10 @@ async def test_whitelist_admits_web_events_but_qq_private_stays_denied() -> None
     The QQ private-deny default was a security fix; this test is the tripwire that
     notices if the web branch ever widens into a general private-chat bypass.
     """
+    from soapbot.adapters.web import WebAdapter
     from soapbot.core.message import IncomingMessage, MessageScene, MessageSegment, Sender
     from soapbot.core.pipeline import PipelineContext
     from soapbot.core.stages import AccessPolicy, WhitelistStage
-    from soapbot.adapters.web import WebAdapter
 
     def _event(adapter: str) -> IncomingMessage:
         return IncomingMessage(
