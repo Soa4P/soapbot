@@ -36,6 +36,24 @@
 - 测试 8 项：未授权拒绝、Cookie 只上钉死主机的线且不进审计、未配置的专属报错、
   路径逃逸全部拒绝、非 200 不回显响应体、子进程 shim 只发 path/params 且不含
   Cookie 字样、路由表接线。插件 IPC（66 项）与安全边界（89/89）门禁保持全绿。
+### 可测试安装包落地：Android APK 与 Windows 桌面安装包
+
+原来错在哪：手机端交付的只有 Dart 源码——连 `android/` 平台目录都没有，「装到手机上
+试一试」这件事不存在；桌面端有构建链但产物从未在本轮代码上重打。测试版落地需要的是
+能直接安装的二进制。
+
+现在：
+
+- **`mobile/android/` 平台骨架进仓库**（`flutter create` 生成，applicationId 定制为
+  `dev.soapbot.archive`，应用名「Soapbot 存档」；`local.properties` 由生成的
+  `.gitignore` 覆盖不进库）。`flutter build apk --debug` 实测通过（Gradle 536s，
+  JDK 17 + Android SDK 36），产物 `app-debug.apk` 直接 `adb install` 或传机安装。
+  release 签名仍不做，见 mobile/README「不做什么」。
+- **桌面端 `soapbot_0.1.0_x64-setup.exe`（47.5 MiB）在本轮代码上重打**：PyInstaller
+  sidecar 重建（包含多端对话端点）→ Tauri NSIS 出包。未签名，SmartScreen 会提示一次，
+  已有[桌面端签名](docs/desktop-signing.md)解释。
+- **CI 新增 `mobile` job**（非必需检查）：`flutter analyze` + `flutter test`，把手机端
+  的 Dart 层质量纳入每次推送；APK 构建仍按需在本地跑，理由写在 job 注释里。
 ### AI PR 审查升级：确定性影响面分析进评论与提示词
 
 原来错在哪：审查评论只给「verdict + 关注点」，维护者要自己从几百行 diff 里看出
