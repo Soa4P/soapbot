@@ -30,6 +30,19 @@ REQUIRED_SECTIONS = (
     "Agent 参与声明",
 )
 
+#: CONTRIBUTING.md explicitly tells readers that these sections exist, so a template
+#: that drops them makes the contribution guide a lie. Kept separate from
+#: REQUIRED_SECTIONS so the parameterised case count stays stable — a doc edit must
+#: not force four "N passed" baselines to be rewritten.
+EXTRA_SECTIONS = (
+    "改了什么",
+    "影响面",
+    "安全影响",
+    "数字基线",
+    "AI 审查",
+    "回滚",
+)
+
 
 def template_problems(text: str) -> list[str]:
     """Return every required section or warning the template has lost."""
@@ -39,7 +52,7 @@ def template_problems(text: str) -> list[str]:
         for line in text.splitlines()
         if line.startswith("## ")
     ]
-    for section in REQUIRED_SECTIONS:
+    for section in (*REQUIRED_SECTIONS, *EXTRA_SECTIONS):
         if section not in headings:
             out.append(f"模板缺少小节：{section}")
 
