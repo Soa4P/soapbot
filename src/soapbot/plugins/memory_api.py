@@ -119,6 +119,9 @@ class SessionView:
     user_id: str
     display_name: str
     is_group: bool
+    #: Host-computed conversation warmth in [0, 1]. Read-only, deterministic, and
+    #: never supplied by a plugin or a model.
+    warmth: float = 0.0
 
 
 class PluginMemoryAPI:
@@ -305,8 +308,16 @@ def _clean_query(query: Any) -> str:
     return text[:MAX_QUERY_CHARS]
 
 
-def build_session_view(caller) -> SessionView:
-    """Snapshot a ``CallerContext`` into the shape ``ctx.session`` exposes."""
+def build_session_view(caller, *, warmth: float | None = None) -> SessionView:
+    """Snapshot a ``CallerContext`` into the shape ``ctx.session`` exposes.
+
+    ``warmth`` is computed by the host when omitted; a caller may pass a value
+    (tests, a persona with custom warmth parameters) but a plugin never can — it
+    only receives the finished view.
+    """
+    from soapbot.ai.autonomy import WARMTH_TRACKER
+
+    value = WARMTH_TRACKER.warmth(caller.session_key) if warmth is None else warmth
     return SessionView(
         session_key=caller.session_key,
         scene=caller.scene,
@@ -314,4 +325,5 @@ def build_session_view(caller) -> SessionView:
         user_id=caller.user_id,
         display_name=caller.display_name,
         is_group=caller.scene == "group",
+        warmth=min(1.0, max(0.0, float(value))),
     )

@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T17:00:00+08:00",
+  "updated_at": "2026-11-12T18:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3497,6 +3497,35 @@
         }
       ],
       "goal": "把「等你拍板」的 qzone 设计变成可拍的能力面，同时完整保留个人号协议端的风控声明"
+    },
+    {
+      "id": "a13",
+      "index": "A13",
+      "name": "人格卡自主字段、宿主温度与 WBI 字幕",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a13-t1",
+          "name": "autonomy / warmth / voice_self_select 保留在 extra 并带保守校验，修好回滚丢 extra",
+          "status": "done"
+        },
+        {
+          "id": "a13-t2",
+          "name": "WarmthTracker 只在成功归档后计数，SessionView 与 session.view 只读暴露 warmth",
+          "status": "done"
+        },
+        {
+          "id": "a13-t3",
+          "name": "BilibiliClient.subtitle 走 L2 WBI 签名且不注入 Cookie，宿主固定端点与字段白名单",
+          "status": "done"
+        },
+        {
+          "id": "a13-t4",
+          "name": "13 项新用例 + 既有人格卡 / session.view / B 站 106 项回归",
+          "status": "done"
+        }
+      ],
+      "goal": "把三处停在纸面的设计变成可配置、可验证的宿主能力，同时不把模型输出变成跨会话持久状态"
     }
   ],
   "archive": [
@@ -3592,7 +3621,7 @@
     }
   ],
   "verification": {
-    "pytest": "2253 passed, 12 skipped",
+    "pytest": "2266 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

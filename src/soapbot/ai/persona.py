@@ -282,6 +282,11 @@ def persona_to_payload(persona: Persona) -> dict[str, Any]:
         "enabled": persona.enabled,
         "locale": persona.locale,
         "examples": [dict(item) for item in persona.examples],
+        # Hand-written front matter (including the autonomy / warmth knobs) used to
+        # be dropped by a rollback: the panel preserved it on save but a version
+        # restore rebuilt a card with an empty `extra`. A version must replay the
+        # whole card, not just the fields this module happens to know by name.
+        "extra": dict(persona.extra or {}),
     }
 
 
@@ -309,6 +314,9 @@ def persona_from_payload(payload: dict[str, Any], persona_id: str) -> Persona:
         version=int(payload.get("version") or 1),
         enabled=bool(payload.get("enabled", True)),
         locale=str(payload.get("locale") or ""),
+        extra=dict(payload["extra"])
+        if isinstance(payload.get("extra"), dict)
+        else {},
     )
 
 
