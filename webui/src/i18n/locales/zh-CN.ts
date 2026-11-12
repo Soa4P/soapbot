@@ -280,6 +280,7 @@ export default {
   'plugins.cap.send': '可主动发消息',
   'plugins.cap.media': '可取走消息里一次性的图片链接（宿主不留存、不记日志）',
   'plugins.cap.browse': '可读白名单域的公开网页做消费提案；遵守 robots.txt，无登录态、无 JS，仍需人工审批',
+  'plugins.cap.qzone': '空间读写走个人号协议端，官方机器人无此接口；可能触发平台风控甚至冻结账号。默认完全关闭，读写分开审批，发说说还需二次命令确认',
   'plugins.grantReplaces': '授权是替换而不是合并：不在本次勾选内的已授予能力会被收回。',
   'plugins.empty': '插件目录为空。',
   'plugins.exported': '运行中插件导出',

@@ -1,0 +1,12 @@
+name: qzone-diary
+version: 1.0.0
+entry: main:QzoneDiaryPlugin
+description: 把值得记的事写成说说。两段式命令级确认：先记下草稿，再显式确认才发；宿主还要有 qzone_write 能力批准与 SOAPBOT_QZONE_VIA_PROTOCOL=true，并且每次调用都带 confirm=true。正文不进日志与审计。
+author: soapbot
+trust: trusted
+channel: official
+min_host_version: 0.1.0
+capabilities:
+  - command
+  - qzone_write
+  - storage

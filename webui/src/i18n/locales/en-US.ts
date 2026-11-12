@@ -266,6 +266,7 @@ export default {
   'plugins.cap.send': 'can send messages unprompted',
   'plugins.cap.media': 'can take one-time image links from messages; the host keeps no copy and writes no log',
   'plugins.cap.browse': 'can read allow-listed public pages for purchase proposals; honours robots.txt, has no login state or JS, and still needs human approval',
+  'plugins.cap.qzone': 'space reads/writes via a personal-account protocol endpoint (the official bot has no such API); may trigger platform risk controls or freeze the account. Off by default, read and write approved separately, posting needs a second command confirmation',
   'plugins.grantReplaces': 'Approval replaces the granted set rather than merging: anything not ticked here is withdrawn.',
   'plugins.empty': 'The plugin directory is empty.',
   'plugins.exported': 'Exports from running plugins',

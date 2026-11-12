@@ -104,6 +104,12 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+# Example plugin directories use hyphenated names (the plugin id), which cannot be
+# Python module names. mypy would see both `main.py` files as one duplicate module
+# and abort the whole run with "errors prevented further checking" — a silent way
+# to hide the real baseline. These two are example code, checked by ruff and by
+# their own import-time tests instead.
+exclude = ["src/soapbot/examples/plugins/qzone-.*"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
