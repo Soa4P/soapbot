@@ -227,7 +227,7 @@ soapbot/
 │   ├── examples/       # 随包发布的示例插件（不是内置功能，仍需批准）
 │   └── webui/dist/     # 前端构建产物（随 wheel 发布）
 ├── webui/              # 前端源码（Vite + Vue 3 + TypeScript）
-├── mobile/             # Flutter 源码骨架，默认关闭的端；只交付源码，未在真机构建
+├── mobile/             # Flutter 客户端，默认关闭的端；CI 产出可下载 debug APK，真机 E2E 未做
 ├── config/             # **模板**（providers/adapters/mcp/personas），首次启动播种到 data/config，之后不再读它
 ├── data/               # 可写卷：SQLite、日志、上传、插件目录、批准记录，以及 data/config（面板真正编辑的那份，gitignore）
 ├── deploy/             # install.sh（一键部署）、Dockerfile 与 docker-compose

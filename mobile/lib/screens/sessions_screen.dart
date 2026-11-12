@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../theme.dart';
+import 'approvals_screen.dart';
 import 'chat_screen.dart';
 
 class SessionsScreen extends StatefulWidget {
@@ -56,6 +57,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
       appBar: AppBar(
         title: const Text('会话'),
         actions: [
+          IconButton(
+            tooltip: '审批',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ApprovalsScreen(api: widget.api),
+              ),
+            ),
+            icon: const Icon(Icons.fact_check_outlined),
+          ),
           IconButton(
             tooltip: '退出登录',
             onPressed: widget.onSignOut,

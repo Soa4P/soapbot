@@ -10,20 +10,38 @@
 - `flutter analyze` 0 错误（仅 7 条 `material.dart` 弃用提示——新 SDK 把 Material 挪进了
   `package:material_ui`，但 pubspec 声明的下限是 3.22，换 import 之前旧 SDK 会装不上，
   保留；CI 的 mobile job 同样按默认把 info 保持非致命）
-- `flutter test` 12 项全过（模型解析、翻页参数、对话发送、会话/聊天两屏的备注与对话模式）
+- `flutter test` 17 项全过（模型解析、翻页参数、对话发送、会话/聊天两屏的备注与对话模式，
+  以及审批 feed 的解析）
 - `flutter build apk --debug` 实测通过（Gradle assembleDebug 536s），产物
   `build/app/outputs/flutter-apk/app-debug.apk`——**可测试安装包**，直接
   `adb install` 或传到手机点开安装（系统会提示未知来源，允许一次即可）。
   applicationId 是 `dev.soapbot.archive`；release 签名与上架配置仍不做（见「不做什么」）。
 
-## 四屏
+## 可下载的安装包
+
+CI 的 `mobile` job 现在每次 PR / push 都会构建 debug APK 并上传为 artifact
+`soapbot-debug-apk`（保留 14 天）：打开 GitHub Actions 里对应的 run，在
+**Artifacts** 区下载 zip，解压得到 `app-debug.apk`，即可装到实体手机或模拟器。
+这样测试不需要本机装 Flutter / Android SDK。真机使用时构建参数要带
+`--dart-define=SOAPBOT_BASE_URL=https://your.domain`；CI 产物默认指向
+`http://127.0.0.1:16700`，只适合模拟器或本机 `adb reverse` 转发。
+
+## 五屏
 
 | 文件 | 作用 |
 | --- | --- |
 | `lib/screens/login_screen.dart` | 用户名密码登录，或邀请码注册 |
-| `lib/screens/sessions_screen.dart` | 被授权的会话列表（30 秒自动刷新 + 下拉刷新） |
+| `lib/screens/sessions_screen.dart` | 被授权的会话列表（30 秒自动刷新 + 下拉刷新），右上角进审批页 |
 | `lib/screens/chat_screen.dart` | 消息流（轮询 `after_id` 游标 + 「加载更早」向前翻页） |
 | `lib/screens/note_sheet.dart` | 备注输入，返回文本，不发消息 |
+| `lib/screens/approvals_screen.dart` | 审批收件箱：5 秒轮询 `/api/approvals/feed` 游标，按申请号保留最新状态，可批准/驳回 |
+
+## 审批页
+
+`/api/approvals/feed` 与 `/api/budget/{id}/approve|deny` 用的是**同一套面板凭据**：
+账号登录时签发的 Cookie 与面板 token 是同一个 `TokenService`，所以 owner 账号在手机上
+就能直接决策，member 账号会收到 403 并显示错误横幅。App 只改状态，不执行任何支付；
+批准之后仍需操作者自己去官方渠道购买。`degraded` 标记会在卡片上显示红色提示。
 
 ## 对话模式
 

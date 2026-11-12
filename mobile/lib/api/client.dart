@@ -219,4 +219,87 @@ class ChatApi {
         body: {'session_key': sessionKey, 'content': content});
     return Message.fromJson(body['note'] as Map<String, dynamic>);
   }
+
+  /// Approval events newer than [after]. The server holds a bounded ring, so the
+  /// client keeps its own cursor and never assumes the whole history is present.
+  Future<ApprovalFeed> approvals({int after = 0}) async {
+    final body = await _send('GET', '/api/approvals/feed?after=$after');
+    return ApprovalFeed.fromJson(body);
+  }
+
+  /// Decide a pending request. The session key only locates the row; authority
+  /// comes from the signed-in account, never from this body.
+  Future<void> decideApproval(int requestId, String kind, String sessionKey) async {
+    await _send('POST', '/api/budget/$requestId/$kind',
+        body: {'session_key': sessionKey, 'note': ''});
+  }
+}
+
+/// One approval event. Field names mirror the server's explicit whitelist.
+class ApprovalEvent {
+  const ApprovalEvent({
+    required this.id,
+    required this.kind,
+    required this.requestId,
+    required this.sessionKey,
+    required this.amountMinor,
+    required this.currency,
+    required this.purpose,
+    required this.degraded,
+  });
+
+  final int id;
+  final String kind;
+  final int requestId;
+  final String sessionKey;
+  final int amountMinor;
+  final String currency;
+  final String purpose;
+  final bool degraded;
+
+  bool get isPending => kind == 'requested';
+
+  String get statusLabel {
+    switch (kind) {
+      case 'approved':
+        return '已批准';
+      case 'denied':
+        return '已驳回';
+      case 'cancelled':
+        return '已撤回';
+      case 'expired':
+        return '已过期';
+      default:
+        return '待审批';
+    }
+  }
+
+  String get amountLabel => '${(amountMinor / 100).toStringAsFixed(2)} $currency';
+
+  factory ApprovalEvent.fromJson(Map<String, dynamic> json) => ApprovalEvent(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        kind: json['kind'] as String? ?? '',
+        requestId: (json['request_id'] as num?)?.toInt() ?? 0,
+        sessionKey: json['session_key'] as String? ?? '',
+        amountMinor: (json['amount_minor'] as num?)?.toInt() ?? 0,
+        currency: json['currency'] as String? ?? 'CNY',
+        purpose: json['purpose'] as String? ?? '',
+        degraded: json['degraded'] == true,
+      );
+}
+
+class ApprovalFeed {
+  const ApprovalFeed({required this.events, required this.cursor, required this.enabled});
+
+  final List<ApprovalEvent> events;
+  final int cursor;
+  final bool enabled;
+
+  factory ApprovalFeed.fromJson(Map<String, dynamic> json) => ApprovalFeed(
+        events: (json['events'] as List<dynamic>? ?? const [])
+            .map((row) => ApprovalEvent.fromJson(row as Map<String, dynamic>))
+            .toList(),
+        cursor: (json['cursor'] as num?)?.toInt() ?? 0,
+        enabled: json['enabled'] != false,
+      );
 }
