@@ -30,8 +30,17 @@ faithfully record it as theirs. Same reasoning as ``/recall``.
 from __future__ import annotations
 
 import logging
+import time
 from typing import ClassVar
 
+from soapbot.budget.events import (
+    APPROVAL_BUS,
+    APPROVED,
+    CANCELLED,
+    DENIED,
+    REQUESTED,
+    ApprovalEvent,
+)
 from soapbot.budget.models import (
     BudgetError,
     BudgetExceededError,
@@ -74,6 +83,41 @@ class BudgetCommands:
     def __init__(self, store: BudgetStore, *, audit: AuditLog | None = None) -> None:
         self.store = store
         self.audit = audit or get_audit_log()
+
+    async def _publish(
+        self,
+        kind: str,
+        req,
+        *,
+        actor_id: str = "",
+        actor_name: str = "",
+        note: str = "",
+        remaining_minor: int | None = None,
+    ) -> None:
+        """Announce a state change on the same bus the panel's decisions use.
+
+        Kept here rather than in the store: the store owns ledger transitions, this
+        module owns the operator-facing workflow, and a channel should never see a
+        half-committed row.
+        """
+        await APPROVAL_BUS.publish(
+            ApprovalEvent(
+                kind=kind,
+                request_id=req.id,
+                session_key=req.session_key,
+                amount_minor=req.amount_minor,
+                currency=req.currency,
+                purpose=req.purpose,
+                requester_id=req.requester_id,
+                requester_name=req.requester_name,
+                actor_id=actor_id,
+                actor_name=actor_name,
+                note=note,
+                remaining_minor=remaining_minor,
+                degraded=not self.store.policy.require_distinct_approver,
+                created_at=time.time(),
+            )
+        )
 
     # ------------------------------------------------------------------ entry
     async def handle(self, ctx: PipelineContext, args: list[str]) -> str:
@@ -164,11 +208,14 @@ class BudgetCommands:
             return f"申请未受理：{exc}"
 
         if not created:
+            # A deduplicated resend is not a new state change; notifying again would
+            # make one request look like two in every channel.
             return (
                 f"这笔申请已经在处理中了（#{req.id}，"
                 f"{format_minor(req.amount_minor, req.currency)}），无需重复提交。"
             )
 
+        await self._publish(REQUESTED, req)
         return (
             f"已提交申请 #{req.id}：{format_minor(req.amount_minor, req.currency)}"
             f"（{req.purpose}）\n"
@@ -216,6 +263,14 @@ class BudgetCommands:
             return f"操作失败：{exc}"
 
         req = outcome.request
+        await self._publish(
+            APPROVED if kind == "approve" else DENIED,
+            req,
+            actor_id=approver_id,
+            actor_name=getattr(principal, "display_name", "") or "",
+            note=note,
+            remaining_minor=outcome.available_minor,
+        )
         amount = format_minor(req.amount_minor, req.currency)
         notice = await self._remaining_notice(ctx)
         if kind == "approve":
@@ -264,6 +319,11 @@ class BudgetCommands:
         except BudgetError as exc:
             return f"操作失败：{exc}"
 
+        await self._publish(
+            CANCELLED,
+            outcome.request,
+            actor_id=getattr(principal, "user_id", "") or "",
+        )
         return f"已撤回申请 #{outcome.request.id}。"
 
 

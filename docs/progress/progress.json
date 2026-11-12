@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T12:21:19+08:00",
+  "updated_at": "2026-11-12T13:05:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3337,6 +3337,40 @@
         }
       ],
       "goal": "让「从聊天里顺手收藏」有宿主能力面可用，且不把一次性的图片 URL 广播给每个消息观察者"
+    },
+    {
+      "id": "a8",
+      "index": "A8",
+      "name": "额度审批可用化（第一阶段）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a8-t1",
+          "name": "APPROVAL_BUS 事件总线：显式字段白名单、通道失败与超时不影响已提交决策",
+          "status": "done"
+        },
+        {
+          "id": "a8-t2",
+          "name": "POST /api/budget/{id}/approve|deny：APPROVE_PAYMENT + 真实凭据 + 作用域复核",
+          "status": "done"
+        },
+        {
+          "id": "a8-t3",
+          "name": "面板第 10 页批准/驳回按钮、确认框与第二审批人策略状态显示",
+          "status": "done"
+        },
+        {
+          "id": "a8-t4",
+          "name": "账本默认开启 + require_distinct_approver 显式降级开关与 degraded 标记",
+          "status": "done"
+        },
+        {
+          "id": "a8-t5",
+          "name": "QQ 命令路径与面板路径发布同一种事件，19 项用例覆盖两路径接线",
+          "status": "done"
+        }
+      ],
+      "goal": "把只在类型定义与命令里存在的审批，变成面板能点、事件能订阅、且不悄悄放宽禁止自批的工作流"
     }
   ],
   "archive": [
@@ -3432,7 +3466,7 @@
     }
   ],
   "verification": {
-    "pytest": "2185 passed, 12 skipped",
+    "pytest": "2204 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
