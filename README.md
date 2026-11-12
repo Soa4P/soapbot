@@ -4,8 +4,12 @@
 [![python](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-QQ 群里的 AI 机器人。Python 3.12 / FastAPI / Vue3。第三方插件跑在独立进程里，
-能力一项一项批准。
+一个多端 AI 陪伴框架：同一个记忆与人格核心，接 QQ（官方机器人 / OneBot 协议端）、
+网页、手机 app、桌面壳四类客户端——后三类是当前的主力方向。Python 3.12 / FastAPI /
+Vue3 / Flutter / Tauri。第三方插件跑在独立进程里，能力一项一项批准。
+
+QQ 不是唯一入口，也不再是默认入口：网页与手机上的对话、备注、主动开口、表情包相册、
+梗词典等生态插件都在围绕同一套账号与温度模型运转（见[插件生态](https://github.com/Soa4P/soapbot-plugins)）。
 
 不内置 QQ 协议逆向代码，不持有支付凭据，不调用支付 API。
 
@@ -225,6 +229,7 @@ HTTP 错误、超时、非法 JSON、非对象 JSON 不重试——那些重试�
 | 多用户账号、邀请码、多端对话、只读存档与端开关 | [docs/chat-archive.md](docs/chat-archive.md) |
 | 443 被占用、内存只有 341 MB 时怎么部署 | [docs/deployment-web-chat.md](docs/deployment-web-chat.md) |
 | 本仓库写作口径（去 AI 味）与可选自查工具 | [docs/writing-style.md](docs/writing-style.md) |
+| 插件生态：官方插件源码、改编清单、发版与封禁 | [插件仓库](https://github.com/Soa4P/soapbot-plugins) |
 | 外部仓库看了什么、改了什么、没抄什么 | [docs/reference-external-2026-11.md](docs/reference-external-2026-11.md) |
 | 配置项与环境变量 | [docs/configuration.md](docs/configuration.md) |
 | 部署形态、容器加固、远程验收 | [docs/deploy-layer.md](docs/deploy-layer.md) |

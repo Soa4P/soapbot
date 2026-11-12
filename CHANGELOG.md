@@ -10,6 +10,23 @@
 
 ## [Unreleased]
 
+### 项目定位随主体方向更新（多端 AI 陪伴框架）
+
+原来错在哪：README 第一行还是「QQ 群里的 AI 机器人」，pyproject 简介、mobile 的
+pubspec 描述同理——但主体方向自2026-11 起已经是「网页/手机/桌面三端为主力、QQ 保
+部署能力不着急优化」（见 MEMORY 与多轮交付）。定位句与新现实相反。
+
+现在：
+
+- **README 定位段重写**：「多端 AI 陪伴框架——同一个记忆与人格核心，接 QQ、网页、
+  手机 app、桌面壳四类客户端，后三类是当前主力方向」；QQ 不再是默认入口的表述
+  写进正文；文档表补插件生态一行（指向 soapbot-plugins）。
+- **pyproject 描述**改为 multi-platform AI companion framework（含插件沙箱、温度
+  模型、Bilibili 等关键词）。
+- **mobile/pubspec.yaml 描述**去掉「Read-only」旧口径（手机端已可对话与写备注）。
+- desktop/package.json 描述同步。QQ 定位改写为「部署能力保留的接入渠道之一」，
+  与 SECURITY.md / chat-archive.md 的既有口径一致。
+
 ### 修复: 手机端在 MuMu 模拟器实测暴露的 CSRF 403——Bearer 优先认证
 
 原来错在哪：手机端只靠会话 Cookie 过鉴权，写请求还要回显 CSRF Cookie。而 CSRF 值
