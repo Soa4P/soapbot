@@ -212,6 +212,16 @@ class _FakeHttp:
     async def get(self, url, params=None):
         self.urls.append(url)
         self.params.append(dict(params or {}))
+        if "view" in url:
+            # subtitle() 现在先解析 aid/cid（只传 bvid 会被 player 端点 -400 拒绝），
+            # 再打 wbi 签名的 player 端点——两段请求，形状不同。
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    "code": 0,
+                    "data": {"aid": 117, "pages": [{"cid": 55}]},
+                },
+            )
         return SimpleNamespace(
             status_code=200,
             json=lambda: {
@@ -241,8 +251,14 @@ async def test_subtitle_uses_a_wbi_signed_l2_request_and_a_field_whitelist() -> 
         "https://x/a.json", "https://x/b.json",
     ]
     assert "playurl" not in str(result)
-    assert http.urls == ["https://api.bilibili.com/x/player/wbi/v2"]
-    assert "w_rid" in http.params[0] and "wts" in http.params[0]
+    assert http.urls == [
+        "https://api.bilibili.com/x/web-interface/view",
+        "https://api.bilibili.com/x/player/wbi/v2",
+    ]
+    # view（第一段）拿 aid/cid；player（第二段）带上了它们 + wbi 签名
+    assert http.params[0] == {"bvid": "BV1abc"}
+    assert http.params[1]["aid"] == "117" and http.params[1]["cid"] == "55"
+    assert "w_rid" in http.params[1] and "wts" in http.params[1]
 
 
 async def test_subtitle_refuses_a_bad_bvid_without_a_network_call() -> None:
