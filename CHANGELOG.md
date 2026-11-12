@@ -10,6 +10,21 @@
 
 ## [Unreleased]
 
+### 修复: 手机端在 MuMu 模拟器实测暴露的 CSRF 403——Bearer 优先认证
+
+原来错在哪：手机端只靠会话 Cookie 过鉴权，写请求还要回显 CSRF Cookie。而 CSRF 值
+只在登录时下发、旧版本 app 从不保存——**升级安装后旧会话仍有效但 csrf 缺失，
+写备注永远 403**（MuMu 模拟器实测截图复现：「CSRF token missing or mismatched」）。
+
+现在：
+
+- **Bearer 优先**：登录返回的 access_token 持久化到安全 storage，后续请求带
+  `Authorization: Bearer`。服务端对 Bearer 请求豁免 CSRF（自己的注释写明「跨站
+  页面 attach 不了 bearer header」），原生客户端从此不被 double-submit 卡死。
+  Cookie/CSRF 保留为降级路径。
+- 模拟器实测（MuMu + adb reverse + 隔离数据目录真服务器）：登录 → 会话列表 →
+  聊天页 → 写备注 → 气泡落库渲染，全链路通过。
+
 ### 修复: subtitle 端点需要 aid/cid（真实视频实测发现）
 
 原来错在哪：`BilibiliClient.subtitle()` 对 `/x/player/wbi/v2` 只传 `bvid`——实测六条
