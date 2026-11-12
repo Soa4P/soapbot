@@ -149,6 +149,7 @@ ALLOWED_SURFACES = frozenset(
         "kb.list_documents",
         "session.view",
         "send.message",
+        "send_media.request",
         "http.request",
         "bilibili.request",
         "storage.get",
@@ -164,6 +165,23 @@ ALLOWED_SURFACES = frozenset(
 _FORBIDDEN_ARG_KEYS = frozenset(
     {"scope", "session_key", "plugin", "caller", "grant", "approved", "capability"}
 )
+
+#: The surfaces where ``session_key`` is the *request itself* — "deliver to this
+#: conversation" — rather than a scope escape. The blanket rule above still rejects
+#: it everywhere else; for these two the real boundary is the host's observed-session
+#: ledger (``SurfaceRouter._send``), which refuses any session the plugin was not
+#: invoked from. Before the exemption, isolated plugins could never send at all: the
+#: child shim must carry the target key, and the blanket check rejected the frame
+#: before the ledger ever saw it (reproduced with a two-line probe on master).
+_SESSION_BEARING_SURFACES = frozenset({"send.message", "send_media.request"})
+
+
+def arg_violation(surface: str, raw_args: dict) -> frozenset:
+    """Forbidden keys a child may not supply for ``surface``. Empty means allowed."""
+    forbidden = set(_FORBIDDEN_ARG_KEYS)
+    if surface in _SESSION_BEARING_SURFACES:
+        forbidden.discard("session_key")
+    return frozenset(forbidden.intersection(raw_args))
 
 
 class SurfaceDeniedError(RuntimeError):
@@ -394,6 +412,17 @@ class _RemoteCtx:
         # session_key is *requested*, not trusted: the host re-checks it against the
         # ledger it owns. A plugin asking for another group gets PermissionError.
         return _call("send.message", {"session_key": session_key, "text": text})
+
+    async def send_media(self, session_key, image_b64, caption=""):
+        # Same ledger discipline as send; the parent audits sizes, never pixels.
+        return _call(
+            "send_media.request",
+            {
+                "session_key": str(session_key),
+                "image_b64": str(image_b64),
+                "caption": str(caption or "")[:2000],
+            },
+        )
 
     #: Raw escape hatch, present so the wire can be exercised end to end (including
     #: by a hostile plugin). It grants nothing: every request still lands in the
@@ -1390,7 +1419,9 @@ class PluginWorker:
             # Refuse scope-bearing keys outright. Silently dropping them would be
             # worse: the plugin would believe it read group 999 and act on an empty
             # result. Failing makes the attempt visible in the audit trail.
-            forbidden = _FORBIDDEN_ARG_KEYS.intersection(raw_args)
+            # ``send.*`` surfaces carry the target key legitimately (see
+            # ``arg_violation``); the ledger is what actually bounds them.
+            forbidden = arg_violation(surface, raw_args)
             if forbidden:
                 raise SurfaceDeniedError(
                     "arguments may not be supplied by the plugin: "
