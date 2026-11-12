@@ -323,8 +323,35 @@ def build_pipeline(
         pipeline.add(SafetyStage())
 
     # --- delivery and post-processing ---
+    # Autonomous voice selection (persona `voice_self_select`): the picker needs a
+    # chat transport; the adapter converts plain message dicts into a ChatRequest on
+    # the same router the pipeline uses, at a small token budget. When TTS or the
+    # router is absent the picker stays None and the operator's voice is used.
+    picker = None
+    if tts is not None and router is not None:
+        from soapbot.providers.base import ChatMessage, ChatRequest
+        from soapbot.voice.picker import VoicePicker
+
+        async def _voice_chat(messages: list[dict[str, str]]) -> str:
+            request = ChatRequest(
+                messages=[
+                    ChatMessage(role=str(m["role"]), content=str(m["content"]))
+                    for m in messages
+                ],
+                temperature=0.2,
+                max_tokens=200,
+            )
+            response = await router.chat(request)
+            return response.content
+
+        picker = VoicePicker(chat=_voice_chat)
+
     pipeline.add(
-        ReplyStage(tts=tts, loader=plugin_manager.loader if plugin_manager is not None else None)
+        ReplyStage(
+            tts=tts,
+            loader=plugin_manager.loader if plugin_manager is not None else None,
+            picker=picker,
+        )
     )
     if memory is not None:
         pipeline.add(PersistReplyStage(memory))

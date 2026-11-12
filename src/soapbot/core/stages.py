@@ -385,9 +385,12 @@ class ReplyStage(Stage):
 
     name = "reply"
 
-    def __init__(self, store=None, *, tts=None, loader=None) -> None:
+    def __init__(self, store=None, *, tts=None, loader=None, picker=None) -> None:
         self._store = store
         self._tts = tts
+        #: Autonomous voice picker (voice/picker.py). ``None`` means the operator's
+        #: configured voice is used verbatim — the pre-existing behaviour.
+        self._picker = picker
         #: Plugin loader when events are wired. ``None`` in tests that only exercise
         #: delivery, which is most of them.
         self._loader = loader
@@ -437,8 +440,33 @@ class ReplyStage(Stage):
         if self._tts is not None and ctx.adapter.supports_segment(SegmentType.RECORD):
             # Synthesised only when the adapter can actually carry a voice segment.
             # Asking first avoids paying for audio the channel will drop.
+            voice_name, picked_via = None, "operator"
+            persona_card = ctx.extras.get("persona")
+            if self._picker is not None and persona_card is not None:
+                from soapbot.ai.autonomy import parse_autonomy
+                from soapbot.voice.picker import DEFAULT_VOICE
+
+                autonomy = parse_autonomy(persona_card)
+                if (
+                    autonomy.voice_self_select
+                    and self._tts.voice == DEFAULT_VOICE
+                ):
+                    # 手动指定优先：操作者改过 voice_tts_voice 时自主挑选不生效。
+                    try:
+                        voice_name, reason = await self._picker.pick(
+                            persona_id=ctx.persona_id,
+                            persona_prompt=ctx.persona_prompt,
+                            session_key=ctx.event.session_key,
+                            recent_context=ctx.model_reply[:400],
+                        )
+                        picked_via = "self"
+                    except Exception as exc:
+                        logger.info("voice pick failed, using default: %s", type(exc).__name__)
+                        voice_name = None
+                        picked_via = "default"
+                    ctx.extras["voice_pick"] = f"{voice_name or 'default'}:{picked_via}:{reason if picked_via == 'self' else ''}"
             try:
-                audio = await self._tts.synthesize(ctx.model_reply)
+                audio = await self._tts.synthesize(ctx.model_reply, voice=voice_name)
             except VoiceUnavailableError as exc:
                 # Two different events share this exception. "Too long" happens on
                 # every long answer and is normal, so it stays at debug; a missing

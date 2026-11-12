@@ -10,6 +10,26 @@
 
 ## [Unreleased]
 
+### 自主挑音色实现：人格卡 `voice_self_select` 从字段变成能力
+
+原来错在哪：autonomous-capabilities-design.md §2 把挑音色写成设计（「决策在管线内、
+候选集宿主给、挑一次缓存、手动指定优先」），#52 只落了人格卡字段
+`voice_self_select`——字段是死的，管线里没有任何代码读它——autonomous-capabilities-design.md §2 的四条验收门槛全部未达成。
+
+现在：
+
+- **`voice/picker.py`**：离线精选的 10 项 zh-CN edge-tts 候选表（每项带一句「气质」，
+  不联网拉全量表——数百项会把挑选变成大上下文调用）；模型只能从表里挑，表外音色
+  与非 JSON 输出抛 `VoicePickError`；按 (persona_id, session_key) 缓存，一次挑选
+  成本 ≤ 200 tokens 的轻量调用。
+- **ReplyStage 接线**：人格卡 `voice_self_select: true` 且操作者的
+  `voice_tts_voice` 仍是出厂默认时，管线在合成前向 picker 要一次音色；失败回退
+  默认音色、回复照常发出（挑选失败不能让回复消失）。手动指定永远优先。
+- **决策可见**：`ctx.extras["voice_pick"]` 记「音色:来源:理由」，trace 可查。
+- **EdgeTts.synthesize(text, voice=)**：每次调用的音色覆盖，None = 操作者配置。
+- 测试 8 项：picker 契约（缓存/表外拒绝/非 JSON/单人失效）+ ReplyStage 四决策
+  路径（自选生效/操作者优先/失败回退且回复照发/无人格回退）。
+
 ### 全库安全审查报告（只读，结论 0 恶意 / 0 可疑必须处理 / 2 项 P2）
 
 按云鼎三层审查流程（关键词扫描 → 深度分析 → 供应链溯源）对主仓库、插件仓库六包、
