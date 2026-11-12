@@ -10,6 +10,36 @@
 
 ## [Unreleased]
 
+### 三份外部参考的核实与适配，以及本仓库的去 AI 味写作规范
+
+原来错在哪：图片里给的三个链接，两个 404、一个名字写错，直接照抄会写出凭空的分析；
+而「加一个去 ai 味 skill」在仓库里既没有 skill 目录，也没有任何与本仓库文档口径相关的
+规则。全盘照抄第三方 SKILL.md 会带进一套「门检 / 终稿 / 打磨报告」的发布稿模板，
+与本仓库 CHANGELOG「写清原来错在哪」的写法完全不搭。
+
+现在：
+
+- **先核实地址**：`zuho-kai/bothouse` → 实为 `zuiho-kai/bothouse`；
+  `mearihaka/dsh-linging` → 该用户唯一公开仓库实为 `mearihaka/dsh-longing`（`longing`）；
+  `github.com/Fangi8` 的 GitHub API 返回 404，**登记为待用户提供正确地址，不编造内容**。
+- `docs/reference-external-2026-11.md`：延续既有 `reference-*.md` 的口径（只读评估、
+  不引入源码/依赖/运行时、每条对照落到一处改动或一条「不改」）。bothouse 的
+  「只有需要人的决策回到聊天 / 规则草稿需人批准」与本仓库审批事件总线是同一治理目标，
+  **不移植**多 CLI 团队与派单；dsh-longing 的「被算出来的角色状态」与本仓库温度模型
+  写入权相反，**不移植**七维状态机。
+- `src/soapbot/examples/plugins/warmth-observer/`：把它适配成只读观察者，用
+  `ctx.session.warmth` 报告温度与阈值，只声明 `command` + `session`，不申请
+  `send` / `cron` / `storage`，也不写状态。
+- `docs/writing-style.md`：把 `qu-ai-wei` 的三条**约束**（敏感信息门检、冻结信息账本、
+  不鉴定作者）按本仓库口径改写，附上「原来错在哪 / 不假装修了 / 未实测标未验证 /
+  数字同步 / README 四块」等具体规矩；没抄它的八族模式目录与三段式输出契约。
+- `scripts/ai_flavor_scan.py`：纯标准库、只读、不默认进 CI 的可选自查工具。单次
+  「不是 X 而是 Y」不报，同文件出现三次才算信号——只凭一个句式就鉴 AI 正是参考 skill
+  明确反对的做法。`ai_flavor_scan.py` 在本仓库只报 1 处，是既有技术文档里的固定措辞。
+
+`tests/test_ai_flavor_check.py`（7 项）。孤儿基线 11 → 12（`warmth-observer` 与既有
+示例插件同等对待），mypy 排除扩到带连字符的示例插件目录，避免 duplicate module 掩盖基线。
+
 ### 人格卡自主字段、宿主温度模型与 WBI 字幕
 
 原来错在哪：`qq-autonomy-design.md` §4 把 `autonomy` / `warmth` / `voice_self_select`
