@@ -246,16 +246,21 @@ jobs:
         run: cd webui && npm run build
 
   mobile:
-    # Dart-level signal only (analyze + test). The APK build needs an Android SDK the
-    # free runners install slowly, and the artifact is built on demand; what must
-    # never silently rot is the client code itself — the same promise the `frontend`
-    # job makes for the panel. `flutter analyze` defaults keep deprecation infos
-    # non-fatal: the codebase targets Flutter >= 3.22, where `package:material_ui`
-    # does not exist yet.
-    timeout-minutes: 20
+    # Analyze + Dart tests + a downloadable debug APK. The runner image ships an
+    # Android SDK; building here (rather than "on demand") is what makes the artifact
+    # actually available from every PR, so an operator can install it on a real phone
+    # or an emulator without owning a Flutter toolchain. `flutter analyze` defaults
+    # keep deprecation infos non-fatal: the codebase targets Flutter >= 3.22, where
+    # `package:material_ui` does not exist yet.
+    timeout-minutes: 35
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - uses: subosito/flutter-action@v2
         with:
@@ -275,6 +280,17 @@ jobs:
 
       - name: Unit tests
         run: cd mobile && flutter test
+
+      - name: Build debug APK
+        run: cd mobile && flutter build apk --debug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: soapbot-debug-apk
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
   desktop:
     # This job stays a `cargo check`: the fast signal that the Rust side still matches
