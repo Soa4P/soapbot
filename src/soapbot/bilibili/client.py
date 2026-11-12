@@ -42,6 +42,7 @@ import asyncio
 import logging
 import re
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -150,7 +151,7 @@ class BilibiliClient:
         self._wbi_key = ""
         self._wbi_fetched_at = 0.0
 
-        self.stats = {"calls": 0, "errors": 0, "risk_control": 0, "last_error": ""}
+        self.stats: dict[str, Any] = {"calls": 0, "errors": 0, "risk_control": 0, "last_error": ""}
 
     # ------------------------------------------------------------------ lifecycle
     def _client(self) -> httpx.AsyncClient:
@@ -221,6 +222,45 @@ class BilibiliClient:
             )
         return {"bvid": clean, "subtitles": items, "has_subtitle": bool(items)}
 
+    async def subtitle_text(self, bvid: str, *, max_chars: int = 8000) -> dict:
+        """One subtitle track's joined text, fetched host-side.
+
+        Why the host fetches the subtitle body instead of handing the URL back: the
+        URL lives on ``*.hdslb.com`` and a plugin fetching it would need that domain
+        added to its http allow-list — configuration the operator should not have to
+        make for a read the host can do inside its own egress rules. Returns
+        ``{"bvid", "lan", "text"}``; ``text`` is capped at ``max_chars``.
+        """
+        listing = await self.subtitle(bvid)
+        tracks = listing.get("subtitles") or []
+        if not tracks:
+            return {"bvid": listing["bvid"], "lan": "", "text": ""}
+        track = tracks[0]
+        url = str(track.get("url") or "")
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or not (
+            host == "aisubtitle.hdslb.com" or host.endswith(".hdslb.com")
+        ):
+            raise ValueError("subtitle url is not on a bilibili subtitle host")
+        await self._throttle()
+        response = await self._client().get(url)
+        if response.status_code != 200:
+            raise ValueError(f"subtitle body returned HTTP {response.status_code}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError("subtitle body is not JSON") from exc
+        body = payload.get("body") or []
+        if not isinstance(body, list):
+            raise ValueError("subtitle body has an unexpected shape")
+        pieces = []
+        for row in body[:400]:
+            if isinstance(row, dict):
+                pieces.append(str(row.get("content") or ""))
+        text = "".join(pieces)[:max_chars]
+        return {"bvid": listing["bvid"], "lan": str(track.get("lan") or ""), "text": text}
+
     # ------------------------------------------------------------------- transport
     async def _get_json(
         self, path: str, params: dict[str, object], *, signed: bool = False
@@ -231,7 +271,9 @@ class BilibiliClient:
             )
         await self._throttle()
 
-        query = dict(params)
+        # 全部值先归一成 str：wbi 签名与 httpx 的 params 都要求字符串，
+        # dict[str, object] 会在签名分支与请求分支各自报类型错。
+        query: dict[str, str] = {str(k): str(v) for k, v in dict(params).items()}
         if signed:
             query = sign(query, await self._signing_key())
 
@@ -328,7 +370,7 @@ class BilibiliClient:
         """Fetch video detail by BV/av id or URL."""
         kind, ident = parse_target(target)
         params = {"bvid": ident} if kind == "bv" else {"aid": ident}
-        data = await self._get_json("/x/web-interface/view", params)
+        data = await self._get_json("/x/web-interface/view", dict(params))
 
         owner = data.get("owner") or {}
         stat = data.get("stat") or {}
