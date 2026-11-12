@@ -10,6 +10,25 @@
 
 ## [Unreleased]
 
+### 字幕能力面（bilibili.subtitle）：dsh-bili-humanism 的核心思想在边界内落地
+
+原来错在哪：第一批改编把 dsh-bili-humanism 的字幕学习列为「待宿主能力」——wbi 签名
+与 hdslb 字幕正文抓取都是宿主职责，插件面当时只有 get_json。#52 交付了宿主 L2 client
+的 subtitle()，但插件面（ctx.bilibili / bilibili.request surface）没有接上，插件依然
+拿不到字幕。
+
+现在：
+
+- **宿主 `BilibiliClient.subtitle_text(bvid)`**：字幕列表 → 取第一轨 → 校验 URL 必须
+  在 `*.hdslb.com`（https only）→ 宿主代抓正文 → 拼接限长 8000 字。播放地址、账号
+  状态等 player 包内容照旧不过边界。
+- **插件面两种形态同一契约**：进程内 `ctx.bilibili.subtitle(bvid)`（沙箱 client 委托
+  宿主注入的 L2 client）；隔离模式 `ctx.bilibili().subtitle(bvid)` 经新 surface
+  `bilibili.subtitle`（宿主侧重新校验能力 + host client 代抓）。
+- 测试：bilibili/send_media/events 24 项全过；IPC 67 项、安全边界 89/89。
+- 插件仓库同批：fishtalk-lite 0.2.0（collect 升级字幕语料）、bili-scroll 0.2.0
+  （whale 克制机制）已发版。
+
 ### 自主挑音色实现：人格卡 `voice_self_select` 从字段变成能力
 
 原来错在哪：autonomous-capabilities-design.md §2 把挑音色写成设计（「决策在管线内、

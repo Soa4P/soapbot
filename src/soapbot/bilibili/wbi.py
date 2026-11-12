@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Mapping
 from urllib.parse import urlencode
 
 #: Fixed permutation published in Bilibili's web bundle. Index into the concatenation
@@ -79,7 +80,7 @@ def mixin_key(img_key: str, sub_key: str) -> str:
     return permuted[:MIXIN_KEY_LENGTH]
 
 
-def sign(params: dict[str, object], key: str, *, timestamp: int | None = None) -> dict[str, str]:
+def sign(params: Mapping[str, object], key: str, *, timestamp: int | None = None) -> dict[str, str]:
     """Return ``params`` with ``wts`` and ``w_rid`` added."""
     if not key:
         raise ValueError("mixin key is empty")
