@@ -62,7 +62,9 @@
 | `TIMELINE_WINDOW` | `10` | 注入「近期事件」的条数上限，范围 `1..50`。时间线只记事件摘要，不复制消息正文 |
 | `SHUTDOWN_GRACE_SECONDS` | `10` | 关闭时等待适配器与后台任务收敛的秒数，范围 `1..120`。超时后进程照常退出，避免一个卡住的读循环让每次重启都像挂死 |
 | `ENABLE_RUNTIME` | `true` | 关掉则只提供 HTTP API |
-| `ENABLE_BUDGET` / `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
+| `ENABLE_BUDGET` | `true` | 额度账本默认开启（¥500/期、¥100/笔的保守上限），设 `false` 可完全移除 `/budget` 命令族 |
+| `BUDGET_REQUIRE_DISTINCT_APPROVER` | `true` | 需第二位审批人；单 owner 部署可显式设 `false`，但审批退化为确认框，事件与审计都会标 `degraded` |
+| `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
 | `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |
 | `HISTORY_TURNS` | `16` | 回放进提示词的历史条数。调大会让上下文更容易超出预算，从而在每次回复前多一次摘要调用 |
 | `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |

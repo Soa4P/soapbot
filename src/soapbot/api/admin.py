@@ -1,4 +1,4 @@
-﻿"""Management views, read-only except for knowledge content.
+﻿"""Management views; writes are knowledge content and budget approvals.
 
 Why configuration writes are absent **from this module**
 --------------------------------------------------------
@@ -62,6 +62,14 @@ from soapbot.api.auth import require_api_auth, require_role
 from soapbot.api.errors import safe_detail
 from soapbot.api.locale import request_locale
 from soapbot.api.service_hint import restart_hint
+from soapbot.budget.events import APPROVAL_BUS, APPROVED, DENIED, ApprovalEvent
+from soapbot.budget.models import (
+    BudgetError,
+    BudgetExceededError,
+    RequestNotFoundError,
+    RequestNotPendingError,
+    SelfApprovalError,
+)
 from soapbot.i18n import t
 from soapbot.security.audit import get_audit_log
 from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
@@ -1327,6 +1335,7 @@ async def budget_view(
             "period_cap_minor": policy.period_cap_minor,
             "per_request_cap_minor": policy.per_request_cap_minor,
             "request_ttl_seconds": policy.request_ttl_seconds,
+            "require_distinct_approver": policy.require_distinct_approver,
             "period_key": policy.period_key(),
         },
         "requests": [
@@ -1350,6 +1359,133 @@ async def budget_view(
         ],
         "count": len(requests),
     }
+
+
+class BudgetDecision(BaseModel):
+    session_key: str = Field(..., min_length=1, max_length=200)
+    note: str = Field("", max_length=500)
+
+
+def _budget_decision_error(exc: BudgetError) -> HTTPException:
+    """Map a ledger rejection to a status without echoing the exception text.
+
+    Stringifying a raw exception into the response would be harmless with today's
+    authored messages, but it invites the next edit to include a SQL fragment.
+    Fixed strings keep the contract stable — and keep the s11 boundary meaningful.
+    """
+    if isinstance(exc, RequestNotFoundError):
+        return HTTPException(status_code=404, detail="budget request not found")
+    if isinstance(exc, RequestNotPendingError):
+        return HTTPException(status_code=409, detail="budget request is no longer pending")
+    if isinstance(exc, SelfApprovalError):
+        return HTTPException(status_code=403, detail="a second approver is required")
+    if isinstance(exc, BudgetExceededError):
+        return HTTPException(status_code=409, detail="period cap exceeded")
+    return HTTPException(status_code=400, detail="budget decision rejected")
+
+
+async def _decide_budget(
+    request: Request,
+    auth: dict,
+    request_id: int,
+    kind: str,
+    payload: BudgetDecision,
+) -> dict:
+    """The one decision path shared by the panel and any future client.
+
+    ``session_key`` is a *locator*, not an authorisation input: ``BudgetStore.approve``
+    verifies the row belongs to it and returns 404 otherwise. Authority comes from
+    ``APPROVE_PAYMENT`` plus a real credential — a loopback read must never be able
+    to approve by POSTing twice.
+    """
+    action = f"budget.{kind}"
+    _require_permission(auth, request, Permission.APPROVE_PAYMENT, action)
+    if auth.get("mode") != "token":
+        raise HTTPException(
+            status_code=401,
+            detail="a credential is required to decide a spend request",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    store = _runtime().budget
+    if store is None:
+        raise HTTPException(status_code=503, detail="budget ledger is not enabled")
+
+    approver_id = str(auth.get("subject") or "")
+    approver_name = str(auth.get("display_name") or approver_id or "webui")
+    try:
+        if kind == "approve":
+            outcome = await store.approve(
+                request_id,
+                session_key=payload.session_key,
+                approver_id=approver_id,
+                approver_name=approver_name,
+                note=payload.note,
+            )
+        else:
+            outcome = await store.deny(
+                request_id,
+                session_key=payload.session_key,
+                approver_id=approver_id,
+                note=payload.note,
+            )
+    except BudgetError as exc:
+        raise _budget_decision_error(exc) from exc
+
+    req = outcome.request
+    degraded = not store.policy.require_distinct_approver
+    get_audit_log().record(
+        kind="budget",
+        action=action,
+        outcome="allow",
+        detail=f"id={req.id} actor={approver_id[:40]} degraded={degraded}",
+    )
+    event = ApprovalEvent(
+        kind=APPROVED if kind == "approve" else DENIED,
+        request_id=req.id,
+        session_key=req.session_key,
+        amount_minor=req.amount_minor,
+        currency=req.currency,
+        purpose=req.purpose,
+        requester_id=req.requester_id,
+        requester_name=req.requester_name,
+        actor_id=approver_id,
+        actor_name=approver_name,
+        note=payload.note,
+        remaining_minor=outcome.available_minor,
+        degraded=degraded,
+        created_at=time.time(),
+    )
+    # Best-effort: the ledger has already committed. A broken webhook must not turn
+    # a successful approval into a 500 that the operator retries (and double-decides).
+    delivered = await APPROVAL_BUS.publish(event)
+    return {
+        "ok": True,
+        "request_id": req.id,
+        "status": str(req.status),
+        "notified": delivered,
+    }
+
+
+@router.post("/budget/{request_id}/approve")
+async def budget_approve(
+    request_id: int,
+    payload: BudgetDecision,
+    request: Request,
+    auth: dict = Depends(require_api_auth),
+) -> dict:
+    """Approve a pending spend request from the panel. Owner + credential only."""
+    return await _decide_budget(request, auth, request_id, "approve", payload)
+
+
+@router.post("/budget/{request_id}/deny")
+async def budget_deny(
+    request_id: int,
+    payload: BudgetDecision,
+    request: Request,
+    auth: dict = Depends(require_api_auth),
+) -> dict:
+    """Refuse a pending request, releasing its reservation."""
+    return await _decide_budget(request, auth, request_id, "deny", payload)
 
 
 @router.get("/logs")
