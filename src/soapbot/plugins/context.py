@@ -34,6 +34,7 @@ from typing import Any
 
 from soapbot.plugins.manifest import Capability
 from soapbot.plugins.sandbox import (
+    MAX_PLUGIN_MEDIA_BYTES,
     BilibiliClient,
     CapabilityGuard,
     EncryptedPluginStorage,
@@ -81,6 +82,8 @@ def bind_caller(caller: CallerContext):
 #: Hard ceiling on a plugin command's reply. The core uses the same budget, so a
 #: plugin cannot out-shout the bot or flood a group.
 MAX_REPLY_CHARS = 2000
+
+
 MAX_ARGS = 16
 MAX_ARG_CHARS = 200
 
@@ -205,6 +208,7 @@ class PluginContext:
         # further away (that variant was reproduced during review).
         self._session_ledger = session_ledger or NullLedger()
         self._sender = None
+        self._sender_media = None
         # Backing stores for the Wave 3 surfaces. ``None`` means "this host has no
         # memory configured", which the APIs report through ``.available`` rather
         # than by raising — but authorisation is still enforced per call, so an
@@ -542,9 +546,51 @@ class PluginContext:
             raise RuntimeError("no sender registered; host did not enable sending")
         await self._sender(session_key, clean)
 
-    def _init_runtime_hooks(self, *, sender=None, memory=None, kb=None) -> None:
+    async def send_media(
+        self, *, session_key: str, image_b64: str, caption: str = ""
+    ) -> None:
+        """Send one image (sticker, photo) to an observed session.
+
+        Same ledger discipline as :meth:`send` — the host refuses any session the
+        plugin was not invoked from — plus a decoded-size cap. ``caption`` is plain
+        text (sanitised like any plugin text); the image travels as base64 and is
+        decoded host-side, so the plugin never touches an upload API.
+        """
+        import base64
+        import binascii
+
+        self._guard.check(Capability.SEND_MEDIA, detail=f"len={len(image_b64 or '')}")
+        from soapbot.plugins.sandbox import _SESSION_KEY_RE
+
+        if not isinstance(session_key, str) or not _SESSION_KEY_RE.match(session_key):
+            raise ValueError(
+                "invalid session_key; expected 'adapter:scene:target' "
+                "(e.g. onebot11:group:123456)"
+            )
+        if not self._session_ledger.permits(self.plugin, session_key):
+            raise PermissionError(
+                "plugin may only send to sessions the host recorded for it"
+            )
+        try:
+            decoded = base64.b64decode(image_b64 or "", validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("image_b64 is not valid base64") from exc
+        if len(decoded) > MAX_PLUGIN_MEDIA_BYTES:
+            raise ValueError(
+                f"image exceeds the {MAX_PLUGIN_MEDIA_BYTES // (1024 * 1024)} MiB cap "
+                f"({len(decoded)} bytes)"
+            )
+        if self._sender_media is None:
+            raise RuntimeError("no media sender registered; host did not enable sending")
+        caption_clean = scrub_plugin_output(caption, max_chars=MAX_REPLY_CHARS)
+        await self._sender_media(session_key, image_b64, caption_clean)
+
+    def _init_runtime_hooks(
+        self, *, sender=None, sender_media=None, memory=None, kb=None
+    ) -> None:
         """Host-only wiring, called by the loader/manager after construction."""
         self._sender = sender
+        self._sender_media = sender_media
         if memory is not None:
             self._memory_store = memory
         if kb is not None:

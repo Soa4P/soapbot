@@ -180,6 +180,16 @@ class Capability(StrEnum):
     SEND = "send"
     """Send messages proactively (rate-limited, group-scoped)."""
 
+    SEND_MEDIA = "send_media"
+    """Send images (stickers, photos) proactively.
+
+    Same ledger discipline as ``send`` — only sessions the host recorded the plugin
+    observing — plus a per-image size cap. Split from ``send`` because "can speak"
+    and "can attach pictures" are different approval decisions: a reminder plugin
+    needs the first and not the second, and an operator who approves media is
+    approving a channel that can carry photos the plugin fetched from elsewhere.
+    """
+
     BILIBILI = "bilibili"
     """Call Bilibili's *logged-in* API (history, watch later).
 
@@ -200,6 +210,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.MEMORY_READ,
         Capability.KB_READ,
         Capability.SEND,
+        Capability.SEND_MEDIA,
         Capability.STORAGE,
         Capability.BILIBILI,
     }
@@ -207,7 +218,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
 
 #: Capabilities that can cost money or annoy users; always rate limited.
 RATE_LIMITED_CAPABILITIES: frozenset[Capability] = frozenset(
-    {Capability.HTTP, Capability.SEND, Capability.CRON, Capability.TOOL, Capability.BILIBILI}
+    {Capability.HTTP, Capability.SEND, Capability.SEND_MEDIA, Capability.CRON, Capability.TOOL, Capability.BILIBILI}
 )
 
 

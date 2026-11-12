@@ -111,3 +111,4 @@ Thumbs.db
 # Watchdog output from tests/conftest.py. Written only when a test exceeds its
 # deadline, and printed by CI at that point; it is a diagnostic, not a source file.
 pytest-hang-dump.log
+.zcode/

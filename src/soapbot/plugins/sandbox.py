@@ -720,6 +720,13 @@ class SafeHttpClient:
                 await aclose()
 
 
+#: Decoded ceiling for one plugin-sent image, shared by the in-process context and
+#: the isolated-mode surface handler. QQ rejects much larger media itself; the cap
+#: exists so a plugin cannot push an arbitrary-size payload through the host's upload
+#: path, and so the base64 round-trip inside frames stays bounded.
+MAX_PLUGIN_MEDIA_BYTES = 4 * 1024 * 1024
+
+
 class BilibiliUnavailableError(RuntimeError):
     """The operator has not configured the login cookie this surface needs.
 

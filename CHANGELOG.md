@@ -10,6 +10,37 @@
 
 ## [Unreleased]
 
+### 插件能发图片了（`send_media` 能力面）+ 修复隔离模式 send 永远被拒的潜在缺陷
+
+原来错在哪（两件，第二件更严重）：
+
+1. 插件只能说文字——表情包/照片即使存下来也发不出去，`ctx.send` 只走
+   `scrub_plugin_output` 的文本路径。
+2. **隔离模式（默认形态）下插件的 send 从来没有通过过**：子进程 shim 必须携带
+   `session_key`（发送目标本身就是请求），而父侧一刀切的 `_FORBIDDEN_ARG_KEYS`
+   检查把 `session_key` 拒在 ledger 看到帧之前。两行探针在 master 上复现
+   （`forbidden keys hit: {'session_key'}`）；进程内模式不受影响，所以既有测试全绿，
+   缺陷一直没暴露。所有依赖 send 的插件（self-nudge 等）在隔离部署上都是哑的。
+
+现在：
+
+- **`arg_violation(surface, args)`**：forbidden-key 检查按 surface 豁免——
+  `send.message` / `send_media.request` 合法携带 `session_key`（真边界是宿主的
+  observed-session ledger），其余 surface 一律照拒；`scope` 等键在 send 上也照拒。
+- **`Capability.SEND_MEDIA`**（敏感 + 限频 30/分）：`ctx.send_media(session_key,
+  image_b64, caption)`，与 send 同一套 ledger；解码 + 4 MiB 上限在**两处边界都
+  强制**（进程内 context 与隔离模式的 `SurfaceRouter._send_media`——隔离是默认
+  形态，只有一个路径有的上限等于没有）；载荷校验先于基础设施检查，报错不泄露
+  宿主是否装了媒体发送。审计只记 base64 字符数，图片字节不进任何日志。
+- **runtime 新增 `_send_media_via_adapter`**：与 `_send_via_adapter` 同一套会话键
+  解析与 `OutgoingMessage` 构造（IMAGE 段 + 可选 caption），适配器按各自能力
+  上传或降级。
+- 测试 7 项：参数规则（send 豁免/memory 照拒/scope 在 send 上也拒）、路由表接线、
+  ledger 拒绝、无能力拒绝、超限拒绝、runtime 段构造。
+- 设计文档 `docs/qq-autonomy-design.md`：主动对话（插件，本批随插件仓库发布）、
+  QQ 空间读写（**官方 API 无此接口，只能走个人号协议端——默认关、读写分开审批、
+  风险自负**）、表情包相册、人格卡 `autonomy`/`warmth` 字段与温度模型。
+
 ### B 站 L3 落地：`bilibili` 插件能力（登录态由宿主持有）与示例插件
 
 原来错在哪：能力矩阵写着「L3 登录态未实现」。而沙箱明确拒绝插件发送 `Cookie` 头

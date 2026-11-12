@@ -1,13 +1,7 @@
 name: bili
 version: 1.0.0
 entry: main:BiliPlugin
-description: >
-  B 站登录态查询：读取本账号的观看历史（/bili-history），按 bvid 拉公开元数据拼
-  摘要（/bili-look）。读了什么：只向 api.bilibili.com 发 GET（宿主固定允许的域），
-  携带操作者在 SOAPBOT_BILI_COOKIE 配置的登录 Cookie；本插件代码拿不到也不存储
-  Cookie。发到哪里：只从 B 站读，不向任何地址写；命令输出经过宿主的输出清洗后
-  回到发起命令的会话。留不留副本：观看历史的标题与 bvid 会写入插件自己的加密
-  storage（最多 50 条）用于去重提示，可随时用 /bili-forget 清空；Cookie 永不落盘。
+description: B 站登录态查询。读取本账号的观看历史（命令 bili-history），按 bvid 拉公开元数据拼摘要（命令 bili-look）。只向宿主钉死的 bilibili 域发 GET，携带操作者配置的登录 Cookie，插件代码拿不到也不存储 Cookie；不外发数据；历史的标题与 bvid 存进插件加密 storage（最多 50 条）用于去重提示，bili-forget 可清空，Cookie 永不落盘。
 author: soapbot
 trust: trusted
 channel: official
