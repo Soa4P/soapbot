@@ -1,0 +1,11 @@
+name: warmth-observer
+version: 1.0.0
+entry: main:WarmthObserverPlugin
+description: 只读报告当前会话的宿主温度（session.view 的 warmth 标量）与阈值比较。不写状态、不主动发言、不申请 send；是 dsh-longing「被算出来的状态」在本仓库能安全落地的形态，见 docs/reference-external-2026-11.md §2。
+author: soapbot
+trust: trusted
+channel: official
+min_host_version: 0.1.0
+capabilities:
+  - command
+  - session
