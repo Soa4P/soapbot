@@ -1,7 +1,9 @@
 # QQ 自主化设计：主动对话、空间、表情包、人格与温度
 
-> 状态：**设计 + 第一批宿主能力已实现**。已实现：`send_media` 能力面（#45 同批）；
-> 设计待做：QQ 空间读写（风险分级见 §2）、宿主级温度模型（§4）。
+> 状态：**设计 + 宿主能力面已部分实现**。已实现：`send_media`（#45 同批）、
+> 消息图片段的按需能力面 `media_observe`（§3 / §5 第 1 项）；
+> 设计待做：QQ 空间读写（风险分级见 §2）、宿主级温度模型（§4）、
+> WBI 字幕读取、人格卡三个可选字段。
 > 扩展政策：本页描述的**用户侧功能**全部落在插件仓库（`packages/`），本体只新增
 > 受审能力面——与 bilibili/send_media 同模式。
 
@@ -46,8 +48,8 @@ SECURITY.md 反复声明的风控区：个人号行为可能触发平台风控�
 - **存**：插件 `sticker-album`（本批发布）——`/meme-save <URL|附件说明>`、
   `/meme-list <标签>`、`/meme-send <标签>`、`/meme-forget`。图片以 base64 存进
   插件加密 storage（单张 ≤4 MiB、总量 ≤100 张），数据不出插件命名空间。v1 的
-  来源是 URL（操作者配置的 http 白名单域）；「从聊天里顺手收藏」需要消息钩子
-  暴露图片段（当前只有 text 前 500 字符）——列为宿主能力项，见 §5。
+  来源是 URL（操作者配置的 http 白名单域）；「从聊天里顺手收藏」的宿主能力面
+  **已实现**（本批），交付形态与隐私边界见 §5 第 1 项。
 - **发**：宿主新能力 `SEND_MEDIA`（**本批已实现**）——与 `send` 同一套
   observed-session ledger，但单独审批（「能说话」和「能发图」是两个决定）；解码
   与 4 MiB 上限在**两处边界都强制**（进程内 context 与隔离模式的 SurfaceRouter，
@@ -69,8 +71,18 @@ SECURITY.md 反复声明的风控区：个人号行为可能触发平台风控�
 
 ## 5. 待宿主能力清单（按优先级）
 
-1. 消息钩子暴露图片段（表情包「顺手收藏」的前置；注意隐私——图片 URL 是一次性
-   的，且只进插件 storage 不进日志）。
+1. **✅ 已实现**：消息图片段的按需能力面 `media_observe`。宿主在消息钩子阶段把当条
+   消息的 http(s) 图片引用放进**纯内存**的 `MediaInbox`（按会话分桶、TTL 120 秒、
+   取一次即消费、单条消息 ≤16 个）；插件凭单独审批的 `media_observe` 调
+   `ctx.observe_images()` 取走，不带任何参数——会话键由宿主绑定的 caller 决定，
+   隔离模式的 `_RemoteCtx` 走同一个 surface `media.observe`，父进程 guard 复核。
+   **刻意不做广播**：一次性的、常带签名的图片 URL 不该塞进 `message_received`
+   让每个 `message` 观察者都拿到；而且隔离 worker 目前不转发命名事件，靠事件字段
+   交付等于对默认形态无效。URL 不进日志、审计（只记数量）、trace、messages 表；
+   本地路径与内联 base64 不越过边界。文本消息不清槽，因为「先发图、再发
+   `/meme-save`」是两条消息。
+   接线证据：`tests/test_plugin_media_observe.py`（16 项，末项是消息钩子→inbox→插件）。
+   插件侧责任：立刻把引用存进自己的加密 storage，不要传给 `ctx.log`。
 2. `qzone_read` / `qzone_write`（经协议端扩展；需操作者显式开启，风险自负）。
 3. 宿主级温度模型（session 元数据 + `session.view` 扩展）。
 4. WBI 签名的字幕读取（dsh-bili-humanism 改编前置，见 ADAPTATION.md）。

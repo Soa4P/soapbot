@@ -150,6 +150,7 @@ ALLOWED_SURFACES = frozenset(
         "session.view",
         "send.message",
         "send_media.request",
+        "media.observe",
         "http.request",
         "bilibili.request",
         "storage.get",
@@ -423,6 +424,15 @@ class _RemoteCtx:
                 "caption": str(caption or "")[:2000],
             },
         )
+
+    async def observe_images(self):
+        """Take the image references of the message that just arrived, once.
+
+        No argument: the session comes from the invoke frame the host itself sent,
+        so a worker cannot name another group's slot. The URL goes straight back
+        over the pipe to the plugin; the parent audits a count, never a URL.
+        """
+        return _call("media.observe", {})
 
     #: Raw escape hatch, present so the wire can be exercised end to end (including
     #: by a hostile plugin). It grants nothing: every request still lands in the

@@ -240,6 +240,31 @@ class SurfaceRouter:
         await self._sender_media(target, image_b64, caption)
         return True
 
+    async def _media_observe(self, args: dict[str, Any], caller) -> Any:
+        """Hand over the current message's image references, once, to an approved plugin.
+
+        The session key comes from the caller the host bound for this invocation,
+        never from ``args``: the wire rejects scope-bearing keys, and this handler
+        does not read one. Audit carries a count — a short-lived signed URL must not
+        end up in a log line simply because a plugin asked for a picture.
+        """
+        self._guard.check(Capability.MEDIA_OBSERVE, detail="media observe")
+        session_key = str(getattr(caller, "session_key", "") or "")
+        if not session_key:
+            raise PermissionError("media observation needs a bound caller")
+        from soapbot.plugins.media_inbox import MEDIA_INBOX
+
+        images = MEDIA_INBOX.take(session_key)
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:media.observe",
+                outcome="allow",
+                detail=f"plugin={self._plugin} count={len(images)}",
+                plugin=self._plugin,
+            )
+        return {"images": images}
+
     async def _http(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.HTTP, detail="http")
         if self._http is None:
@@ -358,6 +383,7 @@ _SURFACE_TABLE = {
     "http.request": SurfaceRouter._http,
     "bilibili.request": SurfaceRouter._bilibili,
     "send_media.request": SurfaceRouter._send_media,
+    "media.observe": SurfaceRouter._media_observe,
     "storage.get": SurfaceRouter._storage_get,
     "storage.set": SurfaceRouter._storage_set,
     "storage.delete": SurfaceRouter._storage_delete,

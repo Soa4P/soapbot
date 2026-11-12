@@ -10,6 +10,43 @@
 
 ## [Unreleased]
 
+### 消息钩子暴露图片段：做成按需能力面，而不是广播
+
+原来错在哪：`docs/qq-autonomy-design.md` §3 和 §5 都写了「从聊天里顺手收藏」需要宿主
+暴露消息里的图片段，宿主内部其实**早就有完整段结构**（OneBot 数组段、QQ 官方附件都产出
+`MessageSegment.image(url=...)`），但插件侧从没见到过——`PluginMessageHookStage` 把消息
+压成 `text[:500]`，`message_received` payload 只有文本与 session_key。同时，隔离模式
+（默认形态）的 worker façade 根本不转发命名事件：`message_hook` 是空实现，loader 只注册
+proxied command/tool。也就是说，就算给事件 payload 加一个 `images` 字段，默认形态的插件
+依然一个都收不到——「未接线的能力等于不存在」。
+
+现在的形态（与 `bilibili` / `send_media` 同模式：宿主持有受审能力面，插件按需申请）：
+
+- 新能力 `media_observe`，与 `message` **分开审批**：能读「说了什么」不等于能拿走附件。
+  列入 `SENSITIVE_CAPABILITIES`，面板审批页新增一条中英提示。
+- 新 surface `media.observe`：插件调 `ctx.observe_images()`，不带任何参数。会话键来自宿主
+  绑定的 caller（进程内是 contextvar，隔离模式是父进程发出的 invoke 帧），插件写不出
+  「读 B 群那张图」这行代码；`arg_violation` 也在 wire 上拒绝 scope-bearing 键。
+- `MediaInbox`：纯内存、按会话分桶、TTL 120 秒、**取一次即消费**、单条消息最多 16 个引用。
+  只交出 http(s) 引用；本地路径是远端适配器的攻击者输入，内联 base64 是图像内容而不是
+  引用，两者都不越过边界。文本消息不清空槽位，因为「先发图、再发 `/meme-save`」是两条
+  消息——由 TTL 而不是下一条文本结束窗口。
+- 隐私：URL 不进日志、不进审计（只记 `count=N`）、不进 trace、不进 messages 表；
+  `_Slot` 用 `repr=False` 防止异常字符串把它带出去。插件被要求立刻存进自己的加密
+  storage，且不要传给 `ctx.log`——这是插件侧的责任，宿主不假装能替它兜住。
+- 两种形态各有一条真实路径，检查点等价但不在同一处：进程内 `PluginContext.observe_images()`
+  用本插件的 `CapabilityGuard` + contextvar 里的 caller；隔离 worker 的
+  `_RemoteCtx.observe_images()` 走 `SurfaceRouter._media_observe`，由父进程的 guard 和
+  invoke 帧里的 caller 判定。两条都只交出本会话的一次性引用，审计口径一致（只记数量）。
+
+`tests/test_plugin_media_observe.py`（16 项）里最后一条是接线测试：真的从
+`IncomingMessage.segments` 跑一遍 `PluginMessageHookStage`，再取到那个 URL。
+
+顺带修正一处文档漂移：本轮之前 `verification-matrix.md` / `architecture.md` /
+`delivery-readiness-v2.md` / `progress.json` 都写着 `2145 passed, 12 skipped`，
+但本机全量实测基线其实是 **2169** ——前几轮的用例数没同步进这几处。以实测为准，
+加上本轮 16 项后是 **2185 passed / 12 skipped**，四处一并改正。
+
 ### 插件能发图片了（`send_media` 能力面）+ 修复隔离模式 send 永远被拒的潜在缺陷
 
 原来错在哪（两件，第二件更严重）：

@@ -255,6 +255,7 @@ export default {
   'plugins.cap.http': 'allows outbound requests',
   'plugins.cap.read': 'can read sessions and documents',
   'plugins.cap.send': 'can send messages unprompted',
+  'plugins.cap.media': 'can take one-time image links from messages; the host keeps no copy and writes no log',
   'plugins.grantReplaces': 'Approval replaces the granted set rather than merging: anything not ticked here is withdrawn.',
   'plugins.empty': 'The plugin directory is empty.',
   'plugins.exported': 'Exports from running plugins',

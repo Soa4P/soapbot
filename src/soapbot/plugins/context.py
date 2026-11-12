@@ -585,6 +585,24 @@ class PluginContext:
         caption_clean = scrub_plugin_output(caption, max_chars=MAX_REPLY_CHARS)
         await self._sender_media(session_key, image_b64, caption_clean)
 
+    async def observe_images(self) -> list[dict[str, str]]:
+        """Take the image references of the message that just arrived, once.
+
+        No session argument on purpose: ``_CURRENT_CALLER`` is the host's record of
+        who is invoking this plugin, and an argument named ``session_key`` would let
+        a plugin write down "read group B's picture" — the same scope escape the
+        memory API refuses. Requires ``media_observe``, not merely ``message``.
+
+        The returned URLs are short-lived and often signed. Store them in the
+        plugin's own encrypted namespace immediately; do not pass them to
+        ``ctx.log``, and do not expect a second call to return them.
+        """
+        self._guard.check(Capability.MEDIA_OBSERVE, detail="media observe")
+        session_key = self._require_caller("observe_images").session_key
+        from soapbot.plugins.media_inbox import MEDIA_INBOX
+
+        return MEDIA_INBOX.take(session_key)
+
     def _init_runtime_hooks(
         self, *, sender=None, sender_media=None, memory=None, kb=None
     ) -> None:

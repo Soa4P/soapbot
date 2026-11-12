@@ -202,6 +202,18 @@ class Capability(StrEnum):
     """
 
 
+    MEDIA_OBSERVE = "media_observe"
+    """Read the image references of the message that just arrived.
+
+    Split from ``MESSAGE`` because a plain-text observer has no reason to hold a
+    short-lived, often signed QQ image URL: "can read what was said" and "can take
+    the attachments" are different approval decisions. The host hands over a
+    reference once, in memory, and never writes it to a log, the audit trail, the
+    trace, or the messages table. A plugin is expected to store it in its own
+    encrypted namespace immediately and not pass it to ``ctx.log``.
+    """
+
+
 #: Capabilities that can leak data or reach the network. A plugin holding any of
 #: these is flagged in the WebUI, and the audit log records each use.
 SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
@@ -211,6 +223,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.KB_READ,
         Capability.SEND,
         Capability.SEND_MEDIA,
+        Capability.MEDIA_OBSERVE,
         Capability.STORAGE,
         Capability.BILIBILI,
     }
