@@ -10,6 +10,15 @@
 
 ## [Unreleased]
 
+### 修复: subtitle 端点需要 aid/cid（真实视频实测发现）
+
+原来错在哪：`BilibiliClient.subtitle()` 对 `/x/player/wbi/v2` 只传 `bvid`——实测六条
+真实视频全部 `-400`。player 端点要求 `aid` + `cid` + `bvid` 三件齐。
+
+现在：subtitle() 先走 view 端点解析 aid 与 cid（pages[0]），再带全三件打签名端点。
+测试同步更新为两段请求断言（view → signed player），六条真实视频实测返回空轨
+（AI 字幕需登录态，与文档边界一致；UP 上传的 CC 轨不受影响）。
+
 ### 两份外部参考评估：ops-handoff 十六篇与 dsh-cua 数据边界
 
 - **docs/reference-ops-handoff.md**：kira905/ops-handoff-design 十六篇运维设计记录
