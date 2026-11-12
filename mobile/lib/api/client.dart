@@ -115,14 +115,34 @@ class ChatApi {
   final String baseUrl;
   final http.Client _client;
   String? _cookie;
+  String? _csrf;
+  String? _token;
+  static const _mutating = {'POST', 'PUT', 'PATCH', 'DELETE'};
 
   void restoreCookie(String? value) => _cookie = value;
   String? get cookie => _cookie;
 
-  Map<String, String> get _headers => {
+  /// 登录返回的 Bearer token：服务端对 Bearer 请求豁免 CSRF（原生客户端没有
+  /// 跨站页面可 attach header，无暴露面），所以 app 优先走 Bearer 而不是靠
+  /// Cookie 过 double-submit——后者要求每次登录都重放 CSRF 值，升级安装
+  /// （旧会话仍有效但 csrf 未存）会永远 403。
+  void restoreToken(String? value) => _token = value;
+  String? get token => _token;
+
+  /// CSRF cookie 值：服务端 double-submit 要求变更请求回显它。HttpOnly 的会话
+  /// Cookie 走 [cookie]，这个是刻意可读的那一枚。Bearer 存在时不需要它。
+  void restoreCsrf(String? value) => _csrf = value;
+  String? get csrf => _csrf;
+
+  Map<String, String> _headersFor(String method) => {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        if (_cookie != null) 'Cookie': _cookie!,
+        if (_token != null) 'Authorization': 'Bearer ${_token!}',
+        if (_token == null && _cookie != null) 'Cookie': _cookie!,
+        if (_token == null &&
+            _csrf != null &&
+            _mutating.contains(method.toUpperCase()))
+          'X-CSRF-Token': _csrf!,
       };
 
   Future<Map<String, dynamic>> _send(
@@ -131,7 +151,7 @@ class ChatApi {
     Map<String, dynamic>? body,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
-    final request = http.Request(method, uri)..headers.addAll(_headers);
+    final request = http.Request(method, uri)..headers.addAll(_headersFor(method));
     if (body != null) request.body = jsonEncode(body);
     final streamed = await _client.send(request);
     final response = await http.Response.fromStream(streamed);
@@ -147,14 +167,22 @@ class ChatApi {
   }
 
   void _rememberCookie(http.Response response) {
+    // 登录/轮换会同时下发会话与 CSRF 两枚 Cookie（httpx 会把多个 Set-Cookie
+    // 合并进一个头）。会话 Cookie 原样回传；CSRF 值另存，变更请求时回显到
+    // X-CSRF-Token——服务端是标准 double-submit 校验。
     final raw = response.headers['set-cookie'];
     if (raw == null || raw.isEmpty) return;
-    _cookie = raw.split(';').first;
+    final session = RegExp(r'soapbot_session=([^;,\s]+)').firstMatch(raw)?.group(1);
+    final csrf = RegExp(r'soapbot_csrf=([^;,\s]+)').firstMatch(raw)?.group(1);
+    if (session != null) _cookie = 'soapbot_session=$session';
+    if (csrf != null) _csrf = csrf;
   }
 
   Future<Account> login(String username, String password) async {
     final body = await _send('POST', '/api/accounts/login',
         body: {'username': username, 'password': password});
+    final token = body['access_token'];
+    if (token is String && token.isNotEmpty) _token = token;
     return Account.fromJson(body['account'] as Map<String, dynamic>);
   }
 

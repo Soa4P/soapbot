@@ -22,6 +22,8 @@ class SoapbotArchiveApp extends StatefulWidget {
 class _SoapbotArchiveAppState extends State<SoapbotArchiveApp> {
   static const _storage = FlutterSecureStorage();
   static const _cookieKey = 'soapbot.session';
+  static const _csrfKey = 'soapbot.csrf';
+  static const _tokenKey = 'soapbot.token';
 
   final _api = ChatApi(baseUrl: baseUrl);
   Account? _account;
@@ -40,11 +42,14 @@ class _SoapbotArchiveAppState extends State<SoapbotArchiveApp> {
       final cookie = await _storage.read(key: _cookieKey);
       if (cookie != null && cookie.isNotEmpty) {
         _api.restoreCookie(cookie);
+        _api.restoreCsrf(await _storage.read(key: _csrfKey));
+        _api.restoreToken(await _storage.read(key: _tokenKey));
         final account = await _api.me();
         if (mounted) setState(() => _account = account);
       }
     } catch (_) {
       await _storage.delete(key: _cookieKey);
+      await _storage.delete(key: _csrfKey);
       _api.restoreCookie(null);
     } finally {
       if (mounted) setState(() => _restoring = false);
@@ -54,12 +59,28 @@ class _SoapbotArchiveAppState extends State<SoapbotArchiveApp> {
   Future<void> _signedIn(Account account) async {
     final cookie = _api.cookie;
     if (cookie != null) await _storage.write(key: _cookieKey, value: cookie);
+    final csrf = _api.csrf;
+    if (csrf != null) {
+      await _storage.write(key: _csrfKey, value: csrf);
+    } else {
+      await _storage.delete(key: _csrfKey);
+    }
+    final token = _api.token;
+    if (token != null) {
+      await _storage.write(key: _tokenKey, value: token);
+    } else {
+      await _storage.delete(key: _tokenKey);
+    }
     if (mounted) setState(() => _account = account);
   }
 
   Future<void> _signOut() async {
     await _storage.delete(key: _cookieKey);
+    await _storage.delete(key: _csrfKey);
+    await _storage.delete(key: _tokenKey);
     _api.restoreCookie(null);
+    _api.restoreCsrf(null);
+    _api.restoreToken(null);
     if (mounted) setState(() => _account = null);
   }
 
