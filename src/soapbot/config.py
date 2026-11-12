@@ -572,6 +572,18 @@ class Settings(BaseSettings):
     browse_robots_ttl_seconds: float = 3600.0
     """How long a host's robots.txt answer is cached in memory."""
 
+    # ---- approval notifications ----
+    notify_session_key: str = ""
+    """Optional ``adapter:scene:target`` to receive approval events as QQ messages.
+
+    Empty disables the channel. This is an operator-owned destination: a plugin
+    cannot choose it, and the runtime re-validates the key before sending.
+    """
+    notify_webhook_url: str = ""
+    """Optional HTTPS endpoint for approval events. Empty disables the channel."""
+    notify_webhook_secret: SecretStr = SecretStr("")
+    """HMAC-SHA256 key. Never logged, audited, or sent as a header value."""
+
     # ---- Bilibili (Wave 9) ----
     # Off by default. The README's disclaimer is only honest if enabling this is a
     # deliberate operator decision: Bilibili's developer agreement prohibits automated

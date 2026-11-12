@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `2225 passed, 12 skipped`；CI 六个
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `2238 passed, 12 skipped`；CI 六个
 必需检查全绿（`backend` 两个平台、`frontend`、`desktop`、`package`、`review`），另有两个
 按需 job：`desktop-bundle` 出 Windows 安装包、`release` 在 tag 上发布。
 
@@ -204,6 +204,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **多语言（对外文案 + 面板全 13 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；12 个管理页浏览器逐页实测中英双向切换，第 13 页存档由 `test_webui_i18n.py` 保证键齐全与「模板无中文残留」，**未做浏览器实测** |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
 | **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
+| **审批通知：QQ / Webhook / 手机 feed** | **本轮新增（服务端）** | `tests/test_approval_notifications.py`（13 项）；单一订阅点 + `(request_id, kind)` 幂等 + HMAC 签名 + 密钥零泄漏。三条通道默认全关，需运维逐项配置；**未做真实通道实测**，Flutter 审批页在下一阶段 |
 | **公开网页浏览 + 消费提案** | **本轮新增（静态渲染）** | `tests/test_browse_proposal.py`（21 项）；`npm run verify` 全绿。**未做**无头浏览器 / 模拟手机 JS 渲染与真机网页实测；白名单默认空，未点名域名时能力不可用 |
 | **额度审批：面板决策 + 事件总线** | **本轮新增** | `tests/test_budget_events.py`（9 项）、`tests/test_budget_approval_api.py`（10 项）；`npm run verify` 全绿并重建 `dist`。默认开启、单 owner 需显式降级且事件标 `degraded`；QQ / Webhook / 手机三条通知通道**本阶段尚未接线**，见下一段 |
 | **消息图片段按需能力面** | **本轮新增（宿主）** | `tests/test_plugin_media_observe.py`（16 项，含消息钩子→inbox→插件接线）；`npm run verify` 全绿并重建 `dist`。进程内与隔离形态各有路径，但**未做真实插件包（sticker-album）联调**，插件仓库不在本仓库内 |
@@ -249,7 +250,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 2225 passed, 12 skipped
+python -m pytest -q                 # 2238 passed, 12 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度
