@@ -1,5 +1,5 @@
 name: soapbot_archive
-description: Read-only cloud archive client for soapbot. QQ remains the source of truth.
+description: soapbot 手机端——云端会话、备注与对话；QQ 仍是 qq:* 会话的事实源。
 publish_to: "none"
 version: 0.1.0+1
 
