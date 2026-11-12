@@ -794,6 +794,8 @@ class PluginManager:
         self.tools = PluginToolRegistry(loader)
         self.cron = PluginCronRunner(loader)
         self.sender = None
+        self.sender_media = None
+        self._sender_media = None
         """Optional ``async (session_key, text) -> None`` installed by the runtime."""
 
         from soapbot.config import settings
