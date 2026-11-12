@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-11T23:56:22+08:00",
+  "updated_at": "2026-11-12T12:21:19+08:00",
   "current": null,
   "phases": [
     {
@@ -3303,6 +3303,40 @@
         }
       ],
       "goal": "让主力使用的网页端与手机端从只读存档升级为真正的对话端，并补上账号管理界面与历史翻页"
+    },
+    {
+      "id": "a7",
+      "index": "A7",
+      "name": "消息图片段的按需能力面",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a7-t1",
+          "name": "宿主能力面 media_observe（与 message 分开审批，列入敏感能力）",
+          "status": "done"
+        },
+        {
+          "id": "a7-t2",
+          "name": "MediaInbox：内存、TTL、取一次即消费、只交 http(s) 引用",
+          "status": "done"
+        },
+        {
+          "id": "a7-t3",
+          "name": "进程内 context 与隔离 worker 两条路径 + surface 白名单与授权",
+          "status": "done"
+        },
+        {
+          "id": "a7-t4",
+          "name": "消息钩子阶段接线 + 16 项用例（含 URL 不进日志/审计的断言）",
+          "status": "done"
+        },
+        {
+          "id": "a7-t5",
+          "name": "面板审批提示中英双语 + 设计文档/能力表/验证矩阵同步",
+          "status": "done"
+        }
+      ],
+      "goal": "让「从聊天里顺手收藏」有宿主能力面可用，且不把一次性的图片 URL 广播给每个消息观察者"
     }
   ],
   "archive": [
@@ -3398,7 +3432,7 @@
     }
   ],
   "verification": {
-    "pytest": "2145 passed, 12 skipped",
+    "pytest": "2185 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

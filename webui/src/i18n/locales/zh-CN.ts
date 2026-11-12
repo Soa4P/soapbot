@@ -269,6 +269,7 @@ export default {
   'plugins.cap.http': '允许外发请求',
   'plugins.cap.read': '可读取会话与文档',
   'plugins.cap.send': '可主动发消息',
+  'plugins.cap.media': '可取走消息里一次性的图片链接（宿主不留存、不记日志）',
   'plugins.grantReplaces': '授权是替换而不是合并：不在本次勾选内的已授予能力会被收回。',
   'plugins.empty': '插件目录为空。',
   'plugins.exported': '运行中插件导出',
