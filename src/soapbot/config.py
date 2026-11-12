@@ -557,6 +557,21 @@ class Settings(BaseSettings):
     the audit trail. Never flipped silently by detecting that only one owner exists.
     """
 
+    # ---- public-page browsing (purchase proposals) ----
+    browse_allow_hosts: IdList = []
+    """Exact hosts (or ``.example.com`` for subdomains) the bot may read.
+
+    Empty refuses every destination. A browsing feature with an implicit "anywhere"
+    default would turn one prompt-injected URL into an SSRF primitive, so the
+    operator has to name the shops explicitly.
+    """
+    browse_max_bytes: int = 512 * 1024
+    """Hard cap on one page's response body."""
+    browse_timeout_seconds: float = 10.0
+    """Per-request timeout; also used for the robots.txt fetch."""
+    browse_robots_ttl_seconds: float = 3600.0
+    """How long a host's robots.txt answer is cached in memory."""
+
     # ---- Bilibili (Wave 9) ----
     # Off by default. The README's disclaimer is only honest if enabling this is a
     # deliberate operator decision: Bilibili's developer agreement prohibits automated
@@ -844,6 +859,7 @@ class Settings(BaseSettings):
         "memory_collect_groups",
         "group_blacklist",
         "user_blacklist",
+        "browse_allow_hosts",
         mode="before",
     )
     @classmethod

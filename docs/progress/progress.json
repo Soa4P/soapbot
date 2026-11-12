@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T13:05:00+08:00",
+  "updated_at": "2026-11-12T14:10:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3371,6 +3371,40 @@
         }
       ],
       "goal": "把只在类型定义与命令里存在的审批，变成面板能点、事件能订阅、且不悄悄放宽禁止自批的工作流"
+    },
+    {
+      "id": "a9",
+      "index": "A9",
+      "name": "公开网页浏览与消费提案",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a9-t1",
+          "name": "browse 能力面：与 HTTP 分开审批，SafeHttpClient 复用 SSRF/禁重定向/头白名单防护",
+          "status": "done"
+        },
+        {
+          "id": "a9-t2",
+          "name": "域名白名单默认拒绝一切 + robots.txt 同意 + 可识别 UA + 无 Cookie/登录态/JS",
+          "status": "done"
+        },
+        {
+          "id": "a9-t3",
+          "name": "文本白名单快照与页面确定性价格提取，输出有体积与长度上限",
+          "status": "done"
+        },
+        {
+          "id": "a9-t4",
+          "name": "browse.propose 限额预检（无价格/超单笔/超周期）后才写账本并发布 REQUESTED",
+          "status": "done"
+        },
+        {
+          "id": "a9-t5",
+          "name": "进程内与隔离两条路径共用 SurfaceRouter + 21 项用例 + 面板审批提示中英双语",
+          "status": "done"
+        }
+      ],
+      "goal": "让 bot 能在不碰支付凭据、不绕反爬与登录的前提下自己找公开商品页并给出可审批的购买提案"
     }
   ],
   "archive": [
@@ -3466,7 +3500,7 @@
     }
   ],
   "verification": {
-    "pytest": "2204 passed, 12 skipped",
+    "pytest": "2225 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

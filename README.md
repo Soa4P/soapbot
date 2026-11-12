@@ -135,6 +135,10 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
   [docs/qq-official-setup.md](docs/qq-official-setup.md) 配置。
   官方机器人审核、B 站数据合规、支付边界见 [SECURITY.md](SECURITY.md) 与
   [docs/provenance.md](docs/provenance.md)。
+- `browse` 能力面只读取操作者点名域名的公开页面：遵守 robots.txt 与站点服务条款，
+  使用可识别 UA，不绕登录、验证码或反爬，不带 Cookie / 登录态，不跟重定向，不执行
+  JS，不提交表单、不点击购买。AI 只能提出消费申请，实际购买始终由人在官方渠道完成；
+  本体不持有支付凭据、不调用支付 API、不自动扣款。
 
 20 项边界逐条证据在 [docs/security-boundaries.md](docs/security-boundaries.md)，
 认证与威胁模型在 [docs/security-model.md](docs/security-model.md)。

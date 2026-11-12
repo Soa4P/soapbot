@@ -65,6 +65,10 @@
 | `ENABLE_BUDGET` | `true` | 额度账本默认开启（¥500/期、¥100/笔的保守上限），设 `false` 可完全移除 `/budget` 命令族 |
 | `BUDGET_REQUIRE_DISTINCT_APPROVER` | `true` | 需第二位审批人；单 owner 部署可显式设 `false`，但审批退化为确认框，事件与审计都会标 `degraded` |
 | `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
+| `BROWSE_ALLOW_HOSTS` | 空 | 允许读取公开页面的域名，逗号分隔；**空 = 拒绝一切**。可写 `.example.com` 覆盖子域 |
+| `BROWSE_MAX_BYTES` | `524288` | 单个页面响应体硬上限 |
+| `BROWSE_TIMEOUT_SECONDS` | `10` | 页面与 robots.txt 的读取超时 |
+| `BROWSE_ROBOTS_TTL_SECONDS` | `3600` | 每个域的 robots.txt 内存缓存时长 |
 | `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |
 | `HISTORY_TURNS` | `16` | 回放进提示词的历史条数。调大会让上下文更容易超出预算，从而在每次回复前多一次摘要调用 |
 | `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |
