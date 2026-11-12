@@ -265,6 +265,95 @@ class SurfaceRouter:
             )
         return {"images": images}
 
+    async def _browse_page(self, url: str) -> Any:
+        """Read one public page with a client that consumes the BROWSE capability.
+
+        The same SafeHttpClient provides SSRF checks, DNS pinning, redirect refusal
+        and the header allow-list; only the capability it consumes differs. Building
+        it here (in the parent) is what keeps an isolated worker from ever holding a
+        client that could bypass the guard.
+        """
+        from soapbot.browse.reader import (
+            USER_AGENT,
+            BrowsePolicy,
+            ReadError,
+            read_public_page,
+        )
+        from soapbot.plugins.sandbox import SafeHttpClient
+
+        policy = BrowsePolicy.from_settings()
+        client = SafeHttpClient(
+            self._guard,
+            allowed_hosts=policy.allowed_hosts,
+            capability=Capability.BROWSE,
+        )
+
+        async def fetcher(target: str, headers: dict[str, str], timeout: float):
+            return await client.fetch(
+                target,
+                method="GET",
+                headers={"User-Agent": USER_AGENT},
+                timeout=timeout,
+            )
+
+        try:
+            return await read_public_page(url, policy=policy, fetcher=fetcher)
+        except ReadError as exc:
+            # Every ReadError carries a sentence the host wrote, not a URL echoed
+            # back from the response.
+            raise ValueError(str(exc)) from exc
+
+    def _browse_audit(self, action: str, page, *, extra: str = "") -> None:
+        if self._audit is None:
+            return
+        self._audit.record(
+            kind="plugin",
+            action=f"surface:{action}",
+            outcome="allow",
+            detail=(
+                f"plugin={self._plugin} host={page.host} "
+                f"bytes={page.bytes_read}{extra}"
+            ),
+            plugin=self._plugin,
+        )
+
+    async def _browse_read(self, args: dict[str, Any], caller) -> Any:
+        self._guard.check(Capability.BROWSE, detail="browse read")
+        page = await self._browse_page(str(args.get("url") or ""))
+        self._browse_audit("browse.read", page)
+        return page.to_dict()
+
+    async def _browse_propose(self, args: dict[str, Any], caller) -> Any:
+        """Read a page, pre-check the caps, and create one pending spend request."""
+        self._guard.check(Capability.BROWSE, detail="browse propose")
+        from soapbot.app import get_runtime
+        from soapbot.browse.proposal import propose_purchase
+
+        runtime = get_runtime()
+        store = getattr(runtime, "budget", None) if runtime is not None else None
+        if store is None:
+            raise RuntimeError("budget ledger is not enabled")
+        session_key = str(getattr(caller, "session_key", "") or "")
+        if not session_key:
+            raise PermissionError("a bound caller is required to propose a purchase")
+
+        page = await self._browse_page(str(args.get("url") or ""))
+        override = args.get("amount_minor")
+        result = await propose_purchase(
+            store,
+            page,
+            session_key=session_key,
+            requester_id=f"plugin:{self._plugin}",
+            requester_name=self._plugin,
+            amount_override_minor=int(override) if override is not None else None,
+        )
+        self._browse_audit(
+            "browse.propose",
+            page,
+            extra=f" created={result.created} reason={result.reason}",
+        )
+        return result.to_dict()
+
     async def _http(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.HTTP, detail="http")
         if self._http is None:
@@ -384,6 +473,8 @@ _SURFACE_TABLE = {
     "bilibili.request": SurfaceRouter._bilibili,
     "send_media.request": SurfaceRouter._send_media,
     "media.observe": SurfaceRouter._media_observe,
+    "browse.read": SurfaceRouter._browse_read,
+    "browse.propose": SurfaceRouter._browse_propose,
     "storage.get": SurfaceRouter._storage_get,
     "storage.set": SurfaceRouter._storage_set,
     "storage.delete": SurfaceRouter._storage_delete,

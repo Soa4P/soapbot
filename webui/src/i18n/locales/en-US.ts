@@ -265,6 +265,7 @@ export default {
   'plugins.cap.read': 'can read sessions and documents',
   'plugins.cap.send': 'can send messages unprompted',
   'plugins.cap.media': 'can take one-time image links from messages; the host keeps no copy and writes no log',
+  'plugins.cap.browse': 'can read allow-listed public pages for purchase proposals; honours robots.txt, has no login state or JS, and still needs human approval',
   'plugins.grantReplaces': 'Approval replaces the granted set rather than merging: anything not ticked here is withdrawn.',
   'plugins.empty': 'The plugin directory is empty.',
   'plugins.exported': 'Exports from running plugins',

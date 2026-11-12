@@ -585,6 +585,37 @@ class PluginContext:
         caption_clean = scrub_plugin_output(caption, max_chars=MAX_REPLY_CHARS)
         await self._sender_media(session_key, image_b64, caption_clean)
 
+    async def browse_read(self, url: str) -> dict:
+        """Read one public page under the host's browsing policy.
+
+        Routed through ``SurfaceRouter`` rather than a second implementation: the
+        allow-list, robots check, capability guard and audit are then identical for
+        in-process and isolated plugins. The caller comes from the host's
+        contextvar, not from an argument.
+        """
+        from soapbot.plugins.surfaces import SurfaceRouter
+
+        router = SurfaceRouter(
+            guard=self._guard, plugin=self.plugin, audit=self._audit
+        )
+        return await router.dispatch(
+            "browse.read", {"url": url}, self._require_caller("browse_read")
+        )
+
+    async def browse_propose(self, url: str, *, amount_minor: int | None = None) -> dict:
+        """Propose a purchase from a public page, after the quota pre-check."""
+        from soapbot.plugins.surfaces import SurfaceRouter
+
+        args: dict = {"url": url}
+        if amount_minor is not None:
+            args["amount_minor"] = amount_minor
+        router = SurfaceRouter(
+            guard=self._guard, plugin=self.plugin, audit=self._audit
+        )
+        return await router.dispatch(
+            "browse.propose", args, self._require_caller("browse_propose")
+        )
+
     async def observe_images(self) -> list[dict[str, str]]:
         """Take the image references of the message that just arrived, once.
 
