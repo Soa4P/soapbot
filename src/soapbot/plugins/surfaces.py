@@ -84,6 +84,7 @@ class SurfaceRouter:
         storage=None,
         bilibili_cookie_provider=None,
         bilibili_client_factory=None,
+        sender_media=None,
     ) -> None:
         self._guard = guard
         self._plugin = plugin
@@ -96,6 +97,7 @@ class SurfaceRouter:
         self._storage = storage
         self._bilibili_cookie_provider = bilibili_cookie_provider
         self._bilibili_client_factory = bilibili_client_factory
+        self._sender_media = sender_media
         self._log_writes: list[float] = []
 
     def _audit_denied(self, surface: str, reason: str) -> None:
@@ -195,6 +197,47 @@ class SurfaceRouter:
         if self._sender is None:
             raise RuntimeError("host has no sender installed")
         await self._sender(target, text)
+        return True
+
+    async def _send_media(self, args: dict[str, Any], caller) -> Any:
+        self._guard.check(Capability.SEND_MEDIA, detail="send_media")
+        target = str(args.get("session_key") or "")
+        image_b64 = str(args.get("image_b64") or "")
+        caption = str(args.get("caption") or "")
+        if self._ledger is None or not self._ledger.permits(self._plugin, target):
+            self._audit_denied("send_media.request", "target session not observed")
+            raise PermissionError("session not authorised for this plugin")
+        # Decode-and-cap lives HERE, not only in the in-process context: for isolated
+        # plugins this router is the boundary, and a cap that exists on one path only
+        # is a cap the default path does not have. Payload validation runs before the
+        # sender check, so the error a hostile payload sees says nothing about whether
+        # the host happens to have media delivery installed.
+        import base64 as _base64
+        import binascii as _binascii
+
+        from soapbot.plugins.sandbox import MAX_PLUGIN_MEDIA_BYTES
+
+        try:
+            decoded = _base64.b64decode(image_b64, validate=True)
+        except (_binascii.Error, ValueError) as exc:
+            raise ValueError("image_b64 is not valid base64") from exc
+        if len(decoded) > MAX_PLUGIN_MEDIA_BYTES:
+            raise ValueError(
+                f"image exceeds the {MAX_PLUGIN_MEDIA_BYTES // (1024 * 1024)} MiB cap "
+                f"({len(decoded)} bytes)"
+            )
+        if self._sender_media is None:
+            raise RuntimeError("host has no media sender installed")
+        # Audit carries sizes only; image bytes never enter a log line.
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:send_media.request",
+                outcome="allow",
+                detail=f"plugin={self._plugin} b64_chars={len(image_b64)}",
+            plugin=self._plugin,
+        )
+        await self._sender_media(target, image_b64, caption)
         return True
 
     async def _http(self, args: dict[str, Any], caller) -> Any:
@@ -314,6 +357,7 @@ _SURFACE_TABLE = {
     "send.message": SurfaceRouter._send,
     "http.request": SurfaceRouter._http,
     "bilibili.request": SurfaceRouter._bilibili,
+    "send_media.request": SurfaceRouter._send_media,
     "storage.get": SurfaceRouter._storage_get,
     "storage.set": SurfaceRouter._storage_set,
     "storage.delete": SurfaceRouter._storage_delete,

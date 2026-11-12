@@ -140,6 +140,7 @@ class BotRuntime:
             # deliver a message, and the runtime applies the adapter's own limits
             # (rate, length, capability) exactly as it does for core replies.
             plugins.install_sender(self._send_via_adapter)
+            plugins.install_media_sender(self._send_media_via_adapter)
         self.locks = SessionLockManager()
         self.sessions = SessionStore()
         self._unsubscribers: list[Any] = []
@@ -380,6 +381,52 @@ class BotRuntime:
         if not receipt.ok:
             logger.warning(
                 "plugin send failed adapter=%s target=%s err=%s",
+                adapter_name,
+                target,
+                receipt.error,
+            )
+
+    async def _send_media_via_adapter(
+        self, session_key: str, image_b64: str, caption: str = ""
+    ) -> None:
+        """Delivery path for plugin-initiated image sends.
+
+        Mirrors :meth:`_send_via_adapter`: the plugin supplies a session key, the
+        runtime re-validates it and builds the ``OutgoingMessage`` — one IMAGE
+        segment (base64; the adapter uploads or degrades per its capability set)
+        followed by an optional caption segment. The decoded-size cap lives in the
+        capability surface, before bytes ever reach an adapter.
+        """
+        import base64
+        import binascii
+
+        from soapbot.core.message import MessageScene, MessageSegment, OutgoingMessage
+
+        parts = session_key.split(":")
+        if len(parts) != 3:
+            raise ValueError("session_key must be adapter:scene:target")
+        adapter_name, scene, target = parts
+        adapter = self.adapters.get(adapter_name)
+        if adapter is None:
+            raise RuntimeError(f"no adapter {adapter_name!r} available for plugin send")
+        try:
+            base64.b64decode(image_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("image payload is not valid base64") from exc
+
+        segments = [MessageSegment.image(b64=image_b64)]
+        if caption.strip():
+            segments.append(MessageSegment.text(caption))
+        out = OutgoingMessage(
+            scene=MessageScene.GROUP if scene == "group" else MessageScene.PRIVATE,
+            segments=segments,
+            group_id=target if scene == "group" else "",
+            user_id=target if scene != "group" else "",
+        )
+        receipt = await adapter.send(out)
+        if not receipt.ok:
+            logger.warning(
+                "plugin media send failed adapter=%s target=%s err=%s",
                 adapter_name,
                 target,
                 receipt.error,

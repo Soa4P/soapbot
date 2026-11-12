@@ -297,6 +297,10 @@ class PluginMessageHookStage(Stage):
     def __init__(self, loader: PluginLoader, *, audit: AuditLog | None = None) -> None:
         self.loader = loader
         self.audit = audit or get_audit_log()
+        # None until install_media_sender runs; hooks read it via getattr so a
+        # deployment without the media approval still loads every plugin.
+        self.sender_media = None
+        self._sender_media = None
 
     async def run(self, ctx: PipelineContext) -> StageResult:
         if not self.loader.loaded:
@@ -825,8 +829,23 @@ class PluginManager:
     def install_sender(self, sender) -> None:
         self.sender = sender
         for loaded in self.loader.loaded.values():
-            loaded.context._init_runtime_hooks(sender=sender)
+            loaded.context._init_runtime_hooks(sender=sender, sender_media=self.sender_media)
         self._sender = sender
+
+    def install_media_sender(self, sender_media) -> None:
+        """Wire the host's image-delivery path for plugins that earned SEND_MEDIA.
+
+        Separate from :meth:`install_sender` on purpose: "can speak" and "can attach
+        pictures" are different approvals, and one may be installed without the other
+        (a plugin whose media sender is missing answers with the surface's own
+        "host did not enable sending" error instead of silently downgrading).
+        """
+        self.sender_media = sender_media
+        for loaded in self.loader.loaded.values():
+            loaded.context._init_runtime_hooks(
+                sender=self.sender, sender_media=sender_media
+            )
+        self._sender_media = sender_media
 
     def install_isolation(self, *, supervisor, memory=None, kb=None) -> None:
         """Wire the process supervisor to a host-side authorization dispatcher.
@@ -884,6 +903,7 @@ class PluginManager:
             memory=getattr(self, "_surface_memory", None),
             kb=getattr(self, "_surface_kb", None),
             sender=getattr(self, "_sender", None),
+            sender_media=getattr(self, "_sender_media", None),
             ledger=ledger,
             audit=self.loader.audit,
             storage=storage,
@@ -902,13 +922,13 @@ class PluginManager:
 
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         loaded = await self.loader.load(name, force=force)
-        loaded.context._init_runtime_hooks(sender=self.sender)
+        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media)
         await self._emit("plugin_loaded", {"plugin": name})
         return loaded
 
     async def reload(self, name: str) -> LoadedPlugin:
         loaded = await self.loader.reload(name)
-        loaded.context._init_runtime_hooks(sender=self.sender)
+        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media)
         await self._emit("plugin_loaded", {"plugin": name, "reloaded": True})
         return loaded
 
