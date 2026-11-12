@@ -72,6 +72,9 @@
 | `NOTIFY_SESSION_KEY` | 空 | 审批事件推送到的 `adapter:scene:target` 会话；空则关闭 QQ 通道 |
 | `NOTIFY_WEBHOOK_URL` | 空 | 审批事件 Webhook 地址；空则关闭该通道 |
 | `NOTIFY_WEBHOOK_SECRET` | 空 | HMAC-SHA256 签名密钥，`SecretStr`，永不进头 / 日志 / 审计 |
+| `QZONE_VIA_PROTOCOL` | `false` | 空间能力总开关。官方机器人无空间接口，开启即表示接受个人号协议端的风控 / 冻结风险 |
+| `QZONE_API_URL` | 空 | 操作者自己的 OneBot 兼容 HTTP 端点基址，不会被自动发现 |
+| `QZONE_ACCESS_TOKEN` | 空 | 该端点的 Bearer token，`SecretStr`，只留在宿主 |
 | `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |
 | `HISTORY_TURNS` | `16` | 回放进提示词的历史条数。调大会让上下文更容易超出预算，从而在每次回复前多一次摘要调用 |
 | `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |

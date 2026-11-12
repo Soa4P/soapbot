@@ -393,6 +393,7 @@ async function deletePlugin(plugin: any): Promise<void> {
                     <li><span class="mono">send</span> — {{ t('plugins.cap.send') }}</li>
                     <li><span class="mono">send_media / media_observe</span> — {{ t('plugins.cap.media') }}</li>
                     <li><span class="mono">browse</span> — {{ t('plugins.cap.browse') }}</li>
+                    <li><span class="mono">qzone_read / qzone_write</span> — {{ t('plugins.cap.qzone') }}</li>
                   </ul>
                   <p class="hint" style="margin: 0">{{ t('plugins.grantReplaces') }}</p>
                 </div>

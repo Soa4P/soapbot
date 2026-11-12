@@ -85,6 +85,7 @@ class SurfaceRouter:
         bilibili_cookie_provider=None,
         bilibili_client_factory=None,
         sender_media=None,
+        qzone=None,
     ) -> None:
         self._guard = guard
         self._plugin = plugin
@@ -98,6 +99,9 @@ class SurfaceRouter:
         self._bilibili_cookie_provider = bilibili_cookie_provider
         self._bilibili_client_factory = bilibili_client_factory
         self._sender_media = sender_media
+        from soapbot.qzone import QzoneGateway
+
+        self._qzone = qzone or QzoneGateway()
         self._log_writes: list[float] = []
 
     def _audit_denied(self, surface: str, reason: str) -> None:
@@ -354,6 +358,40 @@ class SurfaceRouter:
         )
         return result.to_dict()
 
+    def _qzone_audit(self, action: str, verb: str, *, chars: int = 0) -> None:
+        if self._audit is None:
+            return
+        # Never the post text, never the token, never the endpoint URL.
+        self._audit.record(
+            kind="plugin",
+            action=f"surface:{action}",
+            outcome="allow",
+            detail=f"plugin={self._plugin} verb={verb} chars={chars}",
+            plugin=self._plugin,
+        )
+
+    async def _qzone_read(self, args: dict[str, Any], caller) -> Any:
+        self._guard.check(Capability.QZONE_READ, detail="qzone read")
+        verb = str(args.get("action") or "")
+        params = args.get("params")
+        result = await self._qzone.call(
+            verb, dict(params) if isinstance(params, dict) else {}, write=False
+        )
+        self._qzone_audit("qzone.read", verb, chars=len(result.get("text", "")))
+        return result
+
+    async def _qzone_write(self, args: dict[str, Any], caller) -> Any:
+        self._guard.check(Capability.QZONE_WRITE, detail="qzone write")
+        verb = str(args.get("action") or "send_qzone_post")
+        params = args.get("params")
+        payload = dict(params) if isinstance(params, dict) else {}
+        text = str(payload.get("text") or "")
+        result = await self._qzone.call(verb, payload, write=True)
+        self._qzone_audit("qzone.write", verb, chars=len(text))
+        # The endpoint's response is not returned: a plugin has no need to read back
+        # a post it just made, and the body could echo the text into a plugin log.
+        return {"status": result["status"], "posted": True}
+
     async def _http(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.HTTP, detail="http")
         if self._http is None:
@@ -475,6 +513,8 @@ _SURFACE_TABLE = {
     "media.observe": SurfaceRouter._media_observe,
     "browse.read": SurfaceRouter._browse_read,
     "browse.propose": SurfaceRouter._browse_propose,
+    "qzone.read": SurfaceRouter._qzone_read,
+    "qzone.write": SurfaceRouter._qzone_write,
     "storage.get": SurfaceRouter._storage_get,
     "storage.set": SurfaceRouter._storage_set,
     "storage.delete": SurfaceRouter._storage_delete,

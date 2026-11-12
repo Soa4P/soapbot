@@ -585,6 +585,35 @@ class PluginContext:
         caption_clean = scrub_plugin_output(caption, max_chars=MAX_REPLY_CHARS)
         await self._sender_media(session_key, image_b64, caption_clean)
 
+    def _surface_router(self):
+        """One router for every host-owned surface this context exposes.
+
+        Returning an unannotated object here would push `Any` into four public
+        methods; keeping the dispatch result in a locally typed variable instead
+        makes the `dict` return type honest without a `type: ignore`.
+        """
+        from soapbot.plugins.surfaces import SurfaceRouter
+
+        return SurfaceRouter(guard=self._guard, plugin=self.plugin, audit=self._audit)
+
+    async def qzone_read(self, action: str, params: dict | None = None) -> dict:
+        """Read 空间/说说 through the host's vetted protocol gateway."""
+        result: dict = await self._surface_router().dispatch(
+            "qzone.read",
+            {"action": action, "params": params or {}},
+            self._require_caller("qzone_read"),
+        )
+        return result
+
+    async def qzone_write(self, text: str, *, confirm: bool = False) -> dict:
+        """Post a 说说. ``confirm`` must be passed again at the call site."""
+        result: dict = await self._surface_router().dispatch(
+            "qzone.write",
+            {"action": "send_qzone_post", "params": {"text": text, "confirm": confirm}},
+            self._require_caller("qzone_write"),
+        )
+        return result
+
     async def browse_read(self, url: str) -> dict:
         """Read one public page under the host's browsing policy.
 
@@ -593,28 +622,20 @@ class PluginContext:
         in-process and isolated plugins. The caller comes from the host's
         contextvar, not from an argument.
         """
-        from soapbot.plugins.surfaces import SurfaceRouter
-
-        router = SurfaceRouter(
-            guard=self._guard, plugin=self.plugin, audit=self._audit
-        )
-        return await router.dispatch(
+        result: dict = await self._surface_router().dispatch(
             "browse.read", {"url": url}, self._require_caller("browse_read")
         )
+        return result
 
     async def browse_propose(self, url: str, *, amount_minor: int | None = None) -> dict:
         """Propose a purchase from a public page, after the quota pre-check."""
-        from soapbot.plugins.surfaces import SurfaceRouter
-
         args: dict = {"url": url}
         if amount_minor is not None:
             args["amount_minor"] = amount_minor
-        router = SurfaceRouter(
-            guard=self._guard, plugin=self.plugin, audit=self._audit
-        )
-        return await router.dispatch(
+        result: dict = await self._surface_router().dispatch(
             "browse.propose", args, self._require_caller("browse_propose")
         )
+        return result
 
     async def observe_images(self) -> list[dict[str, str]]:
         """Take the image references of the message that just arrived, once.
