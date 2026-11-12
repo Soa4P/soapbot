@@ -306,6 +306,15 @@ class PluginMessageHookStage(Stage):
         if not self.loader.loaded:
             return StageResult()
 
+        # The message hook owns the hand-off: it is the stage where an inbound
+        # message has already passed admission, and the command stage runs *before*
+        # it, so "send a picture, then /meme-save" still finds the picture. Only
+        # http(s) references are offered, in memory, once — never to a log, the
+        # trace, the audit trail or the messages table.
+        from soapbot.plugins.media_inbox import MEDIA_INBOX
+
+        MEDIA_INBOX.put(ctx.event.session_key, ctx.event.segments)
+
         principal: Principal | None = ctx.extras.get("principal")
         caller = CallerContext.from_principal(principal, ctx.event.session_key)
         text = ctx.event.text[:500]

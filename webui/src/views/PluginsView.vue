@@ -391,6 +391,7 @@ async function deletePlugin(plugin: any): Promise<void> {
                     <li><span class="mono">http</span> — {{ t('plugins.cap.http') }}</li>
                     <li><span class="mono">memory_read / kb_read</span> — {{ t('plugins.cap.read') }}</li>
                     <li><span class="mono">send</span> — {{ t('plugins.cap.send') }}</li>
+                    <li><span class="mono">send_media / media_observe</span> — {{ t('plugins.cap.media') }}</li>
                   </ul>
                   <p class="hint" style="margin: 0">{{ t('plugins.grantReplaces') }}</p>
                 </div>
