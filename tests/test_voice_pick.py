@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from soapbot.voice.picker import DEFAULT_VOICE, VOICE_CANDIDATES, VoicePickError, VoicePicker
+from soapbot.voice.picker import VOICE_CANDIDATES, VoicePickError, VoicePicker
 
 
 def _chat(responses: list[str]):
