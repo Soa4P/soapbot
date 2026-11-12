@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T18:00:00+08:00",
+  "updated_at": "2026-11-12T19:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3526,6 +3526,35 @@
         }
       ],
       "goal": "把三处停在纸面的设计变成可配置、可验证的宿主能力，同时不把模型输出变成跨会话持久状态"
+    },
+    {
+      "id": "a14",
+      "index": "A14",
+      "name": "外部参考核实与写作规范",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a14-t1",
+          "name": "用 GitHub API 核实三条链接，纠正两处拼写，登记 Fangi8 仍 404 待确认",
+          "status": "done"
+        },
+        {
+          "id": "a14-t2",
+          "name": "新增 reference-external-2026-11.md：bothouse / dsh-longing 只读评估与不改理由",
+          "status": "done"
+        },
+        {
+          "id": "a14-t3",
+          "name": "按 qu-ai-wei 的三条约束改写 writing-style.md，配纯标准库可选扫描器",
+          "status": "done"
+        },
+        {
+          "id": "a14-t4",
+          "name": "warmth-observer 只读示例插件 + 7 项用例 + 孤儿基线与 mypy 排除同步",
+          "status": "done"
+        }
+      ],
+      "goal": "把「自行查找并改写、不要全盘照抄」落成可核实的分析文档与本仓库自己的写作规矩"
     }
   ],
   "archive": [
@@ -3621,7 +3650,7 @@
     }
   ],
   "verification": {
-    "pytest": "2266 passed, 12 skipped",
+    "pytest": "2273 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",

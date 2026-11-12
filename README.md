@@ -224,6 +224,8 @@ HTTP 错误、超时、非法 JSON、非对象 JSON 不重试——那些重试�
 | 15 个面板页、群范围、语音、登录 | [docs/guide.md](docs/guide.md) |
 | 多用户账号、邀请码、多端对话、只读存档与端开关 | [docs/chat-archive.md](docs/chat-archive.md) |
 | 443 被占用、内存只有 341 MB 时怎么部署 | [docs/deployment-web-chat.md](docs/deployment-web-chat.md) |
+| 本仓库写作口径（去 AI 味）与可选自查工具 | [docs/writing-style.md](docs/writing-style.md) |
+| 外部仓库看了什么、改了什么、没抄什么 | [docs/reference-external-2026-11.md](docs/reference-external-2026-11.md) |
 | 配置项与环境变量 | [docs/configuration.md](docs/configuration.md) |
 | 部署形态、容器加固、远程验收 | [docs/deploy-layer.md](docs/deploy-layer.md) |
 | 备份、巡检、排障、升级 | [docs/operations.md](docs/operations.md) |

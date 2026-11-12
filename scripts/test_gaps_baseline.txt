@@ -12,3 +12,4 @@ soapbot.examples.plugins.help.main
 soapbot.examples.plugins.qzone-diary.main
 soapbot.examples.plugins.qzone-watch.main
 soapbot.examples.plugins.remind.main
+soapbot.examples.plugins.warmth-observer.main
