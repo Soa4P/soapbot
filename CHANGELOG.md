@@ -10,6 +10,33 @@
 
 ## [Unreleased]
 
+### 审批事件终于能通知到人了：QQ / Webhook / 手机三通道
+
+原来错在哪：`APPROVAL_BUS` 有发布者、**零生产订阅者**（全仓 `subscribe` 只出现在测试里）。
+申请提交后除了命令回复里那句被动提醒，没人知道有事要批；额度页要人工打开才看得到。
+上一阶段把面板按钮做出来了，但「通知我」这件事依然是空的。
+
+现在（`ApprovalNotifier` 是唯一订阅点，`app.py` lifespan 装配）：
+
+- **QQ**：`SOAPBOT_NOTIFY_SESSION_KEY` 指向操作者指定的会话，宿主走
+  `BotRuntime._send_via_adapter` 发送（与插件 send 同一条投递路径，密钥形状由宿主复核）；
+  文本截断 500 字，末尾明确「本机器人不执行任何支付」。
+- **Webhook**：`SOAPBOT_NOTIFY_WEBHOOK_URL` + `SOAPBOT_NOTIFY_WEBHOOK_SECRET`，
+  HMAC-SHA256 签 `timestamp.nonce.body`，带时间戳与 nonce 抗重放；走共享出站客户端
+  （禁重定向、TLS 校验、忽略代理环境变量）。密钥用 `SecretStr`，**不进请求头、不进日志、
+  不进审计**；审计只记 host 与状态码，连完整 URL 与用途正文都不记。
+- **手机**：`GET /api/approvals/feed?after=<cursor>` 返回有界游标 feed，供下一阶段 Flutter
+  审批页轮询。刻意复用手机端已有的 2 秒轮询范式，不新造 SSE 会话，也不把审批通知
+  伪装成聊天归档消息污染存档。
+- **幂等**：以 `(request_id, kind)` 为键的有界 LRU，重放回调、重试 POST、通道被调用两次
+  都只投递一次；不同状态（申请/批准）不会互相压制。进程重启可能重通知一次——这是
+  明确记录的取舍，漏通知比重复更糟。
+- 三条通道互不阻塞：单个通道抛异常或超时只记异常类型，账本已经提交，通知失败绝不
+  把成功审批变成 500 然后被重试成二次决策。
+
+`tests/test_approval_notifications.py`（13 项）覆盖三通道、签名可验证、密钥零泄漏、
+失败隔离、幂等、游标增量、feed 有界与端点权限。
+
 ### 公开网页浏览与消费提案：AI 能自己找，但不能自己买
 
 原来错在哪：`qq-autonomy-design.md` 想让 bot 自主上网挑东西，但仓库里**没有任何

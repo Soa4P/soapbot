@@ -288,6 +288,13 @@ async def _start_runtime() -> None:
 
     await _attach_adapters(runtime)
 
+    # One subscription for every notification channel. Attached here rather than in
+    # build_runtime so hand-assembled runtimes in tests stay free of global state;
+    # the notifier owns no credentials of its own, it reads them from settings.
+    from soapbot.notifications.dispatcher import ApprovalNotifier
+
+    runtime.approval_notifier = ApprovalNotifier(runtime).start()
+
     _RUNTIME = runtime
     await runtime.start()
 

@@ -1488,6 +1488,27 @@ async def budget_deny(
     return await _decide_budget(request, auth, request_id, "deny", payload)
 
 
+@router.get("/approvals/feed")
+async def approval_feed(
+    request: Request,
+    after: int = Query(0, ge=0),
+    auth: dict = Depends(require_api_auth),
+) -> dict:
+    """Cursor feed of approval events for the phone app.
+
+    Polling with ``after`` rather than SSE on purpose: the Flutter client already
+    polls the chat stream every two seconds, and a cursor the client holds survives
+    a dropped connection without a server-side session to reconstruct. The payload
+    is the same whitelisted dict the other two channels receive.
+    """
+    _require_permission(auth, request, Permission.MANAGE_CONFIG, "approval.feed")
+    runtime = _runtime()
+    notifier = getattr(runtime, "approval_notifier", None)
+    if notifier is None:
+        return {"enabled": False, "events": [], "cursor": 0}
+    return {"enabled": True, **notifier.feed(after)}
+
+
 @router.get("/logs")
 async def recent_logs(
     limit: int = Query(200, ge=1, le=2000),
