@@ -108,13 +108,18 @@ class EdgeTts:
             "max_chars": self.max_chars,
         }
 
-    async def synthesize(self, text: str) -> str:
+    async def synthesize(self, text: str, *, voice: str | None = None) -> str:
         """Return base64 audio, ready for :meth:`MessageSegment.record`.
 
         Base64 rather than bytes keeps the value JSON-serialisable end to end: it
         travels through the trace record and the adapter frame, and a ``bytes`` object
         in either would fail at serialisation time — after the user has waited.
+
+        ``voice`` overrides the constructor voice for this one call — the autonomous
+        picker's per-(persona, session) choice lands here; ``None`` keeps the
+        operator's configured voice.
         """
+        effective_voice = voice or self.voice
         cleaned = " ".join(str(text or "").split())
         if not cleaned:
             raise VoiceUnavailableError("empty text", code="empty")
@@ -134,7 +139,7 @@ class EdgeTts:
             ) from exc
 
         try:
-            communicate = edge_tts.Communicate(cleaned, self.voice, rate=self.rate)
+            communicate = edge_tts.Communicate(cleaned, effective_voice, rate=self.rate)
             chunks: list[bytes] = []
             async for chunk in communicate.stream():
                 if chunk.get("type") == "audio" and chunk.get("data"):
