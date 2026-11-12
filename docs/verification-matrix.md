@@ -35,7 +35,7 @@
 | MCP 握手协商与失败区分 | `mcp/client.py` | `test_mcp_wiring.py`（服务端回旧版本时采纳其版本；握手期崩溃的错误带 stderr 与退出码） | 真实服务端返回 `2025-06-18`，客户端采纳而非假定自己的 | **自动 + 实测** |
 | 三家 Provider 的报文映射 | `providers/anthropic.py`、`gemini.py`、`ollama.py` | `tests/test_providers_mapping.py`（7 项：system 提升、data URL 转换、token 字段名、`done` 终止、角色重命名、429→`ProviderError`） | — | **仅自动** |
 | 可访问性静态规则 | `scripts/check_a11y.py` | 32 个组件 × 4 条规则（按钮名称、点击目标可聚焦、img 有 alt、对话框有语义） | 规则查出两处表格行只能鼠标点击，已补 `tabindex` 与 Enter/Space。**但这两行的键盘路径只由模板断言覆盖**：本机没有已配置的人格与会话，表格为空，浏览器里按不到那一行 | **仅自动**（键盘实测缺数据） |
-| 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（9 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；补测后逐步降为 9（`core/bus.py` 有了 `test_event_bus_contract.py` 就该从基线里删掉，否则「没人看」成了常态） | **自动 + 实测** |
+| 测试断层扫描 | `scripts/check_test_gaps.py` | 孤儿模块基线（11 个）+ 文档数字与看板一致性 | 扫出 19 个无人引用的模块与 1 处过期数字；补测后逐步降为 9（`core/bus.py` 有了 `test_event_bus_contract.py` 就该从基线里删掉，否则「没人看」成了常态）；新增 `qzone-diary` / `qzone-watch` 两个示例插件的 `main.py` 与既有示例插件同等对待，基线升为 11 | **自动 + 实测** |
 | 容器部署 | `deploy/docker-compose.yml`、`deploy/Dockerfile` | `scripts/check_deploy.py`（静态，17 项：16 通过 + 1 告警） | 雨云 Ubuntu 24.04 真机：镜像 430 MB、`Up (healthy)`、`uid=10001`、只读根、`tini`、`doctor: PASS`、`down/up` 后 `/data` 数据不变、设置写入后 `/data/.env` 落盘且重启可读回。§8 九条全过，见 `deploy-layer.md` §8.1 | **自动 + 实测** |
 | 上游连通性静态检查 | `security/posture.py` | `tests/test_posture.py`（7 项：空配置、缺文件、坏 YAML、本机端点、明文 http、远端、进报告） | `python -m soapbot.cli doctor` 实跑，输出 `[warn] provider.upstream (medium)` | **自动 + 实测** |
 | `doctor --probe` 网络探测 | `security/posture.py`、`cli.py` | `test_posture.py`：401 ⇒ 可达、503 ⇒ 不可达（mock transport，规则本身）；另有本地回环服务端的 Socket 测试 | 只对本地回环跑过。**本机回环被拦截返回 502，那条 Socket 测试在此环境会 skip**，规则由 mock 版覆盖 | **仅自动**（真实云端探测**未验证**） |
@@ -48,6 +48,7 @@
 | 公开网页浏览与消费提案 | `browse/reader.py`、`browse/proposal.py`、`plugins/surfaces.py`、`plugins/sandbox.py` | `tests/test_browse_proposal.py`（21 项：页面提取不执行脚本、输出白名单、空白名单拒绝、域外拒绝、robots 允许/拒绝/5xx/网络错误、非 200 与体积上限、可识别 UA 且无 Cookie、能力单列且敏感、两个 surface 白名单与路由、scope 键拒绝、`BROWSE` 而非 `HTTP`、限额预检四种结果、事件发布） | 静态渲染路径由单元测试覆盖；**未做真机网页实测与无头浏览器渲染** | **仅自动** |
 | 审批通知三通道与幂等 | `notifications/dispatcher.py`、`api/admin.py`、`app.py` | `tests/test_approval_notifications.py`（13 项：QQ 投递与关闭、Webhook 签名可验证、密钥零泄漏、失败隔离、非 200 不回显 URL、重复事件只投递一次、不同状态不互压、游标增量、feed 有界、白名单 payload、端点权限） | 通道用注入的假 HTTP 客户端与假 runtime；**未做真实 QQ / 企业微信 / 手机推送实测** | **仅自动** |
 | 手机审批页与可下载 debug APK | `mobile/lib/screens/approvals_screen.dart`、`mobile/lib/api/client.dart`、`.github/workflows/ci.yml` | `mobile/test/approval_test.dart`（5 项：feed 白名单解析、缺省值降级、degraded 可见、游标保序、未启用时为空）；CI `flutter analyze` + `flutter test` + `flutter build apk --debug` + `upload-artifact` | APK 由 CI 构建产出，可在 Actions run 的 Artifacts 下载；**未做真机 / 模拟器端到端实测** | **仅自动** |
+| QQ 空间受审网关 | `qzone.py`、`plugins/surfaces.py`、`examples/plugins/qzone-*` | `tests/test_qzone_surface.py`（15 项：默认关闭仍拒绝、读写动作互不串用、未知协议动作拒绝、写需 confirm 与有界正文、不改调用方参数、token 宿主侧且不回传、审计不含正文/token/URL、非 200 不回显响应体、两个示例插件能力声明） | 只测注入的假协议端点；**未做真实 NapCat / Lagrange 联调** | **仅自动** |
 | 20 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、20 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
 | Cookie 会话与角色分级 | `api/auth.py`、`webui/src/api/client.ts`、`webui/src/stores/auth.ts` | `tests/test_auth_cookie.py`（Cookie 标志、CSRF/Origin、角色门槛、回环读写分离、登录登出） | 本机 TestClient 覆盖；云服务器上的登录/登出见本轮发布验收 | **仅自动**（云服务器实测见发布记录） |
 | 日志净化与统一错误层 | `logging_setup.py`、`core/log_context.py`、`api/errors.py`、`security/audit.py` | `tests/test_logging_hardening.py`（控制字符、ContextVar 不串请求、有界正则）、`tests/test_error_mapping.py`（状态码映射、响应不含异常原文） | 本机跑过；日志环与 `X-Request-ID` 由 TestClient 断言 | **仅自动** |
@@ -121,7 +122,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：2238 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：2253 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁

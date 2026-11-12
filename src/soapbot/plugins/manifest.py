@@ -214,6 +214,19 @@ class Capability(StrEnum):
     """
 
 
+    QZONE_READ = "qzone_read"
+    """Read 空间/说说 through the operator's personal-account protocol endpoint.
+
+    The endpoint is off unless ``SOAPBOT_QZONE_VIA_PROTOCOL=true``. Approving this
+    capability is also an explicit acceptance of the account-risk trade-off, which
+    the approval page spells out. Read and write are separate decisions.
+    """
+
+    QZONE_WRITE = "qzone_write"
+    """Post a 说说. Higher bar than read: every call needs ``confirm=true`` in
+    addition to the capability, and the audit records only the text length.
+    """
+
     BROWSE = "browse"
     """Read a public web page to build a purchase proposal.
 
@@ -236,6 +249,8 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.SEND_MEDIA,
         Capability.MEDIA_OBSERVE,
         Capability.BROWSE,
+        Capability.QZONE_READ,
+        Capability.QZONE_WRITE,
         Capability.STORAGE,
         Capability.BILIBILI,
     }

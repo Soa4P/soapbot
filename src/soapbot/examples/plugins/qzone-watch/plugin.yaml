@@ -1,0 +1,11 @@
+name: qzone-watch
+version: 1.0.0
+entry: main:QzoneWatchPlugin
+description: 浏览关注的人的新说说并摘要。只申请 qzone_read，通过宿主受审网关读取；不写、不发、不缓存正文到本地库。宿主未开启 SOAPBOT_QZONE_VIA_PROTOCOL 时明确失败。
+author: soapbot
+trust: trusted
+channel: official
+min_host_version: 0.1.0
+capabilities:
+  - command
+  - qzone_read
