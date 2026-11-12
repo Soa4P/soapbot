@@ -95,7 +95,7 @@ class WatchReport:
     comments: list[Comment] = field(default_factory=list)
     model: str = ""
     tier: str = ""
-    degraded: bool = ""
+    degraded: str = ""
     """Non-empty when the impression is a metadata summary rather than model output.
 
     Recorded explicitly instead of leaving ``impression`` empty: the caller has to be

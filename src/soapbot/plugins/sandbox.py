@@ -771,10 +771,23 @@ class BilibiliClient:
         *,
         cookie_provider: Callable[[], str],
         client_factory=None,
+        host_client=None,
     ) -> None:
         self._guard = guard
         self._cookie_provider = cookie_provider
         self._client_factory = client_factory
+        #: Host L2 client (#52) for the subtitle surface. ``None`` = 未接入，subtitle
+        #: 报「宿主未接」而不是静默降级。签名与 hdslb 抓取都留在宿主。
+        self._host_client = host_client
+
+    async def subtitle(self, bvid: str) -> dict:
+        """字幕正文：插件只发 bvid。签名与正文抓取全部委托宿主 L2 client。"""
+        self._guard.check(Capability.BILIBILI, detail=f"subtitle {str(bvid)[:24]}")
+        if self._host_client is None:
+            raise BilibiliUnavailableError(
+                "host has no bilibili client installed; subtitle needs the host's L2 face"
+            )
+        return await self._host_client.subtitle_text(str(bvid))
 
     async def get_json(self, path: str, *, params: dict[str, str] | None = None) -> dict:
         """GET ``https://api.bilibili.com{path}`` and return the parsed payload.

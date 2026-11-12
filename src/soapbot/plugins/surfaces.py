@@ -84,6 +84,7 @@ class SurfaceRouter:
         storage=None,
         bilibili_cookie_provider=None,
         bilibili_client_factory=None,
+        bilibili_host_client=None,
         sender_media=None,
         qzone=None,
     ) -> None:
@@ -98,6 +99,7 @@ class SurfaceRouter:
         self._storage = storage
         self._bilibili_cookie_provider = bilibili_cookie_provider
         self._bilibili_client_factory = bilibili_client_factory
+        self._bilibili_host_client = bilibili_host_client
         self._sender_media = sender_media
         from soapbot.qzone import QzoneGateway
 
@@ -413,6 +415,9 @@ class SurfaceRouter:
         # isolated path this router *is* the security boundary — the child has no
         # guard at all, and this is the object that decides.
         self._guard.check(Capability.BILIBILI, detail="bilibili.request")
+        kind = str(args.get("kind") or "get_json")
+        if kind == "subtitle":
+            return await self._bilibili_subtitle(args)
         path = str(args.get("path") or "")
         if not path:
             raise ValueError("bilibili.request needs a path")
@@ -429,6 +434,20 @@ class SurfaceRouter:
         # The client audits the request with the path only; the cookie value never
         # enters a detail string, a log line or an error message.
         return await client.get_json(path, params=raw_params)
+
+    async def _bilibili_subtitle(self, args: dict[str, Any]) -> Any:
+        """字幕正文：wbi 签名与 hdslb.com 抓取都在宿主侧完成（#52 的 L2 client）。
+
+        插件拿到的只有文本——播放地址、账号状态等 player 包内容照旧不过边界。
+        """
+        bvid = str(args.get("bvid") or "")
+        if not bvid:
+            raise ValueError("bilibili.subtitle needs a bvid")
+        self._guard.check(Capability.BILIBILI, detail=f"bilibili subtitle {bvid[:24]}")
+        host_client = self._bilibili_host_client
+        if host_client is None:
+            raise RuntimeError("host has no bilibili client installed")
+        return await host_client.subtitle_text(bvid)
 
     async def _storage_get(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.STORAGE, detail="storage.get")
@@ -512,6 +531,7 @@ _SURFACE_TABLE = {
     "send.message": SurfaceRouter._send,
     "http.request": SurfaceRouter._http,
     "bilibili.request": SurfaceRouter._bilibili,
+    "bilibili.subtitle": SurfaceRouter._bilibili_subtitle,
     "send_media.request": SurfaceRouter._send_media,
     "media.observe": SurfaceRouter._media_observe,
     "browse.read": SurfaceRouter._browse_read,

@@ -805,7 +805,8 @@ class PluginManager:
         self.sender = None
         self.sender_media = None
         self._sender_media = None
-        """Optional ``async (session_key, text) -> None`` installed by the runtime."""
+        self._surface_bilibili_client = None
+        """Optional host L2 bilibili client, installed by the runtime (#52)."""
 
         from soapbot.config import settings
         from soapbot.plugins.index_client import IndexClient
@@ -840,8 +841,13 @@ class PluginManager:
     def install_sender(self, sender) -> None:
         self.sender = sender
         for loaded in self.loader.loaded.values():
-            loaded.context._init_runtime_hooks(sender=sender, sender_media=self.sender_media)
+            loaded.context._init_runtime_hooks(sender=sender, sender_media=self.sender_media,
+                                              bilibili_host=getattr(self, '_surface_bilibili_client', None))
         self._sender = sender
+
+    def install_bilibili_client(self, client) -> None:
+        """Wire the host's L2 bilibili client for the subtitle surface (#52)."""
+        self._surface_bilibili_client = client
 
     def install_media_sender(self, sender_media) -> None:
         """Wire the host's image-delivery path for plugins that earned SEND_MEDIA.
@@ -915,6 +921,7 @@ class PluginManager:
             kb=getattr(self, "_surface_kb", None),
             sender=getattr(self, "_sender", None),
             sender_media=getattr(self, "_sender_media", None),
+            bilibili_host_client=getattr(self, "_surface_bilibili_client", None),
             ledger=ledger,
             audit=self.loader.audit,
             storage=storage,
@@ -933,13 +940,15 @@ class PluginManager:
 
     async def load(self, name: str, *, force: bool = False) -> LoadedPlugin:
         loaded = await self.loader.load(name, force=force)
-        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media)
+        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media,
+                                          bilibili_host=getattr(self, '_surface_bilibili_client', None))
         await self._emit("plugin_loaded", {"plugin": name})
         return loaded
 
     async def reload(self, name: str) -> LoadedPlugin:
         loaded = await self.loader.reload(name)
-        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media)
+        loaded.context._init_runtime_hooks(sender=self.sender, sender_media=self.sender_media,
+                                          bilibili_host=getattr(self, '_surface_bilibili_client', None))
         await self._emit("plugin_loaded", {"plugin": name, "reloaded": True})
         return loaded
 

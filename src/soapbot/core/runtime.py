@@ -149,6 +149,10 @@ class BotRuntime:
             # (rate, length, capability) exactly as it does for core replies.
             plugins.install_sender(self._send_via_adapter)
             plugins.install_media_sender(self._send_media_via_adapter)
+            if self.bilibili is not None:
+                # 字幕面（bilibili.subtitle）需要宿主 L2 client：wbi 签名与 hdslb
+                # 抓取留在宿主，插件只发 bvid、只拿文本。
+                plugins.install_bilibili_client(self.bilibili)
         self.locks = SessionLockManager()
         self.sessions = SessionStore()
         self._unsubscribers: list[Any] = []
