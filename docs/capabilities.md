@@ -53,6 +53,8 @@
 | 额度审批 | ✅（默认开） | 日/周/月周期与单笔上限（整数分）；状态机、原子预留、禁止自批、批准时重算额度。`POST /api/budget/{id}/approve\|deny` 与 QQ `/budget` 共用账本，都要求 `APPROVE_PAYMENT` + 真实凭据；面板第 10 页可批准/驳回。两条路径都往 `APPROVAL_BUS` 发同一份事件。**仍不**持有支付凭据、调用支付 API 或自动扣款 |
 | B 站元数据与观后感 | ✅（默认关） | L2 公开元数据；L3 登录态由插件的 `bilibili` 能力承担（Cookie 宿主持有，需配 `SOAPBOT_BILI_COOKIE`） |
 | 插件发图片（表情包/照片） | ✅（需逐项批准 `send_media`） | 与 send 同一套会话白名单 + 4 MiB 上限；审计只记大小 |
+| 人格卡自主字段与温度 | ✅ | 人格卡 front matter 可选 `autonomy`（会话白名单 / 每日上限）、`warmth`（起点 / 增速 / 衰减 / 阈值）、`voice_self_select`；非法值回退保守默认，面板保存与版本回滚都不丢。宿主 `WarmthTracker` 只在回复成功归档后计数，`session.view` 只读暴露 `warmth` 标量。**挑音色的管线环节未实现** |
+| WBI 字幕读取 | ✅（L2，默认关） | `BilibiliClient.subtitle(bvid)` 走 `/x/player/wbi/v2` + WBI 签名，**不注入登录 Cookie**；只返回语言与字幕 URL 白名单，L1 明确拒绝。端点 `GET /api/bilibili/subtitle` 由宿主钉死，插件不能自选 path |
 | QQ 空间读写 | ✅（默认完全关闭） | `qzone_read` / `qzone_write` 分开审批；`SOAPBOT_QZONE_VIA_PROTOCOL=true` 才可用，只有四个白名单协议动作，token 宿主持有，写需 `confirm=true` + 插件二次命令确认，审计不记正文。官方机器人无此接口，只能走个人号协议端，**有账号风控/冻结风险，风险自负**。示例插件 `qzone-diary` / `qzone-watch`。**未做**真实协议端联调 |
 | 审批通知三通道 | ✅（默认全关，逐项配置） | QQ 主动消息（`NOTIFY_SESSION_KEY`）、HMAC-SHA256 签名 Webhook（`NOTIFY_WEBHOOK_URL` + `NOTIFY_WEBHOOK_SECRET`）、手机游标 feed（`GET /api/approvals/feed?after=`）。单一 `APPROVAL_BUS` 订阅点，`(request_id, kind)` 幂等；通道失败只记异常类型，密钥不进头/日志/审计。**没有**持久 outbox——进程重启可能重通知一次 |
 | 公开网页浏览与消费提案 | ✅（需逐项批准 `browse`，白名单默认空） | `browse.read` / `browse.propose`：点名域名的 allowlist（空 = 拒绝一切）+ robots.txt 同意 + 可识别 UA；无 Cookie / 登录态 / 重定向 / 表单 / JS，响应与正文有上限。`propose` 先做单笔与日/月限额预检，不通过就不建申请；金额来自页面确定性提取，最终仍要人审批、自己去官方渠道买。**没有**无头浏览器渲染、代付链接、电商登录态、支付 API |

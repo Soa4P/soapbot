@@ -49,6 +49,7 @@
 | 审批通知三通道与幂等 | `notifications/dispatcher.py`、`api/admin.py`、`app.py` | `tests/test_approval_notifications.py`（13 项：QQ 投递与关闭、Webhook 签名可验证、密钥零泄漏、失败隔离、非 200 不回显 URL、重复事件只投递一次、不同状态不互压、游标增量、feed 有界、白名单 payload、端点权限） | 通道用注入的假 HTTP 客户端与假 runtime；**未做真实 QQ / 企业微信 / 手机推送实测** | **仅自动** |
 | 手机审批页与可下载 debug APK | `mobile/lib/screens/approvals_screen.dart`、`mobile/lib/api/client.dart`、`.github/workflows/ci.yml` | `mobile/test/approval_test.dart`（5 项：feed 白名单解析、缺省值降级、degraded 可见、游标保序、未启用时为空）；CI `flutter analyze` + `flutter test` + `flutter build apk --debug` + `upload-artifact` | APK 由 CI 构建产出，可在 Actions run 的 Artifacts 下载；**未做真机 / 模拟器端到端实测** | **仅自动** |
 | QQ 空间受审网关 | `qzone.py`、`plugins/surfaces.py`、`examples/plugins/qzone-*` | `tests/test_qzone_surface.py`（15 项：默认关闭仍拒绝、读写动作互不串用、未知协议动作拒绝、写需 confirm 与有界正文、不改调用方参数、token 宿主侧且不回传、审计不含正文/token/URL、非 200 不回显响应体、两个示例插件能力声明） | 只测注入的假协议端点；**未做真实 NapCat / Lagrange 联调** | **仅自动** |
+| 人格卡自主字段 / 温度 / WBI 字幕 | `ai/autonomy.py`、`ai/persona.py`、`plugins/memory_api.py`、`memory/stages.py`、`bilibili/client.py`、`api/bilibili.py` | `tests/test_persona_autonomy_warmth.py`（13 项：默认值保守、合法/非法配置、front matter 与回滚都保留 extra、warmth 确定性与衰减、只记成功归档、SessionView 与隔离字典显式 warmth、字幕 WBI 签名与字段白名单、坏 BV 不触网、L1 拒绝）；另有人格卡 / session.view / B 站既有用例一并回归 | 字幕用注入的假 HTTP 客户端；**未做真实 B 站联调**，挑音色管线未实现 | **仅自动** |
 | 20 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、20 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
 | Cookie 会话与角色分级 | `api/auth.py`、`webui/src/api/client.ts`、`webui/src/stores/auth.ts` | `tests/test_auth_cookie.py`（Cookie 标志、CSRF/Origin、角色门槛、回环读写分离、登录登出） | 本机 TestClient 覆盖；云服务器上的登录/登出见本轮发布验收 | **仅自动**（云服务器实测见发布记录） |
 | 日志净化与统一错误层 | `logging_setup.py`、`core/log_context.py`、`api/errors.py`、`security/audit.py` | `tests/test_logging_hardening.py`（控制字符、ContextVar 不串请求、有界正则）、`tests/test_error_mapping.py`（状态码映射、响应不含异常原文） | 本机跑过；日志环与 `X-Request-ID` 由 TestClient 断言 | **仅自动** |
@@ -122,7 +123,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：2253 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：2266 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁

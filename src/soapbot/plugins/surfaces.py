@@ -179,6 +179,8 @@ class SurfaceRouter:
         view = build_session_view(caller)
         # ``to_dict`` rather than ``asdict`` so the shape is explicit: adding a field
         # to SessionView must not silently start crossing the process boundary.
+        # ``warmth`` is here on purpose — a host-computed scalar the auto-chat plugin
+        # reads to decide whether a conversation is warm enough to open on its own.
         return {
             "session_key": view.session_key,
             "scene": view.scene,
@@ -186,6 +188,7 @@ class SurfaceRouter:
             "user_id": view.user_id,
             "display_name": view.display_name,
             "is_group": view.is_group,
+            "warmth": view.warmth,
         }
 
     async def _send(self, args: dict[str, Any], caller) -> Any:

@@ -66,14 +66,16 @@ SECURITY.md 反复声明的风控区：个人号行为可能触发平台风控�
 
 ## 4. 人格卡生态与情感温度
 
-- **人格卡新增可选字段**（宿主侧，下一批实现）：`autonomy`（主动开白名单：哪些
-  会话允许主动发言、每日上限）、`warmth`（温度模型参数：起点、增速、衰减）、
-  `voice_self_select`（是否允许自主挑音色，接 autonomous-capabilities-design）。
-  人格历史/回滚机制沿用既有 append-only 版本。
-- **情感温度模型**：v1 在插件内做确定性近似——`warmth = 近 7 天交互次数的对数
-  归一 + 最近一次交互的衰减`，阈值默认 0.6、可被 /autochat-set 调整。**宿主级
-  温度**（跨插件共享、进人格卡、可被管线引用）是下一批：放在 session 元数据里，
-  由管线在回复时更新，插件只读（`session.view` 扩展一个 warmth 字段）。
+- **人格卡新增可选字段（已实现）**：`autonomy`（主动开白名单与每日上限）、`warmth`
+  （起点 / 增速 / 衰减 / 阈值）、`voice_self_select`（是否允许自主挑音色）。
+  三者留在 front matter 的 `extra` 里由 `ai/autonomy.py::parse_autonomy` 校验——
+  刻意**不**新增 `Persona` 已知字段，否则面板编辑器（只认九字段）每次保存都会把它们
+  悄悄重置。顺带修好 `persona_to_payload` 不带 `extra` 的旧缺陷，回滚不再丢手写字段。
+  `voice_self_select` 目前只是配置开关，挑音色的管线环节仍按 §3 的设计未实现。
+- **情感温度模型（宿主级已实现）**：`WarmthTracker` 只在回复成功归档后计一次交互，
+  7 天窗口、纯内存、有界；`compute_warmth` 是对数归一减线性衰减的确定性函数，
+  阈值默认 0.6，参数来自人格卡 `warmth`。`SessionView` 与隔离模式的 `session.view`
+  显式字典增加只读 `warmth` 标量。数值不由模型或插件写入。
 - **生态优化方向**：人格卡模板库进插件仓库（同 luanyujia-workbench 的改编路线）；
   人格卡与记忆场景的绑定已有（scene memory），温度模型接入后，人格的「亲密度
   分层」就有了数据来源。
@@ -97,6 +99,10 @@ SECURITY.md 反复声明的风控区：个人号行为可能触发平台风控�
    `/meme-save`」是两条消息。
    接线证据：`tests/test_plugin_media_observe.py`（16 项，末项是消息钩子→inbox→插件）。
    插件侧责任：立刻把引用存进自己的加密 storage，不要传给 `ctx.log`。
-2. `qzone_read` / `qzone_write`（经协议端扩展；需操作者显式开启，风险自负）。
-3. 宿主级温度模型（session 元数据 + `session.view` 扩展）。
-4. WBI 签名的字幕读取（dsh-bili-humanism 改编前置，见 ADAPTATION.md）。
+2. **✅ 已实现**：`qzone_read` / `qzone_write`（fail-closed 协议端网关，默认完全关闭、
+   读写分开、写三重确认）。见 §2 与 `docs/capabilities.md`。
+3. **✅ 已实现**：宿主级温度模型（`WarmthTracker` + `SessionView` / `session.view`
+   只读 `warmth`）。见 §4。
+4. **✅ 已实现**：WBI 签名的字幕读取。`BilibiliClient.subtitle(bvid)` 走 L2 公开签名
+   （不注入 SESSDATA），只返回语言与字幕 URL 白名单；宿主固定端点
+   `GET /api/bilibili/subtitle`。**未做**真实 B 站联调与 dsh-bili-humanism 的完整改编。

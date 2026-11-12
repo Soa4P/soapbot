@@ -187,6 +187,40 @@ class BilibiliClient:
                 await asyncio.sleep(wait)
             self._last_call = time.monotonic()
 
+    async def subtitle(self, bvid: str) -> dict:
+        """WBI-signed public subtitle list, with **no login state**.
+
+        Subtitles are L2 public metadata. Routing them through the L3
+        ``bilibili.request`` plugin surface would attach the operator's SESSDATA
+        to an endpoint that does not need it, so the host owns this one path and
+        exposes only a whitelist of fields: a plugin never receives the full
+        player payload (which also carries playback URLs and account state).
+        """
+        clean = str(bvid or "").strip()
+        if not clean.startswith("BV") or len(clean) > 32:
+            raise ValueError("a BV id is required")
+        data = await self._get_json(
+            "/x/player/wbi/v2", {"bvid": clean}, signed=True
+        )
+        raw = (data.get("subtitle") or {}).get("subtitles") or []
+        if not isinstance(raw, list):
+            raw = []
+        items: list[dict[str, str]] = []
+        for row in raw[:20]:
+            if not isinstance(row, dict):
+                continue
+            url = str(row.get("subtitle_url") or "")
+            if url.startswith("//"):
+                url = "https:" + url
+            items.append(
+                {
+                    "lan": str(row.get("lan") or ""),
+                    "lan_doc": str(row.get("lan_doc") or ""),
+                    "url": url,
+                }
+            )
+        return {"bvid": clean, "subtitles": items, "has_subtitle": bool(items)}
+
     # ------------------------------------------------------------------- transport
     async def _get_json(
         self, path: str, params: dict[str, object], *, signed: bool = False

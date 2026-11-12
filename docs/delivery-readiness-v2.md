@@ -4,7 +4,7 @@
 > 它记录的是「内核扎实但仓库为零提交」那一刻的状态，删掉会让之后的人无法判断
 > 哪些问题是曾经存在过的。
 
-**当前状态**：可 clone、可安装、可运行、可升级；本地 `2253 passed, 12 skipped`；CI 六个
+**当前状态**：可 clone、可安装、可运行、可升级；本地 `2266 passed, 12 skipped`；CI 六个
 必需检查全绿（`backend` 两个平台、`frontend`、`desktop`、`package`、`review`），另有两个
 按需 job：`desktop-bundle` 出 Windows 安装包、`release` 在 tag 上发布。
 
@@ -204,6 +204,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **多语言（对外文案 + 面板全 13 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；12 个管理页浏览器逐页实测中英双向切换，第 13 页存档由 `test_webui_i18n.py` 保证键齐全与「模板无中文残留」，**未做浏览器实测** |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
 | **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
+| **人格卡自主字段 / 温度 / WBI 字幕** | **本轮新增** | `tests/test_persona_autonomy_warmth.py`（13 项）；修好回滚丢 `extra` 的旧缺陷。`voice_self_select` 只是配置开关，**自主挑音色管线未实现**；字幕未做真实 B 站联调 |
 | **QQ 空间读写能力面** | **本轮新增（默认完全关闭）** | `tests/test_qzone_surface.py`（15 项）；读写分开审批、四个白名单协议动作、写三重确认、审计零正文。**未做真实协议端联调**，官方机器人无此接口，个人号风控/冻结风险由操作者承担 |
 | **手机审批页 + 可下载 debug APK** | **本轮新增（客户端 / CI）** | `mobile/test/approval_test.dart`（5 项）；CI `mobile` job 现构建 debug APK 并上传 artifact（14 天）。owner 账号可在手机上批准/驳回，member 收 403。**未做真机 / 模拟器端到端实测**；release 签名与上架仍不做 |
 | **审批通知：QQ / Webhook / 手机 feed** | **本轮新增（服务端）** | `tests/test_approval_notifications.py`（13 项）；单一订阅点 + `(request_id, kind)` 幂等 + HMAC 签名 + 密钥零泄漏。三条通道默认全关，需运维逐项配置；**未做真实通道实测**，Flutter 审批页在下一阶段 |
@@ -252,7 +253,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 ## 五、如何自行验证
 
 ```bash
-python -m pytest -q                 # 2253 passed, 12 skipped
+python -m pytest -q                 # 2266 passed, 12 skipped
 python -m ruff check src tests
 python scripts/check_deploy.py      # 静态检查，0 阻断
 python scripts/check_contrast.py    # 配色对比度
