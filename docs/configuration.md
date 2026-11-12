@@ -69,6 +69,9 @@
 | `BROWSE_MAX_BYTES` | `524288` | 单个页面响应体硬上限 |
 | `BROWSE_TIMEOUT_SECONDS` | `10` | 页面与 robots.txt 的读取超时 |
 | `BROWSE_ROBOTS_TTL_SECONDS` | `3600` | 每个域的 robots.txt 内存缓存时长 |
+| `NOTIFY_SESSION_KEY` | 空 | 审批事件推送到的 `adapter:scene:target` 会话；空则关闭 QQ 通道 |
+| `NOTIFY_WEBHOOK_URL` | 空 | 审批事件 Webhook 地址；空则关闭该通道 |
+| `NOTIFY_WEBHOOK_SECRET` | 空 | HMAC-SHA256 签名密钥，`SecretStr`，永不进头 / 日志 / 审计 |
 | `STREAM_REPLY` | `true` | 边生成边发。仅在适配器声明 `PROGRESSIVE` 时生效（目前只有 OneBot v11）。关掉则等整段回复生成完才发，首字延迟 = 总延迟 |
 | `HISTORY_TURNS` | `16` | 回放进提示词的历史条数。调大会让上下文更容易超出预算，从而在每次回复前多一次摘要调用 |
 | `MAX_PROMPT_TOKENS` | `6000` | 提示词硬上限。超出时压缩器会折叠历史（**多一次模型调用**），这是「回复慢」最常见的成因 |

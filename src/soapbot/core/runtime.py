@@ -53,6 +53,14 @@ class BotRuntime:
         self.plugins = plugins
         """Optional :class:`soapbot.plugins.dispatch.PluginManager`."""
 
+        self.approval_notifier: Any = None
+        """Optional :class:`soapbot.notifications.dispatcher.ApprovalNotifier`.
+
+        Installed by the app lifespan, not by ``build_runtime``: hand-assembled
+        runtimes in tests must not acquire a global bus subscription as a side
+        effect of construction.
+        """
+
         self.budget = budget
         """Optional :class:`soapbot.budget.store.BudgetStore`.
 

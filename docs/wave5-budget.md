@@ -21,8 +21,10 @@
 >   管控」，而保守的日/月上限本来就是显式整数。`SOAPBOT_ENABLE_BUDGET=false` 仍是出口。
 > - §5.1 的单 owner 死结没有被悄悄降级：`budget_require_distinct_approver` 是显式开关，
 >   面板显示它的状态，关闭后每次决策的事件与审计都带 `degraded` 标记。
-> - 新增 `budget/events.py`：QQ 命令、面板 API、未来的选品提案都往同一个
->   `APPROVAL_BUS` 发布事件，通知渠道各自订阅；通道失败不影响已提交的账本状态。
+> - 新增 `budget/events.py`：QQ 命令、面板 API、选品提案都往同一个 `APPROVAL_BUS`
+>   发布事件；`notifications/dispatcher.py` 是唯一订阅点，已接到 QQ、HMAC 签名
+>   Webhook、手机游标 feed 三条通道（各自可关、幂等、密钥不落日志）。
+>   通道失败不影响已提交的账本状态。
 > 支付边界（§1.1）**未改**：仍然不持有支付凭据、不调用支付 API、不自动扣款。
 
 ---
