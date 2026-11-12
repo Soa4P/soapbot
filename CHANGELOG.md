@@ -10,6 +10,36 @@
 
 ## [Unreleased]
 
+### 公开网页浏览与消费提案：AI 能自己找，但不能自己买
+
+原来错在哪：`qq-autonomy-design.md` 想让 bot 自主上网挑东西，但仓库里**没有任何
+浏览能力**——`Capability` 全表没有 BROWSER，全仓 `playwright|selenium|爬虫` 零命中；
+`SafeHttpClient` 有完备的 SSRF / 白名单 / 禁重定向 / 拒 Cookie 防护，却只服务
+`ctx.http`，且没有可配置的目的地白名单。于是「自主上网抉择」只能停在纸面，而直接给
+插件一个能访问任意 URL 的 HTTP 能力等于把 SSRF 原语交出去。
+
+现在（宿主先有受审能力面，与 `bilibili` / `media_observe` 同模式）：
+
+- 新能力 `browse`，与 `http` **分开审批**；敏感能力，面板审批页有中英提示。
+  `SafeHttpClient` 增加 `capability` 参数，浏览请求消耗 `browse` 而不是 `http`，
+  其余 SSRF / DNS pinning / 禁重定向 / 头白名单全部复用同一套实现。
+- `browse_allow_hosts` **默认空 = 拒绝一切**（fail closed），运维必须点名商店域名；
+  遵守 robots.txt（stdlib `RobotFileParser`，带 TTL 缓存；5xx / 网络错误一律拒绝，
+  404 视为无限制）；只用可识别的 `User-Agent`，无 Cookie / Authorization，只 GET，
+  不跟重定向，不提交表单，不执行 JS；响应体积、正文长度、图片数都有上限。
+- `browse.read` 返回**文本白名单快照**（标题 / 描述 / 正文 / ¥ 价格 / 图片引用），
+  `browse.propose` 先做限额预检再写账本：没有价格、超单笔上限、超本期剩余额度，
+  都直接返回原因，**不创建申请、不预留额度、不发通知**。金额来自页面上的确定性
+  提取（`product:price:amount` 或 ¥ 数字），不是模型自由生成的数字——模型编造的
+  金额不能成为授权输入。通过后创建 pending 申请并发布 `REQUESTED` 事件，人仍要在
+  面板/QQ 里批准，实际购买由人在官方渠道完成。
+- 进程内 `PluginContext` 与隔离 `_RemoteCtx` 都走同一个 `SurfaceRouter`，检查点单一。
+
+**明确未做**：无头浏览器 / 模拟手机的 JS 渲染（当前 renderer 是静态 HTTP，页面若靠 JS
+才有内容会返回空正文并标记 `static_only`，不假装看到了）；未做真机网页实测；
+未做代付链接、电商登录态与支付 API。`tests/test_browse_proposal.py`（21 项）覆盖
+白名单、robots 四种情形、上限、能力门控、wire scope 键、审计口径与限额预检。
+
 ### 额度审批从「只能敲命令」变成「面板能点、事件能订阅」
 
 原来错在哪：`Permission.APPROVE_PAYMENT`、状态机、原子预留、禁止自批、日/周/月上限都

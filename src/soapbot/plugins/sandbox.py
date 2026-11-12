@@ -610,9 +610,14 @@ class SafeHttpClient:
         *,
         client_factory=None,
         allowed_hosts: Collection[str] | None = None,
+        capability: Capability = Capability.HTTP,
     ) -> None:
         self._guard = guard
         self._client_factory = client_factory
+        #: Which capability a fetch consumes. ``browse.read`` reuses every SSRF and
+        #: header rule here but must be approved separately: "may call an API" and
+        #: "may read public web pages" are different decisions for an operator.
+        self._capability = capability
         #: Destination pre-allow-list. ``None`` keeps the legacy deny-list-only
         #: behaviour; an empty collection is fail-closed. Handed to
         #: :func:`assert_url_allowed` on every fetch, not once at construction, so a
@@ -657,7 +662,7 @@ class SafeHttpClient:
         body: bytes | None = None,
         timeout: float = 10.0,
     ) -> tuple[int, bytes]:
-        self._guard.check(Capability.HTTP, detail=f"{method} {urlsplit(url).netloc}")
+        self._guard.check(self._capability, detail=f"{method} {urlsplit(url).netloc}")
         assert_url_allowed(url, allowed_hosts=self._allowed_hosts)
         parts = urlsplit(url)
         host = parts.hostname or ""
