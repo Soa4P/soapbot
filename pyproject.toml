@@ -1,7 +1,7 @@
 [project]
 name = "soapbot"
 version = "0.1.0"
-description = "QQ group chat AI bot framework: multi-provider, persona cards, context compression, memory recall, vision, Bilibili watching, budget approval"
+description = "Multi-platform AI companion framework: QQ (official bot / OneBot), web, mobile and desktop clients share one memory and persona core; plugin sandbox with per-capability approval, multi-provider, context compression, warmth model, Bilibili, budget approval"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
