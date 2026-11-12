@@ -466,7 +466,12 @@ class ReplyStage(Stage):
                         picked_via = "default"
                     ctx.extras["voice_pick"] = f"{voice_name or 'default'}:{picked_via}:{reason if picked_via == 'self' else ''}"
             try:
-                audio = await self._tts.synthesize(ctx.model_reply, voice=voice_name)
+                # ``voice`` 仅在自主挑选生效时传入：自定义 TTS 实现（含测试存根）的
+                # synthesize 签名没有 voice 参数，无条件传会 TypeError 被吞成文本回退。
+                if voice_name:
+                    audio = await self._tts.synthesize(ctx.model_reply, voice=voice_name)
+                else:
+                    audio = await self._tts.synthesize(ctx.model_reply)
             except VoiceUnavailableError as exc:
                 # Two different events share this exception. "Too long" happens on
                 # every long answer and is normal, so it stays at debug; a missing
