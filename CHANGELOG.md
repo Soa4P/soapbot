@@ -10,6 +10,33 @@
 
 ## [Unreleased]
 
+### 手机上能点审批了，安装也能直接下载
+
+原来错在哪：上一阶段做出了 `/api/approvals/feed` 与面板批准按钮，但手机端只有四屏
+（登录/会话/聊天/备注），没有任何审批入口；`mobile/README.md` 虽然写着本机
+`flutter build apk --debug` 实测通过，仓库和 CI 里**都没有可下载的产物**——
+`ci.yml` 的 mobile job 只有 `analyze` + `test`，注释还写着「APK 按需本地构建」。
+想在实体手机或虚拟机里测，得自己装整套 Flutter + Android SDK。
+
+现在：
+
+- 第五屏 `approvals_screen.dart`：5 秒轮询 `/api/approvals/feed` 游标，按申请号只保留
+  最新状态（批准事件替换申请行，不新增第二行），显示金额 / 用途 / 状态，pending 行
+  可批准或驳回；`degraded` 降级状态用红字标出。会话页右上角加入口。
+- 复用**同一套凭据**：账号登录签发的 Cookie 与面板 token 是同一个 `TokenService`，
+  所以 owner 账号能直接调 `/api/budget/{id}/approve|deny`，member 收到 403 并显示
+  错误横幅。App 只改状态，不执行支付，批准后仍需人去官方渠道购买。
+- CI 的 `mobile` job 现在装 JDK 17、`flutter build apk --debug`，并把
+  `app-debug.apk` 上传为 artifact `soapbot-debug-apk`（保留 14 天）——打开 Actions
+  run 的 Artifacts 就能下载装到实体手机或模拟器。
+- `mobile/README.md` 补「可下载的安装包」与审批页说明；修正三处过期口径
+  （`architecture.md` 的「只交付源码，未在真机构建」、`verification-matrix.md` 两处
+  「Flutter 无 SDK / 未构建验证」）。
+
+`mobile/test/approval_test.dart`（5 项）覆盖 feed 白名单解析、缺省值降级、degraded
+可见、游标保序与未启用时的空 feed。**未做**真机 / 模拟器端到端实测，release 签名与
+上架仍不做。
+
 ### 审批事件终于能通知到人了：QQ / Webhook / 手机三通道
 
 原来错在哪：`APPROVAL_BUS` 有发布者、**零生产订阅者**（全仓 `subscribe` 只出现在测试里）。

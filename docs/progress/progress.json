@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T15:05:00+08:00",
+  "updated_at": "2026-11-12T16:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3439,6 +3439,35 @@
         }
       ],
       "goal": "让待批申请主动找到人，而不是等人打开额度页；通道失败不影响已提交的账本状态"
+    },
+    {
+      "id": "a11",
+      "index": "A11",
+      "name": "手机审批页与可下载测试包",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a11-t1",
+          "name": "第五屏审批收件箱：游标轮询、按申请号保留最新状态、批准/驳回按钮",
+          "status": "done"
+        },
+        {
+          "id": "a11-t2",
+          "name": "复用面板 TokenService 凭据，owner 可决策、member 403 有明确提示",
+          "status": "done"
+        },
+        {
+          "id": "a11-t3",
+          "name": "CI mobile job 加 JDK17 + debug APK 构建 + upload-artifact（14 天）",
+          "status": "done"
+        },
+        {
+          "id": "a11-t4",
+          "name": "5 项 Dart 用例 + README 下载说明 + 三处过期口径修正",
+          "status": "done"
+        }
+      ],
+      "goal": "让操作者能在实体手机或虚拟机里装包、看到待批申请并当场处理，且不需要自己搭 Flutter 工具链"
     }
   ],
   "archive": [
