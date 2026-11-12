@@ -42,6 +42,7 @@ import asyncio
 import logging
 import re
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -150,7 +151,7 @@ class BilibiliClient:
         self._wbi_key = ""
         self._wbi_fetched_at = 0.0
 
-        self.stats = {"calls": 0, "errors": 0, "risk_control": 0, "last_error": ""}
+        self.stats: dict[str, Any] = {"calls": 0, "errors": 0, "risk_control": 0, "last_error": ""}
 
     # ------------------------------------------------------------------ lifecycle
     def _client(self) -> httpx.AsyncClient:
@@ -270,7 +271,9 @@ class BilibiliClient:
             )
         await self._throttle()
 
-        query = dict(params)
+        # 全部值先归一成 str：wbi 签名与 httpx 的 params 都要求字符串，
+        # dict[str, object] 会在签名分支与请求分支各自报类型错。
+        query: dict[str, str] = {str(k): str(v) for k, v in dict(params).items()}
         if signed:
             query = sign(query, await self._signing_key())
 
@@ -367,7 +370,7 @@ class BilibiliClient:
         """Fetch video detail by BV/av id or URL."""
         kind, ident = parse_target(target)
         params = {"bvid": ident} if kind == "bv" else {"aid": ident}
-        data = await self._get_json("/x/web-interface/view", params)
+        data = await self._get_json("/x/web-interface/view", dict(params))
 
         owner = data.get("owner") or {}
         stat = data.get("stat") or {}
