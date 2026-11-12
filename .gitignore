@@ -112,3 +112,4 @@ Thumbs.db
 # deadline, and printed by CI at that point; it is a diagnostic, not a source file.
 pytest-hang-dump.log
 .zcode/
+.mimosa/
