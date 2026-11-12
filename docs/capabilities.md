@@ -53,6 +53,7 @@
 | 额度审批 | ✅（默认开） | 日/周/月周期与单笔上限（整数分）；状态机、原子预留、禁止自批、批准时重算额度。`POST /api/budget/{id}/approve\|deny` 与 QQ `/budget` 共用账本，都要求 `APPROVE_PAYMENT` + 真实凭据；面板第 10 页可批准/驳回。两条路径都往 `APPROVAL_BUS` 发同一份事件。**仍不**持有支付凭据、调用支付 API 或自动扣款 |
 | B 站元数据与观后感 | ✅（默认关） | L2 公开元数据；L3 登录态由插件的 `bilibili` 能力承担（Cookie 宿主持有，需配 `SOAPBOT_BILI_COOKIE`） |
 | 插件发图片（表情包/照片） | ✅（需逐项批准 `send_media`） | 与 send 同一套会话白名单 + 4 MiB 上限；审计只记大小 |
+| 审批通知三通道 | ✅（默认全关，逐项配置） | QQ 主动消息（`NOTIFY_SESSION_KEY`）、HMAC-SHA256 签名 Webhook（`NOTIFY_WEBHOOK_URL` + `NOTIFY_WEBHOOK_SECRET`）、手机游标 feed（`GET /api/approvals/feed?after=`）。单一 `APPROVAL_BUS` 订阅点，`(request_id, kind)` 幂等；通道失败只记异常类型，密钥不进头/日志/审计。**没有**持久 outbox——进程重启可能重通知一次 |
 | 公开网页浏览与消费提案 | ✅（需逐项批准 `browse`，白名单默认空） | `browse.read` / `browse.propose`：点名域名的 allowlist（空 = 拒绝一切）+ robots.txt 同意 + 可识别 UA；无 Cookie / 登录态 / 重定向 / 表单 / JS，响应与正文有上限。`propose` 先做单笔与日/月限额预检，不通过就不建申请；金额来自页面确定性提取，最终仍要人审批、自己去官方渠道买。**没有**无头浏览器渲染、代付链接、电商登录态、支付 API |
 | 插件取消息里的图片链接 | ✅（需逐项批准 `media_observe`） | `ctx.observe_images()` 不带参数，会话键由宿主绑定的 caller 决定；纯内存、TTL 120 秒、取一次即消费、单条消息 ≤16 个 http(s) 引用；只交引用，不交内联 base64 或本地路径。URL 不进日志 / 审计（只记数量）/ trace / messages 表，进程内与隔离形态各有接线测试。**没有**事件广播——隔离 worker 目前不转发命名事件 |
 | 插件包安装 | ✅ | **上传 zip 即安装，不等于批准**——没有在线商店、没有搜索与评分。装完仍需 `approve` + `load` |

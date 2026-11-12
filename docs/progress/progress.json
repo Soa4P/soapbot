@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T14:10:00+08:00",
+  "updated_at": "2026-11-12T15:05:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3405,6 +3405,40 @@
         }
       ],
       "goal": "让 bot 能在不碰支付凭据、不绕反爬与登录的前提下自己找公开商品页并给出可审批的购买提案"
+    },
+    {
+      "id": "a10",
+      "index": "A10",
+      "name": "审批事件的三通道通知（服务端）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a10-t1",
+          "name": "ApprovalNotifier 单一订阅点 + (request_id, kind) 有界 LRU 幂等",
+          "status": "done"
+        },
+        {
+          "id": "a10-t2",
+          "name": "QQ 通道：宿主投递路径 + 500 字截断 + 不执行支付的明示",
+          "status": "done"
+        },
+        {
+          "id": "a10-t3",
+          "name": "Webhook 通道：HMAC-SHA256(timestamp.nonce.body) + SecretStr 零泄漏",
+          "status": "done"
+        },
+        {
+          "id": "a10-t4",
+          "name": "手机游标 feed 端点 + 权限门槛 + app.py lifespan 装配",
+          "status": "done"
+        },
+        {
+          "id": "a10-t5",
+          "name": "13 项用例覆盖三通道、签名、密钥、失败隔离、幂等与端点",
+          "status": "done"
+        }
+      ],
+      "goal": "让待批申请主动找到人，而不是等人打开额度页；通道失败不影响已提交的账本状态"
     }
   ],
   "archive": [
@@ -3500,7 +3534,7 @@
     }
   ],
   "verification": {
-    "pytest": "2225 passed, 12 skipped",
+    "pytest": "2238 passed, 12 skipped",
     "ruff": "All checks passed",
     "contrast": "PASS（14 组色对）",
     "deploy_check": "静态 0 阻断 / 1 告警 / 16 通过（共 17 条 finding）；真机容器部署 2026-10-30 实测通过（deploy-layer.md §8.1）",
