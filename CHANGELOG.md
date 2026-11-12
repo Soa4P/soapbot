@@ -10,6 +10,32 @@
 
 ## [Unreleased]
 
+### 人格卡自主字段、宿主温度模型与 WBI 字幕
+
+原来错在哪：`qq-autonomy-design.md` §4 把 `autonomy` / `warmth` / `voice_self_select`
+写成「下一批实现」，`§5` 把 WBI 字幕列为待办，但三者**零实现**；而且人格卡版本快照
+`persona_to_payload` 根本不带 `extra`——就算把新字段写进 front matter，面板保存能留住，
+一次回滚也会全部丢掉。`autonomous-capabilities-design.md` 的挑音色仍是设计，本文没有
+假装实现它。
+
+现在：
+
+- `ai/autonomy.py`：三个可选配置从人格卡 `extra` 读取并校验（会话白名单、每日上限、
+  温度参数、`voice_self_select`），非法值回退保守默认而不是放宽。刻意**不**新增
+  `Persona` 已知字段——面板编辑器只认九字段，新增已知字段会让每次面板保存把三字段
+  悄悄重置。`voice_self_select` 目前只是配置开关，挑音色的执行器仍按设计文档未实现。
+- 修 `persona_to_payload` / `persona_from_payload` 带上 `extra`，回滚不再丢手写字段。
+- 宿主温度模型：`WarmthTracker` 只在**回复成功归档后**记一次交互，7 天窗口、纯内存、
+  有界；`compute_warmth` 是对数归一减线性衰减的确定性函数，不由模型或插件写入。
+  `SessionView` / `session.view` 显式字典增加 `warmth` 标量，插件只读。
+- WBI 字幕：`BilibiliClient.subtitle(bvid)` 走 `/x/player/wbi/v2` + `wbi.sign`（L2 公开
+  签名，**不注入 SESSDATA**），只返回 `lan` / `lan_doc` / `url` 三个字段，不交整个
+  player 包；`GET /api/bilibili/subtitle` 是宿主固定路径，插件不能自选 endpoint。
+  L1 档位明确拒绝，坏 BV id 不触网。
+
+`tests/test_persona_autonomy_warmth.py`（13 项），另有人格卡 / session.view /
+B 站既有用例一并回归。**未做**自主挑音色的管线环节与真实 B 站字幕联调。
+
 ### QQ 空间能力面落地：默认完全关闭，读写分开，写要三次确认
 
 原来错在哪：`qq-autonomy-design.md` §2 早就写清了风险与形态——官方机器人开放平台

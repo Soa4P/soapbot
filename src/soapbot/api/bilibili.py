@@ -111,6 +111,25 @@ async def bilibili_preview(
     return {"video": video.to_dict(), "comments": [c.to_dict() for c in comments]}
 
 
+@router.get("/subtitle")
+async def bilibili_subtitle(
+    bvid: str = Query(..., min_length=3, max_length=32),
+    _: dict = Depends(require_api_auth),
+) -> dict:
+    """WBI-signed public subtitle list for one BV id (L2, no cookie)."""
+    client = _client()
+    try:
+        return await client.subtitle(bvid)
+    except BilibiliTierError as exc:
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
+    except BilibiliRateLimitedError as exc:
+        raise HTTPException(status_code=429, detail=safe_detail(429, exc, "bilibili")) from exc
+    except BilibiliRiskControlError as exc:
+        raise HTTPException(status_code=502, detail=safe_detail(502, exc, "bilibili")) from exc
+    except BilibiliError as exc:
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "bilibili")) from exc
+
+
 @router.get("/impression")
 async def bilibili_impression(
     request: Request,

@@ -121,6 +121,13 @@ class PersistReplyStage(Stage):
             )
         except Exception as exc:
             logger.error("failed to archive reply: %s", exc)
+        else:
+            # A delivered reply is one more interaction for the host's warmth model.
+            # Only counted after a successful archive, so a pipeline that halted or
+            # failed to send cannot make a quiet group look warm.
+            from soapbot.ai.autonomy import WARMTH_TRACKER
+
+            WARMTH_TRACKER.record(ctx.event.session_key)
         return StageResult()
 
 
