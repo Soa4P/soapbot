@@ -196,12 +196,24 @@ class BilibiliClient:
         to an endpoint that does not need it, so the host owns this one path and
         exposes only a whitelist of fields: a plugin never receives the full
         player payload (which also carries playback URLs and account state).
+
+        The player endpoint requires ``aid`` and ``cid`` alongside ``bvid``
+        (calling it with ``bvid`` alone returns ``-400`` — found while actually
+        reading a video's subtitles), so the video metadata is resolved first.
         """
         clean = str(bvid or "").strip()
         if not clean.startswith("BV") or len(clean) > 32:
             raise ValueError("a BV id is required")
+        view = await self._get_json("/x/web-interface/view", {"bvid": clean})
+        aid = view.get("aid")
+        pages = view.get("pages") or []
+        cid = (pages[0].get("cid") if pages and isinstance(pages[0], dict) else None) or view.get("cid")
+        if not aid or not cid:
+            raise ValueError("could not resolve aid/cid for this video")
         data = await self._get_json(
-            "/x/player/wbi/v2", {"bvid": clean}, signed=True
+            "/x/player/wbi/v2",
+            {"bvid": clean, "aid": str(aid), "cid": str(cid)},
+            signed=True,
         )
         raw = (data.get("subtitle") or {}).get("subtitles") or []
         if not isinstance(raw, list):
