@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from soapbot.voice.picker import VOICE_CANDIDATES, VoicePickError, VoicePicker
+from soapbot.voice.picker import VOICE_CANDIDATES, VoicePicker, VoicePickError
 
 
 def _chat(responses: list[str]):
