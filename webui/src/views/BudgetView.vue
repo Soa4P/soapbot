@@ -2,9 +2,12 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { t } from '@/i18n'
 import { datetime, money, num, untilFuture } from '@/lib/format'
 import { useAsync } from '@/lib/useAsync'
+
+type Decision = { id: number; kind: 'approve' | 'deny'; sessionKey: string }
 
 const status = ref('')
 const budget = useAsync(() => api.budget({ status: status.value, limit: 200 }))
@@ -51,6 +54,50 @@ function statusClass(value: string): string {
   if (value === 'approved') return 'ok'
   if (value === 'denied') return 'bad'
   return ''
+}
+
+function canDecide(row: any): boolean {
+  return row.status === 'pending' || row.status === 'reserved'
+}
+
+const pendingDecision = ref<Decision | null>(null)
+const decisionBusy = ref(false)
+const decisionError = ref('')
+
+const decisionDialog = computed(() => {
+  const decision = pendingDecision.value
+  return {
+    open: decision !== null,
+    title: decision?.kind === 'approve'
+      ? t('budget.confirmApproveTitle')
+      : t('budget.confirmDenyTitle'),
+    detail: decision ? t('budget.confirmDetail', { id: decision.id }) : '',
+  }
+})
+
+function askDecision(row: any, kind: 'approve' | 'deny'): void {
+  decisionError.value = ''
+  pendingDecision.value = { id: row.id, kind, sessionKey: row.session_key }
+}
+
+async function confirmDecision(): Promise<void> {
+  const decision = pendingDecision.value
+  if (!decision || decisionBusy.value) return
+  decisionBusy.value = true
+  decisionError.value = ''
+  try {
+    if (decision.kind === 'approve') {
+      await api.approveBudget(decision.id, decision.sessionKey)
+    } else {
+      await api.denyBudget(decision.id, decision.sessionKey)
+    }
+    pendingDecision.value = null
+    await budget.reload()
+  } catch (err) {
+    decisionError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    decisionBusy.value = false
+  }
 }
 </script>
 
@@ -110,6 +157,7 @@ function statusClass(value: string): string {
               <th scope="col">{{ t('budget.created') }}</th>
               <th scope="col">{{ t('budget.decided') }}</th>
               <th scope="col">{{ t('budget.note') }}</th>
+              <th scope="col">{{ t('budget.action') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -133,6 +181,17 @@ function statusClass(value: string): string {
                 <span v-else class="faint">{{ t('budget.expiresIn', { when: untilFuture(row.expires_at) }) }}</span>
               </td>
               <td style="max-width: 220px">{{ row.decision_note || '—' }}</td>
+              <td>
+                <div v-if="canDecide(row)" class="strip">
+                  <button class="btn" :disabled="decisionBusy" @click="askDecision(row, 'approve')">
+                    {{ t('budget.approve') }}
+                  </button>
+                  <button class="btn ghost" :disabled="decisionBusy" @click="askDecision(row, 'deny')">
+                    {{ t('budget.deny') }}
+                  </button>
+                </div>
+                <span v-else class="faint">—</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -164,6 +223,14 @@ function statusClass(value: string): string {
             <th scope="row">{{ t('budget.ttl') }}</th>
             <td class="key">{{ t('common.seconds', { n: num(policy.request_ttl_seconds) }) }}</td>
           </tr>
+          <tr v-if="enabled">
+            <th scope="row">{{ t('budget.distinctApprover') }}</th>
+            <td class="key">
+              {{ policy.require_distinct_approver === false
+                ? t('budget.distinctApproverOff')
+                : t('budget.distinctApproverOn') }}
+            </td>
+          </tr>
         </tbody>
       </table>
       <p class="hint" style="margin: 12px 0 0">
@@ -175,4 +242,16 @@ function statusClass(value: string): string {
   </section>
 
   <div v-if="budget.error.value" class="error-banner">{{ budget.error.value }}</div>
+  <div v-if="decisionError" class="error-banner">{{ decisionError }}</div>
+
+  <ConfirmDialog
+    :open="decisionDialog.open"
+    :title="decisionDialog.title"
+    :detail="decisionDialog.detail"
+    :tone="pendingDecision?.kind === 'approve' ? 'danger' : 'default'"
+    :irreversible="true"
+    :busy="decisionBusy"
+    @confirm="confirmDecision"
+    @cancel="pendingDecision = null"
+  />
 </template>

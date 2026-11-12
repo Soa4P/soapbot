@@ -466,6 +466,20 @@ export const api = {
     query.set('limit', String(params.limit ?? 100))
     return request<any>(`/api/budget?${query.toString()}`)
   },
+  // session_key locates the row; authority comes from the owner credential, never
+  // from the body. Separate literal paths keep check-api-paths.mjs able to match
+  // them statically, and make a typo turn into a missing route rather than a
+  // refusal silently becoming an approval.
+  approveBudget: (id: number, sessionKey: string, note = '') =>
+    request<any>(`/api/budget/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ session_key: sessionKey, note }),
+    }),
+  denyBudget: (id: number, sessionKey: string, note = '') =>
+    request<any>(`/api/budget/${id}/deny`, {
+      method: 'POST',
+      body: JSON.stringify({ session_key: sessionKey, note }),
+    }),
   bilibili: () => request<any>('/api/bilibili'),
 
   // --- pipeline: read-only topology, traces and metrics ---------------------

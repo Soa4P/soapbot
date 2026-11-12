@@ -44,6 +44,7 @@
 | 进程数上限与统一回收 | `config.py`、`core/builder.py`、`plugins/loader.py`、`app.py` | `tests/test_plugin_ipc_hardening.py`（容量 fail-closed、非法值拒绝、退出看护 reap 与代际守卫）、`tests/test_deploy_isolation.py`（熔断不随时间自动恢复） | — | **仅自动** |
 | 离线审计门禁与只读巡检 | `scripts/check_plugin_ipc.py`、`scripts/plugin_worker_guard.py`、`deploy/plugin-worker-guard.{service,timer}` | `tests/test_plugin_ipc_hardening.py`（门禁对故意移除不变量会失败、巡检自检的解析断言）、`make ipc-audit`、`make guard` | 本机跑过门禁与 `--self-test`；生产上实跑 `--json`，输出 `warnings: []`、`restart_performed: false`、退出码 0 | **自动 + 实测** |
 | 消息图片段的按需能力面 | `plugins/media_inbox.py`、`plugins/context.py`、`plugins/surfaces.py`、`plugins/supervisor.py`、`plugins/dispatch.py` | `tests/test_plugin_media_observe.py`（16 项：只交 http(s) 引用、一次性且按会话隔离、文本消息不清槽、TTL 与条数上限、结果非宿主状态活视图、能力单列且敏感、surface 白名单与路由、scope 键在 wire 上被拒、审计只记 `count`、无能力 / 无 caller 拒绝、进程内两条路径、消息钩子→inbox→插件接线） | `npm run verify` 重建 dist；URL 不进日志 / 审计 / trace / messages 表由测试断言 | **仅自动** |
+| 额度审批的面板决策与事件总线 | `budget/events.py`、`budget/commands.py`、`api/admin.py`、`webui/src/views/BudgetView.vue` | `tests/test_budget_events.py`（9 项：多订阅者、失败/挂起通道不影响决策、事件字段白名单、申请去重不重发、命令决策事件形状、驳回事件、局部总线）、`tests/test_budget_approval_api.py`（10 项：角色与凭据、无账本 503、批准/驳回、重放 409、跨域 404、禁止自批、降级标记、策略可见） | `npm run verify` 全绿并重建 dist；两条决策路径发布同一份事件由测试断言 | **仅自动** |
 | 20 项安全与错误日志契约 | `scripts/check_security_boundaries.py`、`docs/security-boundaries.md` | `tests/test_security_boundaries.py`（门禁对故意移除不变量会失败、20 个编号都有检查）、CI 双矩阵与 `make boundary-audit` | 本机逐条打印证据行 | **仅自动** |
 | Cookie 会话与角色分级 | `api/auth.py`、`webui/src/api/client.ts`、`webui/src/stores/auth.ts` | `tests/test_auth_cookie.py`（Cookie 标志、CSRF/Origin、角色门槛、回环读写分离、登录登出） | 本机 TestClient 覆盖；云服务器上的登录/登出见本轮发布验收 | **仅自动**（云服务器实测见发布记录） |
 | 日志净化与统一错误层 | `logging_setup.py`、`core/log_context.py`、`api/errors.py`、`security/audit.py` | `tests/test_logging_hardening.py`（控制字符、ContextVar 不串请求、有界正则）、`tests/test_error_mapping.py`（状态码映射、响应不含异常原文） | 本机跑过；日志环与 `X-Request-ID` 由 TestClient 断言 | **仅自动** |
@@ -117,7 +118,7 @@ python -m soapbot.cli start
 ## 四、复现这套结论
 
 ```bash
-# 全量测试（本机基线：2185 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
+# 全量测试（本机基线：2204 passed / 12 skipped；另有 1 条 opt-in 的真实 MCP 测试）
 PYTHONPATH=src SOAPBOT_ENABLE_RUNTIME=false python -m pytest -q
 
 # 静态门禁
