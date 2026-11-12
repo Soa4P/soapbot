@@ -10,6 +10,19 @@
 
 ## [Unreleased]
 
+### 两份外部参考评估：ops-handoff 十六篇与 dsh-cua 数据边界
+
+- **docs/reference-ops-handoff.md**：kira905/ops-handoff-design 十六篇运维设计记录
+  的逐篇对照。十四篇在 soapbot 已有同源落地（只读巡检、capability 阶梯、文档一致性
+  门禁、受控动词……）；三项吸收登记：长会话交接的 worker 重启语义（auto-chat 0.3.0
+  行为说明）、假完成识别（审批记录加 done_at，归属面板下批）、批量改文件纪律
+  （写面为零暂不需要，记给未来）。
+- **autonomous-capabilities-design.md §1.4**：dsh-cua（Windows 桌面自动化，UIA+OCR+
+  窗口绑定）作为「自助玩游戏」控制面的技术参考——四条数据边界纪律（截屏只落本地、
+  caption 是唯一画面出机点、CDP 端口自认不是隔离、明文 token 的文件化替代）与
+  技术选型（UIA 优先于纯视觉 OCR、窗口绑定细化专用机器边界）。控制面开工三前置
+  不变，默认关闭立场不变。
+
 ### 字幕能力面（bilibili.subtitle）：dsh-bili-humanism 的核心思想在边界内落地
 
 原来错在哪：第一批改编把 dsh-bili-humanism 的字幕学习列为「待宿主能力」——wbi 签名
