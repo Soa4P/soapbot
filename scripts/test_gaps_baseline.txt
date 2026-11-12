@@ -9,4 +9,6 @@ soapbot.core.session
 soapbot.examples.plugins.admin.main
 soapbot.examples.plugins.echo.main
 soapbot.examples.plugins.help.main
+soapbot.examples.plugins.qzone-diary.main
+soapbot.examples.plugins.qzone-watch.main
 soapbot.examples.plugins.remind.main

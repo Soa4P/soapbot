@@ -153,6 +153,8 @@ ALLOWED_SURFACES = frozenset(
         "media.observe",
         "browse.read",
         "browse.propose",
+        "qzone.read",
+        "qzone.write",
         "http.request",
         "bilibili.request",
         "storage.get",
@@ -437,6 +439,15 @@ class _RemoteCtx:
         if amount_minor is not None:
             args["amount_minor"] = amount_minor
         return _call("browse.propose", args)
+
+    async def qzone_read(self, action, params=None):
+        return _call("qzone.read", {"action": action, "params": params or {}})
+
+    async def qzone_write(self, text, *, confirm=False):
+        return _call(
+            "qzone.write",
+            {"action": "send_qzone_post", "params": {"text": text, "confirm": confirm}},
+        )
 
     async def observe_images(self):
         """Take the image references of the message that just arrived, once.

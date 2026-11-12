@@ -584,6 +584,19 @@ class Settings(BaseSettings):
     notify_webhook_secret: SecretStr = SecretStr("")
     """HMAC-SHA256 key. Never logged, audited, or sent as a header value."""
 
+    # ---- QQ 空间 via a personal-account protocol endpoint (high risk) ----
+    qzone_via_protocol: bool = False
+    """Off unless the operator explicitly accepts the account-risk trade-off.
+
+    QQ's official bot platform exposes no 空间/说说 API. The only path is a
+    personal-account protocol endpoint, where automation can trigger platform
+    risk controls. Nothing in this deployment turns it on by itself.
+    """
+    qzone_api_url: str = ""
+    """Operator-owned OneBot-compatible HTTP API base URL. Never discovered."""
+    qzone_access_token: SecretStr = SecretStr("")
+    """Bearer token for that endpoint. Held by the host, never given to a plugin."""
+
     # ---- Bilibili (Wave 9) ----
     # Off by default. The README's disclaimer is only honest if enabling this is a
     # deliberate operator decision: Bilibili's developer agreement prohibits automated
