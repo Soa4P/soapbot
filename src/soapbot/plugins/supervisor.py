@@ -151,6 +151,8 @@ ALLOWED_SURFACES = frozenset(
         "send.message",
         "send_media.request",
         "media.observe",
+        "browse.read",
+        "browse.propose",
         "http.request",
         "bilibili.request",
         "storage.get",
@@ -424,6 +426,17 @@ class _RemoteCtx:
                 "caption": str(caption or "")[:2000],
             },
         )
+
+    async def browse_read(self, url):
+        """Read a public page; the host applies the allow-list and robots.txt."""
+        return _call("browse.read", {"url": url})
+
+    async def browse_propose(self, url, amount_minor=None):
+        """Create a spend request from a public page, after the host's cap check."""
+        args = {"url": url}
+        if amount_minor is not None:
+            args["amount_minor"] = amount_minor
+        return _call("browse.propose", args)
 
     async def observe_images(self):
         """Take the image references of the message that just arrived, once.

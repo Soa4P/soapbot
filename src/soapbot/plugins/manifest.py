@@ -214,6 +214,17 @@ class Capability(StrEnum):
     """
 
 
+    BROWSE = "browse"
+    """Read a public web page to build a purchase proposal.
+
+    Separate from ``HTTP`` because the rules are stricter: a named host allow-list,
+    robots.txt consent, our own user agent, no cookies or redirects, no JavaScript,
+    bounded text-only output. A plugin may fetch an API it was granted and still
+    have no business wandering around shop pages — and an operator approving
+    "may read public pages" is approving exactly that, nothing more.
+    """
+
+
 #: Capabilities that can leak data or reach the network. A plugin holding any of
 #: these is flagged in the WebUI, and the audit log records each use.
 SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
@@ -224,6 +235,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.SEND,
         Capability.SEND_MEDIA,
         Capability.MEDIA_OBSERVE,
+        Capability.BROWSE,
         Capability.STORAGE,
         Capability.BILIBILI,
     }
