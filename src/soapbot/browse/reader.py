@@ -232,7 +232,6 @@ class _Robots:
             )
         except Exception as exc:
             raise ReadError("robots.txt could not be read; refusing the fetch") from exc
-        parser: RobotFileParser | None
         if status == 404 or status >= 400:
             # No robots file means no stated restriction; a 5xx does NOT mean that.
             parser = None if status == 404 else _deny_all()
