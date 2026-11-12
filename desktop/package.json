@@ -2,7 +2,7 @@
   "name": "soapbot-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Desktop shell for the soapbot control panel",
+  "description": "soapbot 桌面端：自带后端的安装包，打开即用控制台与对话端",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
