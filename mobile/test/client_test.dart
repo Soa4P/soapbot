@@ -3,7 +3,11 @@
 // The client is the contract between the app and the archive API; these tests pin the
 // shapes the server actually sends (snake_case keys, optional has_older) so a backend
 // rename fails here instead of on a phone.
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:soapbot_archive/api/client.dart';
 
 void main() {
@@ -63,6 +67,56 @@ void main() {
       expect(plain.isNote, isFalse);
       expect(plain.userName, '');
       expect(plain.imageDesc, isNull);
+    });
+  });
+
+  group('CSRF double-submit', () {
+    test('登录同时捕获两枚 Cookie，变更请求回显 X-CSRF-Token', () async {
+      final captured = <http.Request>[];
+      http.Response respond(dynamic body, {Map<String, String> headers = const {}}) {
+        final h = <String, String>{'content-type': 'application/json', ...headers};
+        return http.Response(jsonEncode(body), 200, headers: h);
+      }
+
+      final api = ChatApi(
+        baseUrl: 'http://test',
+        client: MockClient((request) async {
+          captured.add(request);
+          if (request.url.path == '/api/accounts/login') {
+            // httpx/http 会把多个 Set-Cookie 合并进一个头（逗号连接）。
+            return respond(
+              {
+                'account': {'id': 1, 'username': 'u', 'role': 'owner'},
+                'access_token': 'jwt-token',
+              },
+              headers: {
+                'set-cookie':
+                    'soapbot_session=abc.def; HttpOnly; Path=/, soapbot_csrf=tok123; Path=/',
+              },
+            );
+          }
+          if (request.url.path == '/api/chat/notes') {
+            return respond({
+              'note': {'id': 1, 'session_key': 's', 'role': 'note', 'content': 'x'},
+              'delivered': false,
+            });
+          }
+          return respond({});
+        }),
+      );
+
+      final account = await api.login('u', 'p');
+      expect(account.id, 1);
+      expect(api.csrf, 'tok123');
+      expect(api.token, 'jwt-token');
+
+      final note = await api.note('onebot11:group:1', '备忘');
+      expect(note.isNote, isTrue);
+      final noteReq = captured.last;
+      // Bearer 优先：服务端对 Bearer 请求豁免 CSRF，原生客户端不再被
+      // 「升级后 csrf 未存」的 403 卡死。
+      expect(noteReq.headers['Authorization'], 'Bearer jwt-token');
+      expect(api.csrf, 'tok123');
     });
   });
 }
