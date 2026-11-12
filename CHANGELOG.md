@@ -10,6 +10,36 @@
 
 ## [Unreleased]
 
+### 额度审批从「只能敲命令」变成「面板能点、事件能订阅」
+
+原来错在哪：`Permission.APPROVE_PAYMENT`、状态机、原子预留、禁止自批、日/周/月上限都
+已经写好，但**没有任何办法从面板决策**：`GET /api/budget` 是只读的，`/budget approve`
+只能在 QQ 群里敲；`enable_budget` 默认关闭；单 owner 部署因为「不能自批」根本走不完流程；
+申请提交后除了命令回复里的被动提醒，没有任何通知。也就是说：账本是对的，但审批这件事
+在实际部署里几乎不会发生。
+
+现在：
+
+- `POST /api/budget/{id}/approve` / `/deny`：要求 `APPROVE_PAYMENT` + 真实凭据
+  （回环只读不能 POST 两下就批准），`session_key` 只是定位参数，账本自己复核归属。
+  第 10 页增加批准/驳回按钮，不可逆动作先过确认框；策略表显示「第二审批人要求」状态。
+- `budget/events.py`：`APPROVAL_BUS` 是唯一订阅点。QQ 命令的申请/批准/驳回/撤回与面板
+  的两个端点发布**同一份** `ApprovalEvent`；下一阶段的 QQ / Webhook / 手机三条通道各自
+  订阅。通道挂掉、超时、抛异常都只记异常类型——账本已经提交，通知失败绝不能把一个
+  成功的审批变成 500 然后被重试成二次决策。事件是显式字段白名单，不携带任何凭据。
+- **默认开启**：面板能操作之后，账本不再是「没人能用的管控」，而 ¥500/期、¥100/笔本来
+  就是显式整数上限。`SOAPBOT_ENABLE_BUDGET=false` 仍可完全移除命令族；`.env.example`
+  与 `docs/configuration.md` 同步。
+- **单 owner 没有被悄悄降级**：新增 `budget_require_distinct_approver`（默认 `true`）。
+  运维可以显式关掉并接受「审批退化成确认框」，但面板会显示这个状态，每次决策的事件与
+  审计都带 `degraded` 标记。没有做「检测到只有一个 owner 就自动放宽」这种自作主张。
+- 支付边界未动：表里依然没有 `paid_at` / `payment_token` / `executed`，批准回复依然是
+  「本机器人不执行任何支付，请按既有渠道人工完成」。
+
+`tests/test_budget_events.py`（9 项）与 `tests/test_budget_approval_api.py`（10 项）覆盖
+权限、凭据、作用域、重放、自批拒绝、降级标记、通道失败不破坏决策，以及命令路径与面板
+路径发布同一种事件。
+
 ### 消息钩子暴露图片段：做成按需能力面，而不是广播
 
 原来错在哪：`docs/qq-autonomy-design.md` §3 和 §5 都写了「从聊天里顺手收藏」需要宿主

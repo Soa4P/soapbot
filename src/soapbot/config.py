@@ -521,9 +521,12 @@ class Settings(BaseSettings):
     """
 
     # ---- budget (Wave 5) ----
-    # Off by default: a ledger nobody configured would register a /budget command
-    # that reads as a working control while governing nothing.
-    enable_budget: bool = False
+    # On by default since the approval workflow became reachable from the panel:
+    # an operator can now act on a request without knowing a slash command exists.
+    # The caps below are still explicit integers, so an unconfigured deployment gets
+    # a real, conservative limit (¥500/month, ¥100/request) rather than no limit.
+    # Set SOAPBOT_ENABLE_BUDGET=false to remove the command family entirely.
+    enable_budget: bool = True
     budget_currency: str = "CNY"
     """Single accounting currency. The ledger never converts between currencies."""
     budget_period: Literal["day", "week", "month"] = "month"
@@ -544,6 +547,15 @@ class Settings(BaseSettings):
     """Single-request cap in minor units (¥100.00)."""
     budget_request_ttl_seconds: float = 24 * 3600
     """How long an unanswered request holds its reservation before expiring."""
+    budget_require_distinct_approver: bool = True
+    """Require a *second* person to approve (single-owner deployments cannot).
+
+    A one-owner installation has nobody else to ask, which is why the workflow used
+    to be dead on arrival there. Turning this off turns approval into a confirmation
+    dialog: honest, but weaker. The name says so, the panel shows the state, and
+    every decision made while disabled is tagged ``degraded`` in the event bus and
+    the audit trail. Never flipped silently by detecting that only one owner exists.
+    """
 
     # ---- Bilibili (Wave 9) ----
     # Off by default. The README's disclaimer is only honest if enabling this is a

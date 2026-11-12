@@ -507,9 +507,10 @@ def build_runtime(
             kb=kb,
         )
 
-    # The ledger is opt-in. Enabled by default it would put an unrequested
-    # ``/budget`` command in every deployment's help text, and a budget nobody
-    # configured is a control that reads as available but governs nothing.
+    # The ledger is on by default with conservative caps; ``enable_budget`` remains
+    # the escape hatch for deployments that want no /budget command at all. A caller
+    # that passes a store explicitly gets it even when the flag is off (tests and
+    # bespoke runtimes), so the two sides never disagree about which store is live.
     budget_commands = None
     if budget is not None or enable_budget:
         from soapbot.budget.policy import BudgetPolicy
@@ -533,6 +534,7 @@ def build_runtime(
                     period_cap_minor=cfg.budget_period_cap_minor,
                     per_request_cap_minor=cfg.budget_per_request_cap_minor,
                     request_ttl_seconds=cfg.budget_request_ttl_seconds,
+                    require_distinct_approver=cfg.budget_require_distinct_approver,
                 ),
                 audit=audit_log,
             )
