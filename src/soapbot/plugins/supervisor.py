@@ -157,6 +157,7 @@ ALLOWED_SURFACES = frozenset(
         "qzone.write",
         "http.request",
         "bilibili.request",
+        "bilibili.subtitle",
         "storage.get",
         "storage.set",
         "storage.delete",
@@ -486,6 +487,14 @@ class _RemoteCtx:
                         "path": str(path),
                         "params": {str(k): str(v) for k, v in (params or {}).items()},
                     },
+                )
+
+            async def subtitle(self, bvid):
+                """字幕正文：wbi 签名与 hdslb 抓取都在宿主侧（#52 的 L2 client），
+                插件只发 bvid、只拿文本。"""
+                return await _call(
+                    "bilibili.subtitle",
+                    {"kind": "subtitle", "bvid": str(bvid)},
                 )
 
         return _RemoteBilibili()

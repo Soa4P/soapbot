@@ -507,7 +507,11 @@ class PluginContext:
         the cookie safely" — it was "no login state at all".
         """
         provider = self._bilibili_cookie_provider or _default_bilibili_cookie
-        return BilibiliClient(self._guard, cookie_provider=provider)
+        return BilibiliClient(
+            self._guard,
+            cookie_provider=provider,
+            host_client=getattr(self, "_bilibili_host_client", None),
+        )
 
     async def send(self, text: str, *, session_key: str) -> None:
         """Send an unsolicited message to a session.
@@ -656,11 +660,12 @@ class PluginContext:
         return MEDIA_INBOX.take(session_key)
 
     def _init_runtime_hooks(
-        self, *, sender=None, sender_media=None, memory=None, kb=None
+        self, *, sender=None, sender_media=None, memory=None, kb=None, bilibili_host=None
     ) -> None:
         """Host-only wiring, called by the loader/manager after construction."""
         self._sender = sender
         self._sender_media = sender_media
+        self._bilibili_host_client = bilibili_host
         if memory is not None:
             self._memory_store = memory
         if kb is not None:
