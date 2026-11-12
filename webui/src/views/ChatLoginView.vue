@@ -139,6 +139,7 @@ async function submit(): Promise<void> {
   display: grid;
   place-items: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
   background:
     radial-gradient(1200px 520px at 15% -10%, var(--brand-soft), transparent 60%),
