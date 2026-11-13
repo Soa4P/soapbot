@@ -1,8 +1,9 @@
 # 自主能力设计：看屏幕（自助玩游戏的前置）与自主挑音色
 
-> 状态：**设计，未实现**。本文只定边界与验收门槛，不写任何一行已实现的代码；
-> 实现顺序、每一步的宿主能力面与插件配额都在这里先说清。放进来是因为两件事都
-> 需要「宿主先有受审能力面，插件才能申请」——与 `bilibili` 能力（#41）同一模式。
+> 状态：**§1 第一阶段（看屏幕）已实现**（2026-11-14，见 §1.5 落地附记）；§2 挑音色的
+> 管线环节未实现；**控制面（键鼠注入）未开工**，三前置不变。
+> 放进来是因为两件事都需要「宿主先有受审能力面，插件才能申请」——与 `bilibili`
+> 能力（#41）同一模式。
 >
 > 注意区分：本文的「看屏幕」是**本机屏幕画面**，单向进模型、不落盘。已经实现的
 > `browse` 能力面读的是**公开网页**，遵守 robots.txt、无登录态、只交文本快照。
@@ -104,3 +105,35 @@
 UIA 覆盖不到的自绘界面回退；窗口绑定（只操作声明过的窗口）对应本设计「专用机器」
 边界的窗口级细化。**控制面（键鼠注入）开工三前置不变**（§1.1 第 4 条 + 三条落地
 条件），本节只登记技术路线，不改变默认关闭的立场。
+
+### 1.5 第一阶段落地记录（2026-11-14）
+
+§1 的五条硬边界逐条兑现（`screen/capture.py`、`screen/inbox.py`，测试
+`tests/test_screen_capability.py` 20 项）：
+
+1. **专用机器**：`SCREEN_ENABLED` + `SCREEN_DEDICATED_MACHINE` 双门——主机名比对
+   （不区分大小写，Windows 主机名书写习惯），**声明为空 = 没有任何机器被声明 = 永远
+   拒绝**（fail closed）。拒绝原因一律是短 token（`screen_disabled` /
+   `screen_machine_undeclared` / `screen_machine_mismatch`），不携带任何画面信息。
+2. **画面单向进模型**：tile 经宿主 `SCREEN_INBOX`（有界、TTL、新帧覆盖旧帧、消费一次
+   即走）在 `ScreenFrameStage`（紧贴 ModelStage 之前）写入 `ctx.extras
+   ["clean_segments"]`——`ModelStage` 读图像的既有缝，**已归档的 event.segments 零变化**
+   （像素不进 messages 表）。全模块无一处文件写入；测试钉住帧字节不出现在审计/日志/
+   异常文本（§1.3 零命中门槛）。
+3. **配额**：`Capability.SCREEN` 入 `SENSITIVE_CAPABILITIES`——插件路径直接继承 guard
+   的 30 次/分钟敏感滑窗；每次请求帧数被 `SCREEN_FRAMES_MAX`（≤6）钳制。
+4. **只看不碰**：`screen/capture.py` 无任何输入注入；依赖只有抓屏用的 mss（可选
+   extra `soapbot[screen]`，懒加载，同 edge-tts 措辞）与既有 Pillow。**没有** pyautogui、
+   没有键鼠通道——控制面第二阶段另开设计。
+5. **会话可见性**：审计只记 frames/used/dropped/duration_ms/bytes 与 session，成功与
+   拒绝都进审计；面板可见。
+
+两个入口：四端任一端发 `/look [帧数]`（宿主命令，抓帧后**不短路模型**——命令产出物是
+上下文不是文本，模型带着图回答用户的问题）；插件经 `screen.capture` 能力申请
+（`ctx.screen_capture(frames)`），拿到的只有 ref + 元数据，帧由宿主在同一轮模型调用前
+注入。`_tile`/`_frame_signature` 从 `ai/vision.py` 提升为公开函数（`tile_frames` /
+`frame_signature`），GIF 路径与屏幕路径共用同一套拼图与去重阈值。
+
+**接线注意**（写给将来动这块的人）：插件命令的回复会短路模型（`PluginCommandStage`
+设 `skip_model`），所以帧注入不能挂在命令阶段里，必须是独立 Stage 且紧贴 ModelStage
+——这个顺序进了 `core/trace.py` 的 `STAGE_ORDER`，被两个测试钉住。

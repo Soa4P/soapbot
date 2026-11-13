@@ -237,6 +237,17 @@ class Capability(StrEnum):
     "may read public pages" is approving exactly that, nothing more.
     """
 
+    SCREEN = "screen"
+    """Request a look at the dedicated machine's display (view only, phase 1).
+
+    The most privacy-adjacent capability in the set: a screen may show anything.
+    The host therefore keeps the pixels — a plugin gets a reference and metadata,
+    and the frame travels into the model context through the host-owned inbox.
+    Doubly gated beyond the capability itself: the operator must enable the flag
+    AND declare this exact hostname as the bot's dedicated machine. No input
+    injection exists in this phase; the plugin cannot touch the machine.
+    """
+
 
 #: Capabilities that can leak data or reach the network. A plugin holding any of
 #: these is flagged in the WebUI, and the audit log records each use.
@@ -249,6 +260,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.SEND_MEDIA,
         Capability.MEDIA_OBSERVE,
         Capability.BROWSE,
+        Capability.SCREEN,
         Capability.QZONE_READ,
         Capability.QZONE_WRITE,
         Capability.STORAGE,

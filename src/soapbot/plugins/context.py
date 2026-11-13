@@ -659,6 +659,21 @@ class PluginContext:
 
         return MEDIA_INBOX.take(session_key)
 
+    async def screen_capture(self, frames: int = 1) -> dict[str, Any]:
+        """Request a look at the dedicated machine's display (view only).
+
+        Requires the ``screen`` capability; the host additionally re-checks the
+        flag and the dedicated-machine declaration on every call. The tile never
+        reaches plugin code — it is staged in the host inbox and enters the model
+        context via ``ScreenFrameStage`` in the same pipeline run. The return value
+        is a ref plus metadata (frame counts, byte size), enough for the plugin to
+        know the capture happened and nothing about what was on screen.
+        """
+        result = await self._surface_router().dispatch(
+            "screen.capture", {"frames": int(frames)}, self._require_caller("screen_capture")
+        )
+        return result
+
     def _init_runtime_hooks(
         self, *, sender=None, sender_media=None, memory=None, kb=None, bilibili_host=None
     ) -> None:

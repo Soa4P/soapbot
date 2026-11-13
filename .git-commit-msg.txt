@@ -1,0 +1,19 @@
+新增: 看屏幕能力面（screen 第一阶段，只看不碰）
+
+原来错在哪：「自助玩游戏」的第一块前置（autonomous-capabilities-design.md §1）一直是
+纯设计——机器人看不见屏幕，四端指挥下玩游戏/看着画面刷 B 站无从谈起。
+
+- 双门：SOAPBOT_SCREEN_ENABLED + SOAPBOT_SCREEN_DEDICATED_MACHINE（显式声明专用
+  工作机主机名）；声明为空 = 永远拒绝（fail closed）；拒绝原因是短 token。
+- 画面单向进模型：筛帧（16x16 亮度签名去重）-> 不超过 1024 的网格拼图 -> 宿主
+  SCREEN_INBOX -> ScreenFrameStage（紧贴 ModelStage，STAGE_ORDER 已钉）写
+  clean_segments——已归档 event.segments 零变化，像素不落盘、不进审计、插件拿
+  不到位图。
+- 配额：Capability.SCREEN 入敏感能力集（30 次/分钟滑窗）；帧数被 SCREEN_FRAMES_MAX
+  钳制（不超过 6）。
+- 两个入口：四端 /look [帧数]（不短路模型——模型带图回答问题）；插件 screen.capture
+  能力（ctx.screen_capture，只拿 ref + 元数据）。
+- 只看不碰：无键鼠注入（控制面第二阶段三前置未齐，继续关闭）；抓屏依赖可选
+  pip install 'soapbot[screen]'（mss 懒加载，同 edge-tts 措辞）。
+- 测试 +20（test_screen_capability.py，含帧字节零泄漏门槛）；vision.py 拼图/去重
+  提升为公开函数，GIF 与屏幕共用阈值；文档五份同步。
