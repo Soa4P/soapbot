@@ -87,6 +87,10 @@ STAGE_ORDER: tuple[str, ...] = (
     "persona",
     "recall",
     "knowledge",
+    # 看屏幕：帧注入紧贴模型。抓帧发生在更早的命令/插件阶段，tile 落宿主 inbox，
+    # 这里在模型运行前消费（见 ScreenFrameStage docstring）——插件命令的回复会
+    # 短路模型，所以注入必须独立成阶段且必须排在 model 之前。
+    "screen_frame",
     "model",
     "safety",
     "reply",

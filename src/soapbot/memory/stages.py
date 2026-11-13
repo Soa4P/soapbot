@@ -486,6 +486,10 @@ class CommandStage(Stage):
         # The controls that matter are elsewhere — a per-session query limit and a
         # per-deployment kill switch — and neither is expressed by a role floor.
         "bili": Permission.USE_COMMAND,
+        # 看屏幕（第一阶段只看不碰）：命令本身不设角色门槛——真正的门禁是「部署开关 +
+        # 专用机器声明」双重门（screen/capture.py），关着时任何人输入都只得到一句带
+        # 原因 token 的拒绝，不产生任何抓帧。与 budget/bili 同一条设计逻辑。
+        "look": Permission.USE_COMMAND,
         # Group moderation. These make the bot do something *to a person* in front
         # of the whole group, under the owner's name, so they need their own
         # permission rather than riding on USE_COMMAND.
@@ -817,6 +821,13 @@ class CommandStage(Stage):
             lines.append("/budget [金额 用途] — 查看额度或发起消费申请")
         if self.bilibili is not None:
             lines.append("/bili <BV号|链接> — 查看视频信息或生成观后感")
+        # 看屏幕只在双重门都成立时才 advertised：帮助文本永远不预告一条必然被拒的命令。
+        from soapbot.config import settings
+
+        if getattr(settings, "screen_enabled", False) and getattr(
+            settings, "screen_dedicated_machine", ""
+        ):
+            lines.append("/look [帧数] — 看一眼专用工作机的屏幕（只看不碰）")
         # Moderation is listed only when the adapter can actually do it. Advertising
         # "/mute" on a transport without MUTE would produce a command that always
         # answers "不支持" — worse than not offering it.
@@ -833,6 +844,50 @@ class CommandStage(Stage):
 
     async def _cmd_ping(self, ctx: PipelineContext, args: list[str]) -> str:
         return f"pong（会话 {ctx.event.session_key}）"
+
+    async def _cmd_look(self, ctx: PipelineContext, args: list[str]) -> str | None:
+        """看一眼专用工作机的屏幕（第一阶段只看不碰）。
+
+        返回 ``None`` 让管线继续走到模型——抓到的帧追加进 ``clean_segments``（模型
+        图像的既有缝），用户在 ``/look`` 后面写的问题原样进模型，模型带着图回答。
+        这与其它命令「回复即短路模型」不同：这个命令的产出物是*上下文*，不是文本。
+        门禁（flag + 专用机器声明）失败时返回带原因 token 的拒绝文本，不抓帧。
+        """
+        from soapbot.config import settings
+        from soapbot.screen.capture import (
+            ScreenPolicy,
+            ScreenRefusedError,
+            ScreenUnavailableError,
+            capture_tile,
+        )
+
+        policy = ScreenPolicy.from_settings(settings)
+        frames = policy.frames_max
+        if args and args[0].isdigit():
+            frames = max(1, min(int(args[0]), policy.frames_max))
+        try:
+            result = await capture_tile(policy, frames=frames)
+        except ScreenRefusedError as exc:
+            return f"看不了屏幕（{exc.reason}）。"
+        except ScreenUnavailableError as exc:
+            return f"看不了屏幕：{exc}"
+
+        _, _, b64 = result.payload.data_url.partition("base64,")
+        segments = list(ctx.extras.get("clean_segments") or ctx.event.segments)
+        from soapbot.core.message import MessageSegment
+
+        segments.append(MessageSegment.image(b64=b64))
+        ctx.extras["clean_segments"] = segments
+        self.audit.record(
+            kind="command",
+            action="cmd:look",
+            outcome="allow",
+            principal=ctx.extras.get("principal"),
+            # 元数据 only：帧数与字节数，绝不记画面内容（设计 §1.1 边界 2）。
+            detail=f"frames={result.frames_captured} used={result.frames_used} bytes={result.size_bytes}",
+            trace_id=ctx.event.trace_id,
+        )
+        return None
 
     # ------------------------------------------------------------- moderation
     async def _cmd_mute(self, ctx: PipelineContext, args: list[str]) -> str:

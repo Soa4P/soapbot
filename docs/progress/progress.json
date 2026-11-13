@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-14T20:00:00+08:00",
+  "updated_at": "2026-11-14T23:30:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3654,6 +3654,45 @@
         }
       ],
       "goal": "把「每个端互通」落成同一份连续对话：QQ 绑定统一会话 + 发送失败/被拒在四端可见"
+    },
+    {
+      "id": "a17",
+      "index": "A17",
+      "name": "看屏幕（screen 能力面第一阶段，只看不碰）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a17-t1",
+          "name": "screen/capture.py：双门（flag + 专用机器声明）+ 筛帧去重拼图 + 零持久化",
+          "status": "done",
+          "note": "声明为空即永远拒绝（fail closed）；拒绝原因是短 token；mss 可选 extra soapbot[screen]，懒加载同 edge-tts"
+        },
+        {
+          "id": "a17-t2",
+          "name": "Capability.SCREEN 入敏感能力集 + screen.capture surface + wire 白名单 + child shim + ctx 方法",
+          "status": "done",
+          "note": "插件继承 30 次/分钟敏感滑窗；插件只拿 ref + 元数据，不到位图；审计只记帧数/时长/字节"
+        },
+        {
+          "id": "a17-t3",
+          "name": "ScreenFrameStage 紧贴 ModelStage（STAGE_ORDER 更新并被两个测试钉住）+ SCREEN_INBOX 单向交接",
+          "status": "done",
+          "note": "插件命令会短路模型，所以注入必须独立阶段；帧进 clean_segments 缝，已归档 event.segments 零变化"
+        },
+        {
+          "id": "a17-t4",
+          "name": "/look [帧数] 宿主命令：四端入口，抓帧后不短路模型",
+          "status": "done",
+          "note": "命令产出物是上下文不是文本——模型带图回答用户的问题；USE_COMMAND 权限，门禁在 capture 内"
+        },
+        {
+          "id": "a17-t5",
+          "name": "测试 +20（test_screen_capability.py）与文档五份（设计附记 §1.5/capabilities/configuration/.env/verification-matrix/CHANGELOG）",
+          "status": "done",
+          "note": "帧字节零出现在审计/日志/异常文本被测试钉住（设计 §1.3 门槛）；CI 无 mss 由 fake 模块代替"
+        }
+      ],
+      "goal": "把「四端指挥机器人看屏幕」落成受审能力面（第一阶段只看不碰）；控制面第二阶段三前置未齐继续关闭"
     }
   ],
   "archive": [

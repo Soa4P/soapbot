@@ -332,6 +332,67 @@ class SurfaceRouter:
         self._browse_audit("browse.read", page)
         return page.to_dict()
 
+    async def _screen_capture(self, args: dict[str, Any], caller) -> Any:
+        """Capture the dedicated machine's display on a plugin's behalf.
+
+        The plugin never receives pixels: the tile goes into the host-owned
+        ``SCREEN_INBOX`` for this session, and the return value is a ref plus
+        metadata. The model reads the frame when ``ScreenFrameStage`` consumes the
+        inbox, right before it runs — the same handoff pattern as ``media.observe``,
+        but for output toward the model instead of input from the message.
+        Audit carries frame counts, duration and byte size — never image content
+        (design §1.1 boundary 2 and §1.3's zero-leak gate).
+        """
+        self._guard.check(Capability.SCREEN, detail="screen capture")
+        from soapbot.config import settings
+        from soapbot.screen.capture import ScreenPolicy, ScreenRefusedError, capture_tile
+        from soapbot.screen.inbox import SCREEN_INBOX
+
+        policy = ScreenPolicy.from_settings(settings)
+        session_key = str(getattr(caller, "session_key", "") or "")
+        if not session_key:
+            raise PermissionError("a bound caller is required to request a screen capture")
+        requested = args.get("frames")
+        try:
+            frames = max(1, int(requested)) if requested is not None else 1
+        except (TypeError, ValueError) as exc:
+            raise ValueError("frames must be an integer") from exc
+        try:
+            result = await capture_tile(policy, frames=frames)
+        except ScreenRefusedError as exc:
+            # Same shape as the design's "说出原因的拒绝": a short token, never prose
+            # that could carry frame content (nothing leaked, but also nothing vague).
+            if self._audit is not None:
+                self._audit.record(
+                    kind="plugin",
+                    action="surface:screen.capture",
+                    outcome="deny",
+                    detail=f"plugin={self._plugin} reason={exc.reason}",
+                    plugin=self._plugin,
+                )
+            raise PermissionError(exc.reason) from exc
+        SCREEN_INBOX.put(session_key, result.payload)
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:screen.capture",
+                outcome="allow",
+                detail=(
+                    f"plugin={self._plugin} frames={result.frames_captured} "
+                    f"used={result.frames_used} dropped={result.frames_dropped} "
+                    f"duration_ms={result.duration_ms} bytes={result.size_bytes}"
+                ),
+                plugin=self._plugin,
+            )
+        return {
+            "ref": "screen:pending",
+            "frames_captured": result.frames_captured,
+            "frames_used": result.frames_used,
+            "frames_dropped": result.frames_dropped,
+            "size_bytes": result.size_bytes,
+            "note": "帧已交给宿主，将在本轮模型上下文中出现；插件拿不到位图。",
+        }
+
     async def _browse_propose(self, args: dict[str, Any], caller) -> Any:
         """Read a page, pre-check the caps, and create one pending spend request."""
         self._guard.check(Capability.BROWSE, detail="browse propose")
@@ -534,6 +595,7 @@ _SURFACE_TABLE = {
     "bilibili.subtitle": SurfaceRouter._bilibili_subtitle,
     "send_media.request": SurfaceRouter._send_media,
     "media.observe": SurfaceRouter._media_observe,
+    "screen.capture": SurfaceRouter._screen_capture,
     "browse.read": SurfaceRouter._browse_read,
     "browse.propose": SurfaceRouter._browse_propose,
     "qzone.read": SurfaceRouter._qzone_read,

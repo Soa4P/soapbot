@@ -287,6 +287,40 @@ class SkipReplyStage(Stage):
         return StageResult()
 
 
+class ScreenFrameStage(Stage):
+    """Move a pending screen tile from the host inbox into the model's context.
+
+    This is the one seam where captured frames become model-visible, and it is a
+    *stage* — not part of the capture surface — on purpose: the capture side may run
+    inside a plugin command whose reply would otherwise short-circuit the model
+    (``PluginCommandStage`` sets ``skip_model`` on any non-empty reply), and the
+    inbox consumer must run immediately before ``ModelStage`` to hand the image to
+    the very turn that asked for it. Frames ride ``ctx.extras["clean_segments"]``,
+    the seam ``ModelStage`` already reads for images; the archived event's own
+    segments are never touched, so the pixels never reach the archive.
+
+    The inbox is host-owned (``screen.inbox``): plugin code holds a ref, not a
+    bitmap. One-shot consumption and the TTL live in the inbox itself.
+    """
+
+    name = "screen_frame"
+
+    async def run(self, ctx: PipelineContext) -> StageResult:
+        from soapbot.core.message import MessageSegment
+        from soapbot.screen.inbox import SCREEN_INBOX
+
+        payload = SCREEN_INBOX.take(ctx.event.session_key)
+        if payload is None:
+            return StageResult()
+        # data URL → raw base64 for the segment; engine._load_image_bytes validates
+        # and re-decodes it on the way to the provider.
+        _, _, b64 = payload.data_url.partition("base64,")
+        segments = list(ctx.extras.get("clean_segments") or ctx.event.segments)
+        segments.append(MessageSegment.image(b64=b64))
+        ctx.extras["clean_segments"] = segments
+        return StageResult()
+
+
 _WAKE_PREFIX_RE = re.compile(r"^[/!]?\s*", re.UNICODE)
 
 #: Characters that introduce a slash command. They may also be configured as wake
