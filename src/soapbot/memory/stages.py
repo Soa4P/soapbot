@@ -110,7 +110,13 @@ class PersistStage(Stage):
 
 
 class PersistReplyStage(Stage):
-    """Archive the assistant reply after a successful send."""
+    """Archive the assistant reply after a send attempt.
+
+    A failed send used to write nothing, which made "the platform refused the
+    delivery" indistinguishable from "the model never answered" — every client just
+    showed silence. The reply is now archived either way; ``state`` tells them apart
+    (``ok`` vs ``send_failed``). Warmth is still only counted on success.
+    """
 
     name = "persist_reply"
 
@@ -118,8 +124,9 @@ class PersistReplyStage(Stage):
         self.store = store
 
     async def run(self, ctx: PipelineContext) -> StageResult:
-        if not ctx.model_reply or not ctx.extras.get("send_ok"):
+        if not ctx.model_reply:
             return StageResult()
+        send_ok = bool(ctx.extras.get("send_ok"))
         try:
             await self.store.archive_message(
                 session_key=ctx.event.session_key,
@@ -131,10 +138,13 @@ class PersistReplyStage(Stage):
                 user_id="",
                 user_name="soapbot",
                 trace_id=ctx.event.trace_id,
+                state="ok" if send_ok else "send_failed",
+                reason="" if send_ok else str(ctx.extras.get("send_error") or "")[:64],
             )
         except Exception as exc:
             logger.error("failed to archive reply: %s", exc)
-        else:
+            return StageResult()
+        if send_ok:
             # A delivered reply is one more interaction for the host's warmth model.
             # Only counted after a successful archive, so a pipeline that halted or
             # failed to send cannot make a quiet group look warm.

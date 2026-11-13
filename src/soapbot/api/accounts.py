@@ -23,6 +23,7 @@ from soapbot.accounts import (
     Account,
     AccountError,
     authenticate,
+    bind_qq_user,
     create_invite,
     create_owner,
     grant_membership,
@@ -30,6 +31,7 @@ from soapbot.accounts import (
     list_memberships,
     redeem_invite,
     set_account_status,
+    unbind_qq_user,
 )
 from soapbot.accounts.service import active_account_from_claims
 from soapbot.api.auth import (
@@ -204,7 +206,13 @@ async def accounts(
     rows = await list_accounts(_db(request))
     return {
         "accounts": [
-            {"id": a.id, "username": a.username, "role": a.role, "status": a.status}
+            {
+                "id": a.id,
+                "username": a.username,
+                "role": a.role,
+                "status": a.status,
+                "qq_user_id": a.qq_user_id,
+            }
             for a in rows
         ]
     }
@@ -262,3 +270,72 @@ async def grant(
     except AccountError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
     return {"ok": True}
+
+
+class BindingRequest(BaseModel):
+    qq_user_id: str = Field(..., min_length=5, max_length=20)
+
+
+def _binding_payload(updated: Account) -> dict[str, Any]:
+    return {"id": updated.id, "qq_user_id": updated.qq_user_id}
+
+
+def _invalidate_session_mapper() -> None:
+    """Drop the mapper's cached bindings after a bind/unbind.
+
+    The mapper caches lookups (including misses) for a short TTL; without this, an
+    unbind could keep a unified session alive for up to that TTL. Rare operation,
+    cheap to invalidate wholesale.
+    """
+    from soapbot.app import get_runtime
+
+    runtime = get_runtime()
+    mapper = getattr(runtime, "session_mapper", None) if runtime is not None else None
+    if mapper is not None:
+        mapper.invalidate()
+
+
+@router.put("/{account_id}/binding")
+async def bind(
+    account_id: int,
+    payload: BindingRequest,
+    request: Request,
+    auth: dict[str, Any] = Depends(require_role(Role.OWNER, require_credential=True)),
+) -> dict[str, Any]:
+    """Bind a QQ platform user to this account (unified chat).
+
+    This is the owner drawing the identity link by hand — a QQ user can never claim
+    it themselves, so nobody can merge someone else's platform conversation into
+    their own session by sending messages. A PUT (idempotent replace) rather than
+    POST: rebinding is moving the link, which the service enforces via the unique
+    index and the clash check.
+    """
+    actor = await active_account_from_claims(_db(request), auth)
+    if actor is None or not actor.is_owner:
+        raise HTTPException(status_code=403, detail="owner only")
+    try:
+        updated = await bind_qq_user(
+            _db(request), account_id=account_id, qq_user_id=payload.qq_user_id
+        )
+    except AccountError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    _invalidate_session_mapper()
+    return {"ok": True, "account": _binding_payload(updated)}
+
+
+@router.delete("/{account_id}/binding")
+async def unbind(
+    account_id: int,
+    request: Request,
+    auth: dict[str, Any] = Depends(require_role(Role.OWNER, require_credential=True)),
+) -> dict[str, Any]:
+    """Remove the QQ binding; the unified mapping stops on the next message."""
+    actor = await active_account_from_claims(_db(request), auth)
+    if actor is None or not actor.is_owner:
+        raise HTTPException(status_code=403, detail="owner only")
+    try:
+        updated = await unbind_qq_user(_db(request), account_id=account_id)
+    except AccountError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    _invalidate_session_mapper()
+    return {"ok": True, "account": _binding_payload(updated)}

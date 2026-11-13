@@ -230,6 +230,7 @@ async function sendTalk(text: string): Promise<void> {
     adapter: 'web',
     user_name: me.value?.username ?? '',
     created_at: Date.now() / 1000,
+    state: 'ok',
   }
   messages.value.push(optimistic)
   await scrollToBottom(true)
@@ -245,7 +246,30 @@ async function sendTalk(text: string): Promise<void> {
       await router.replace({ path: '/chat/login', query: { next: '/chat' } })
       return
     }
-    messages.value = messages.value.filter((row) => row.id !== optimistic.id)
+    if (err instanceof ApiError && err.status === 429) {
+      // The pipeline refused the message and the server archived a `rejected` row
+      // for it: pull that row instead of keeping the optimistic bubble, so every
+      // end sees the same state. The detail is a short token, not prose.
+      messages.value = messages.value.filter((row) => row.id !== optimistic.id)
+      try {
+        await syncTail(key)
+      } catch {
+        // degraded: a failed tail sync must not resurrect the optimistic bubble —
+        // the server row will arrive on the next SSE tick anyway.
+      }
+      noteError.value = err.message || t('chat.talk.refused')
+      void scrollToBottom(true)
+      return
+    }
+    // Network/5xx: the request never reached the server, so there is no server row.
+    // Keep the bubble but mark it failed instead of silently deleting it. Mutate the
+    // row *through the reactive list* — the raw `optimistic` object is no longer the
+    // reference Vue tracks once it was pushed.
+    const local = messages.value.find((row) => row.id === optimistic.id)
+    if (local) {
+      local.state = 'send_failed'
+      local.reason = 'network'
+    }
     noteError.value = err instanceof Error ? err.message : t('chat.talk.refused')
   } finally {
     saving.value = false

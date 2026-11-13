@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 
 from soapbot.memory.db import (
@@ -60,6 +60,8 @@ class Account:
     username: str
     role: str
     status: str
+    qq_user_id: str = ""
+    """Bound QQ platform user id (unified chat). Empty means unbound."""
 
     @property
     def is_owner(self) -> bool:
@@ -109,7 +111,13 @@ def _check_username(username: str) -> str:
 
 
 def _to_account(row: AccountRow) -> Account:
-    return Account(id=row.id, username=row.username, role=row.role, status=row.status)
+    return Account(
+        id=row.id,
+        username=row.username,
+        role=row.role,
+        status=row.status,
+        qq_user_id=row.qq_user_id or "",
+    )
 
 
 # --------------------------------------------------------------------- accounts
@@ -408,3 +416,83 @@ async def active_account_from_claims(db: Database, auth: dict[str, Any]) -> Acco
     if account is None or account.status != "active":
         return None
     return account
+
+
+# --------------------------------------------------------------------- qq binding
+_QQ_USER_RE = re.compile(r"^[0-9]{5,20}$")
+
+
+def _check_qq_user_id(qq_user_id: str) -> str:
+    """QQ numbers are digits; anything else is an authoring error, not a binding."""
+    value = str(qq_user_id).strip()
+    if not _QQ_USER_RE.match(value):
+        raise AccountError("QQ 号需为 5–20 位数字")
+    return value
+
+
+async def bind_qq_user(db: Database, *, account_id: int, qq_user_id: str) -> Account:
+    """Owner-set trust link: this QQ platform user *is* this account.
+
+    One QQ user may be bound to at most one account and one account to at most one
+    QQ user (unique index), so the mapping is a function in both directions. A
+    platform id can never impersonate two identities, and rebinding moves the link
+    instead of duplicating it.
+    """
+    value = _check_qq_user_id(qq_user_id)
+    async with db.write() as session:
+        row = (
+            await session.execute(
+                select(AccountRow).where(AccountRow.id == account_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise AccountError("账号不存在")
+        clash = (
+            await session.execute(
+                select(AccountRow.id).where(
+                    and_(
+                        AccountRow.qq_user_id == value,
+                        AccountRow.id != account_id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if clash is not None:
+            raise AccountError("该 QQ 号已绑定到另一个账号")
+        row.qq_user_id = value
+        await session.flush()
+        return _to_account(row)
+
+
+async def unbind_qq_user(db: Database, *, account_id: int) -> Account:
+    """Remove the binding. Unified mapping stops for this account on the next event —
+    the mapper reads the account row when its short cache misses."""
+    async with db.write() as session:
+        row = (
+            await session.execute(
+                select(AccountRow).where(AccountRow.id == account_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise AccountError("账号不存在")
+        row.qq_user_id = None
+        await session.flush()
+        return _to_account(row)
+
+
+async def account_by_qq_user(db: Database, qq_user_id: str) -> Account | None:
+    """Resolve a platform user id to its bound account, or ``None`` when unbound.
+
+    A disabled account resolves to ``None``: the binding is a trust link, and a
+    disabled identity must not keep receiving unified sessions.
+    """
+    value = _check_qq_user_id(qq_user_id)
+    async with db.session_factory()() as session:
+        row = (
+            await session.execute(
+                select(AccountRow).where(AccountRow.qq_user_id == value)
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status != "active":
+            return None
+        return _to_account(row)

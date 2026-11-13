@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-14T12:00:00+08:00",
+  "updated_at": "2026-11-14T20:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3609,6 +3609,51 @@
         }
       ],
       "goal": "把散在各批次的未完成目标收进一张清单：已收口的写明证据，未动工的标 todo，需要操作者决策的单独列出"
+    },
+    {
+      "id": "a16",
+      "index": "A16",
+      "name": "全端互通：统一会话与消息状态",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a16-t1",
+          "name": "迁移 v6：messages.state/reason + accounts.qq_user_id",
+          "status": "done",
+          "note": "旧行 NULL 按 ok 读；唯一索引让 QQ 号与账号双向一一对应"
+        },
+        {
+          "id": "a16-t2",
+          "name": "QQ 绑定：owner 面板设置，PUT/DELETE binding API，停用账号即脱离映射",
+          "status": "done",
+          "note": "绑定/解绑立即失效 SessionMapper 缓存；member 403 由测试钉住"
+        },
+        {
+          "id": "a16-t3",
+          "name": "SessionMapper：dispatch 会话锁前改写，flag 关/未绑定/停用三种情况零行为变化",
+          "status": "done",
+          "note": "事件 adapter 保持 onebot11，回复只回来源端；白名单三重信任分支，未绑定私聊默认拒绝不变"
+        },
+        {
+          "id": "a16-t4",
+          "name": "消息状态：send_failed 落库、被拒 talk 补写 rejected 行（短 token reason）",
+          "status": "done",
+          "note": "发送失败不再等于沉默；QQ 平台未验证文本被拒仍不留痕"
+        },
+        {
+          "id": "a16-t5",
+          "name": "客户端状态机：webui 三态乐观气泡 + 徽标；App 乐观插入与失败可见；统一会话标「与机器人的对话」",
+          "status": "done",
+          "note": "桌面壳=webui 自动获得；webui vitest 49 项、flutter 22 项全绿"
+        },
+        {
+          "id": "a16-t6",
+          "name": "文档与部署口径：chat-archive 统一会话章、security-model §9.3、README/.env/configuration/验证矩阵",
+          "status": "done",
+          "note": "部署需开 SOAPBOT_CHAT_TALK_ENABLED=true 与（要用 QQ 互通时）SOAPBOT_CHAT_UNIFIED_ENABLED=true 并重启"
+        }
+      ],
+      "goal": "把「每个端互通」落成同一份连续对话：QQ 绑定统一会话 + 发送失败/被拒在四端可见"
     }
   ],
   "archive": [

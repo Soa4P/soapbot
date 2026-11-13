@@ -128,15 +128,18 @@ OneBot 11 网关（阶段二）用四个变量：
 | `CHAT_APP_ENABLED` | `false` | Flutter 手机端可以访问聊天接口 |
 | `CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问聊天接口 |
 | `CHAT_TALK_ENABLED` | `false` | 允许被授权的账号在网页/手机端与机器人**对话**（`POST /api/chat/messages`） |
+| `CHAT_UNIFIED_ENABLED` | `false` | **统一会话**：已绑定 QQ 号的账号，其 QQ 私聊落进同一个 `web:private:account-<id>` 会话（绑定在第 15 页由 owner 设置） |
 | `BILI_COOKIE` | 空 | B 站登录 Cookie（`SESSDATA=...`），供插件的 `bilibili` 能力使用；宿主持有并在请求时注入，不进日志/审计。**这是凭据**，泄露等于交出 B 站账号，只在本机或容器挂载文件里配置 |
 
 三个端开关全关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。
 `CHAT_TALK_ENABLED` 单独控制发送端点，关掉时它同样 404。开启后也不是「能登录就能聊」：
 账号需要在第 15 页被授权自己的会话（`web:private:account-<id>`），每条消息都走与 QQ
-消息相同的管线门禁（注入检测、按适配器限频）。改这个开关要重启进程——web 适配器在
-启动时注册。手机端与桌面壳默认关闭，是因为它们是装到别人设备上的二进制，默认能读存档
-不合适；开启等于所有者明确同意。账号本身由邀请码创建，首个所有者用面板的一次性
-bootstrap token 建立（`POST /api/accounts/owner`）。开关的完整语义见
+消息相同的管线门禁（注入检测、按适配器限频）。`CHAT_UNIFIED_ENABLED` 再进一步：在第
+15 页把 QQ 号绑定到账号后，该 QQ 号的私聊落进同一会话，四端共享一份连续对话——信任链
+是 owner 绑定 + 该开关 + 既有 membership 三重，缺一即回到旧隔离。改这些开关要重启
+进程——web 适配器在启动时注册。手机端与桌面壳默认关闭，是因为它们是装到别人设备上的
+二进制，默认能读存档不合适；开启等于所有者明确同意。账号本身由邀请码创建，首个所有者
+用面板的一次性 bootstrap token 建立（`POST /api/accounts/owner`）。开关的完整语义见
 [`chat-archive.md`](./chat-archive.md)。
 
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
