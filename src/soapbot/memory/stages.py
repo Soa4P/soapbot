@@ -7,6 +7,7 @@ history provider, closing the loop: archive -> compress -> recall.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import replace
 from typing import Any, ClassVar
 
@@ -32,6 +33,11 @@ from soapbot.security.principal import (
 from soapbot.security.stages import require
 
 logger = logging.getLogger(__name__)
+
+
+#: 温度 v2 负向通道的道歉标记（确定性词表）。硬编码：判定标准悄悄可改等于
+#: 温度悄悄可改。词表刻意保持短——误报（把非道歉当道歉）比漏报更伤温度模型。
+_APOLOGY_MARKERS = re.compile("对不起|抱歉|是我的错|说错话了")
 
 
 class PersistStage(Stage):
@@ -83,6 +89,13 @@ class PersistStage(Stage):
         except Exception as exc:
             logger.error("failed to archive inbound message: %s", exc)
             ctx.extras["persist_error"] = str(exc)
+        # 温度 v2 的负向通道：用户消息中的道歉标记触发一次惩罚记录（确定性词表，
+        # 不做语义判断）。判定标准硬编码在本表——悄悄换表等于悄悄改结论。
+        # 命中与未命中都不写审计/日志：温度是模型可见的状态，不是告警。
+        if text and _APOLOGY_MARKERS.search(text):
+            from soapbot.ai.autonomy import WARMTH_TRACKER
+
+            WARMTH_TRACKER.record_penalty(ctx.event.session_key)
         if self.layers is not None and ctx.extras.get("persisted_inbound"):
             # Deliberately not the message text: the timeline is an index of events,
             # not a second copy of the archive, and copying prose there would create a

@@ -121,7 +121,9 @@ def test_warmth_is_deterministic_bounded_and_decays() -> None:
     fresh = compute_warmth(5, 0.0, p)
     idle = compute_warmth(5, 48.0, p)
     assert 0.0 <= idle < fresh <= 1.0
-    assert compute_warmth(0, 0.0, p) == p.baseline
+    # v2：零交互的会话读 0（「日常」只属于有过交流的关系），baseline 是
+    # 有史会话的闲置下限而非起点。
+    assert compute_warmth(0, 0.0, p) == 0.0
     assert compute_warmth(10**9, 0.0, p) <= 1.0
 
 
@@ -286,3 +288,42 @@ async def test_the_subtitle_endpoint_is_a_fixed_host_owned_path() -> None:
         getattr(route, "path", "") == "/api/bilibili/subtitle"
         for route in api.router.routes
     )
+
+
+async def test_penalty_lowers_warmth_asymmetrically() -> None:
+    """温度 v2：负向事件的减量大于同次数的正向增量（伤害不对称）。"""
+    session = "onebot11:group:100"
+    WARMTH_TRACKER.clear()
+    params = WarmthParams()
+    for _ in range(5):
+        WARMTH_TRACKER.record(session)
+    positive = WARMTH_TRACKER.warmth(session, params)
+    WARMTH_TRACKER.record_penalty(session)
+    penalized = WARMTH_TRACKER.warmth(session, params)
+    WARMTH_TRACKER.record(session)
+    recovered = WARMTH_TRACKER.warmth(session, params)
+    assert penalized < positive
+    # 一次道歉的减量大于一次普通交互的增量（伤害不对称）
+    assert positive - penalized > recovered - penalized
+    WARMTH_TRACKER.clear()
+
+
+async def test_penalty_expires_with_the_window() -> None:
+    session = "onebot11:group:101"
+    WARMTH_TRACKER.clear()
+    WARMTH_TRACKER.record(session)
+    WARMTH_TRACKER.record_penalty(session, now=0.0)  # 7 天前的旧惩罚：已出窗
+    assert WARMTH_TRACKER.warmth(session) > 0
+
+
+def test_idle_decay_floors_at_baseline_not_zero() -> None:
+    """日常值回归：有过交互史的会话，闲置衰减推得到日常，推不到 0。"""
+    params = WarmthParams(baseline=0.10, growth=0.15, decay_per_hour=0.5)
+    score = compute_warmth(50, 48.0, params)  # 两天没说话
+    assert score == pytest.approx(params.baseline)
+
+
+def test_unknown_session_still_reads_zero() -> None:
+    """从未交互过的会话保持 0——「日常」只属于有过交流的关系。"""
+    params = WarmthParams(baseline=0.10)
+    assert compute_warmth(0, 0.0, params, penalties=0) == 0.0
