@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError, chatApi, type ChatAccount, type ChatMessage, type ChatSessionRow } from '@/api/client'
@@ -310,6 +310,23 @@ onMounted(() => {
 onBeforeUnmount(() => {
   closeStream()
   if (sessionsTimer !== null) clearInterval(sessionsTimer)
+})
+
+// KeepAlive 下导航离开只触发 deactivated：SSE 与轮询必须同步暂停，
+// 回来时重建——否则连接在后台常驻，一组标签页就是 N 条死流。
+onDeactivated(() => {
+  closeStream()
+  if (sessionsTimer !== null) clearInterval(sessionsTimer)
+})
+
+onActivated(() => {
+  sessionsTimer = setInterval(() => {
+    void refreshSessions()
+  }, 30_000)
+  if (activeKey.value) {
+    void refreshSessions()
+    openStream()
+  }
 })
 </script>
 

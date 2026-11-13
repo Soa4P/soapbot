@@ -26,22 +26,38 @@
     disabled. LocalService is non-admin, needs no stored password and still reaches the
     network for provider calls.
 
+.PARAMETER Tag
+    Install from a pinned tag instead of master (e.g. v0.1.0). Pinned installs are
+    reproducible: the downloaded archive cannot change under you the way a branch ref
+    can. Omit to follow master.
+
 .EXAMPLE
     irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 | iex
 
 .EXAMPLE
     .\install.ps1 -Dir D:\soapbot -Port 7000
+
+.EXAMPLE
+    .\install.ps1 -Tag v0.1.0
 #>
 [CmdletBinding()]
 param(
     [string]$Dir = 'C:\soapbot',
     [int]$Port = 6185,
-    [string]$Account = 'NT AUTHORITY\LocalService'
+    [string]$Account = 'NT AUTHORITY\LocalService',
+    [string]$Tag = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $TaskName = 'SoapbotBot'
-$ZipUrl = 'https://codeload.github.com/Soa4P/soapbot/zip/refs/heads/master'
+if ($Tag -and $Tag -notmatch '^v[0-9]') {
+    throw "-Tag must look like v0.1.0 (a tag ref, not a branch)"
+}
+$ZipUrl = if ($Tag) {
+    "https://codeload.github.com/Soa4P/soapbot/zip/refs/tags/$Tag"
+} else {
+    'https://codeload.github.com/Soa4P/soapbot/zip/refs/heads/master'
+}
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "    $Message" -ForegroundColor Green }

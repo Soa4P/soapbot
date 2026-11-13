@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, ref } from 'vue'
 
 import { api, type MessageTrace, type PipelineTopology, type TraceSummary } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
@@ -208,8 +208,16 @@ onMounted(() => {
   void loadTraces(false)
 })
 
-onBeforeUnmount(() => {
+onDeactivated(() => {
   if (timer) window.clearInterval(timer)
+})
+
+onActivated(() => {
+  // 回到追踪页：轮询在 deactivated 时已停，live 开着就按原样恢复
+  if (live.value) {
+    timer = window.setInterval(() => void loadTraces(false), LIVE_INTERVAL_MS)
+  }
+  void loadTraces(false)
 })
 </script>
 
