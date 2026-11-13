@@ -189,6 +189,32 @@ class Settings(BaseSettings):
     groups keep their own sessions.
     """
 
+    screen_enabled: bool = False
+    """Let the bot *look at* its dedicated machine's display (view only).
+
+    Off by default, and doubly gated: the flag alone is not enough — capture is
+    refused unless this host's hostname equals ``screen_dedicated_machine``, so the
+    capability cannot silently activate on the operator's daily machine or on a
+    cloud server nobody declared. Frames go one way, into the model context; they
+    are never persisted, audited by content, or exposed to plugin code. No input
+    injection exists in this phase: the bot cannot touch the keyboard or mouse
+    (control plane = separate design, three preconditions, still closed).
+    """
+
+    screen_dedicated_machine: str = ""
+    """Hostname of the machine dedicated to the bot (``socket.gethostname()`` form).
+
+    Empty (the default) means no machine is dedicated and screen capture always
+    refuses, regardless of the flag. This is the physical-isolation declaration the
+    design demands: the operator states, in writing, which machine the bot may see.
+    """
+
+    screen_frames_max: int = 6
+    """Frames per capture request (1–6). Each frame costs one grid cell of tokens."""
+
+    screen_capture_interval_ms: int = 500
+    """Gap between frames in one capture, so the model sees change over time."""
+
     bili_cookie: SecretStr = SecretStr("")
     """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
     capability.

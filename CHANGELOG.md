@@ -10,6 +10,31 @@
 
 ## [Unreleased]
 
+### 看屏幕（screen 能力面第一阶段）：机器人可以看它的专用工作机了——只看不碰
+
+原来错在哪：路线图上「自助玩游戏」的第一块前置（`autonomous-capabilities-design.md` §1）
+一直是纯设计——机器人既看不见屏幕，也就无从谈起在四端指挥下玩游戏、看着画面刷 B 站。
+
+现在（五条硬边界逐条兑现，§1.5 落地附记）：
+
+- **双门**：`SOAPBOT_SCREEN_ENABLED` + `SOAPBOT_SCREEN_DEDICATED_MACHINE`（显式声明
+  专用工作机的主机名）。声明为空 = 没有机器被声明 = 永远拒绝；主机名不匹配拒绝；
+  拒绝原因一律是短 token（`screen_disabled` / `screen_machine_undeclared` /
+  `screen_machine_mismatch`），不携带任何画面信息。
+- **画面单向进模型**：筛帧（16×16 亮度签名去近重帧）→ 拼成 ≤1024 网格图 → 宿主
+  inbox → `ScreenFrameStage`（紧贴 ModelStage）写入 `clean_segments`——已归档的
+  event.segments 零变化，像素不进 messages 表、不落盘、不进审计。测试钉住帧字节
+  不出现在任何审计/日志/异常文本。
+- **配额**：`Capability.SCREEN` 入敏感能力集——插件路径继承 30 次/分钟敏感滑窗；
+  单次请求帧数被 `SCREEN_FRAMES_MAX`（≤6）钳制。
+- **两个入口**：四端任一端 `/look [帧数]`（抓帧后不短路模型——模型带着图回答你的
+  问题）；插件 `screen.capture` 能力（`ctx.screen_capture`），只拿 ref + 元数据，
+  不到位图。
+- **只看不碰**：无任何键鼠注入（控制面第二阶段三前置未齐，继续默认关闭）；抓屏
+  依赖可选安装 `pip install 'soapbot[screen]'`（mss），无头服务器不受影响。
+- 测试 +20（`test_screen_capability.py`）；`ai/vision.py` 的拼图/去重机件提升为公开
+  函数，GIF 与屏幕两条路径共用同一阈值。
+
 ### 全端互通：统一会话（QQ 绑定）+ 发送状态语义
 
 原来错在哪：四端里 App/网页共享同一会话，但 QQ 会话完全独立——「桌面端发的消息，

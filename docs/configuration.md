@@ -129,6 +129,10 @@ OneBot 11 网关（阶段二）用四个变量：
 | `CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问聊天接口 |
 | `CHAT_TALK_ENABLED` | `false` | 允许被授权的账号在网页/手机端与机器人**对话**（`POST /api/chat/messages`） |
 | `CHAT_UNIFIED_ENABLED` | `false` | **统一会话**：已绑定 QQ 号的账号，其 QQ 私聊落进同一个 `web:private:account-<id>` 会话（绑定在第 15 页由 owner 设置） |
+| `SCREEN_ENABLED` | `false` | **看屏幕**（只看不碰）：机器人可以看「专用工作机」的画面。双门之一，还需下一项声明 |
+| `SCREEN_DEDICATED_MACHINE` | 空 | 专用工作机的主机名（`hostname` 命令输出）。**空 = 没有任何机器被声明**，看屏幕永远拒绝——这是物理隔离声明，只写给你专门给 bot 用的那台机器 |
+| `SCREEN_FRAMES_MAX` | `6` | 单次抓帧上限（1–6），多帧自动拼成一张网格图 |
+| `SCREEN_CAPTURE_INTERVAL_MS` | `500` | 同一次抓帧内相邻两帧的间隔，让模型看到变化而不是 N 张相同的图 |
 | `BILI_COOKIE` | 空 | B 站登录 Cookie（`SESSDATA=...`），供插件的 `bilibili` 能力使用；宿主持有并在请求时注入，不进日志/审计。**这是凭据**，泄露等于交出 B 站账号，只在本机或容器挂载文件里配置 |
 
 三个端开关全关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。
@@ -141,6 +145,13 @@ OneBot 11 网关（阶段二）用四个变量：
 二进制，默认能读存档不合适；开启等于所有者明确同意。账号本身由邀请码创建，首个所有者
 用面板的一次性 bootstrap token 建立（`POST /api/accounts/owner`）。开关的完整语义见
 [`chat-archive.md`](./chat-archive.md)。
+
+看屏幕是能力面里最贴隐私的一个，因此是「双门」设计：`SCREEN_ENABLED` 与
+`SCREEN_DEDICATED_MACHINE` 必须同时成立（flag 开 + 当前主机名与声明一致），缺一即拒绝
+且拒绝原因是一个短 token。帧只进模型上下文，不落盘、不进审计、插件拿不到位图；四端
+可用 `/look [帧数]` 触发。抓屏依赖可选安装：`pip install 'soapbot[screen]'`。第二阶段
+（键鼠注入，真的「玩」游戏）有独立的三前置条件，尚未开工——见
+[autonomous-capabilities-design.md](./autonomous-capabilities-design.md)。
 
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
 > 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的

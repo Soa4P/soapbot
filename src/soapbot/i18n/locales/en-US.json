@@ -42,6 +42,7 @@
     "pipeline.stage.persona": "Persona",
     "pipeline.stage.recall": "Memory recall",
     "pipeline.stage.knowledge": "Knowledge search",
+    "pipeline.stage.screen_frame": "Screen frame inject",
     "pipeline.stage.model": "Model call",
     "pipeline.stage.safety": "Safety",
     "pipeline.stage.reply": "Send reply",

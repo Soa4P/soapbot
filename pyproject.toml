@@ -41,6 +41,10 @@ precision = ["tiktoken==0.14.0"]
 # Text-to-speech for reply-as-voice. Inbound transcription needs no extra: it goes
 # through the provider's ``transcribe`` slot, like every other model call.
 voice = ["edge-tts==7.3.1"]
+# Screen capture for the ``screen`` capability (the bot looking at its dedicated
+# machine, view only). Pillow is already a core dependency; mss is the only
+# platform-specific piece and stays optional so headless servers never pull it.
+screen = ["mss==10.0.0"]
 # Freezing the backend into the desktop sidecar. Build-time only: nothing at runtime
 # imports PyInstaller, and `check_deps.py` keeps it out of the runtime pins. A separate
 # extra rather than part of `dev`, so fixing a test does not pull in a 50 MB bundler.

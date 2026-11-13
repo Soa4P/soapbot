@@ -32,6 +32,7 @@ from soapbot.core.stages import (
     DedupStage,
     ReplyStage,
     SanitizeStage,
+    ScreenFrameStage,
     SkipReplyStage,
     StripWakeWordStage,
     WakePolicy,
@@ -310,6 +311,10 @@ def build_pipeline(
 
     # --- generation ---
     if engine is not None:
+        # 看屏幕（screen 能力面第一阶段）的注入点：抓帧发生在更早的命令/插件阶段，
+        # tile 落在宿主 SCREEN_INBOX 里，这里在模型运行前一步消费它——插件命令的
+        # 回复会短路模型，所以注入必须是独立阶段、必须紧贴 ModelStage。
+        pipeline.add(ScreenFrameStage())
         pipeline.add(
             ModelStage(
                 engine,
