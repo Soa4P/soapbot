@@ -159,4 +159,147 @@ void main() {
       expect(find.text('这里只记录，不发送。对方在 QQ 里看不到这些内容。'), findsOneWidget);
     });
   });
+
+  group('delivery state wire format', () {
+    test('session label names the conversation session', () {
+      final row = SessionRow.fromJson({
+        'session_key': 'web:private:account-3',
+        'message_count': 0,
+        'last_at': 0,
+      });
+      expect(row.label, '与机器人的对话');
+      expect(row.isWebTalk('3'), isTrue);
+    });
+
+    test('state and reason parse from the server rows, legacy rows read ok/absent', () {
+      final rejected = Message.fromJson({
+        'id': 1,
+        'session_key': 's',
+        'role': 'user',
+        'content': 'x',
+        'created_at': 0,
+        'state': 'rejected',
+        'reason': 'abuse_rate_limited',
+      });
+      expect(rejected.state, DeliveryState.rejected);
+      expect(rejected.reason, 'abuse_rate_limited');
+
+      final failed = Message.fromJson({
+        'id': 2,
+        'session_key': 's',
+        'role': 'assistant',
+        'content': 'x',
+        'created_at': 0,
+        'state': 'send_failed',
+      });
+      expect(failed.state, DeliveryState.sendFailed);
+
+      final legacy = Message.fromJson({
+        'id': 3,
+        'session_key': 's',
+        'role': 'user',
+        'content': 'x',
+        'created_at': 0,
+        'state': null,
+      });
+      expect(legacy.state, isNull);
+      expect(legacy.reason, '');
+    });
+  });
+
+  group('ChatScreen delivery states', () {
+    testWidgets('a refused message is replaced by the server rejected row', (tester) async {
+      final api = ChatApi(
+        baseUrl: 'http://test',
+        client: MockClient((request) async {
+          final headers = <String, String>{'content-type': 'application/json'};
+          if (request.url.path == '/api/chat/surfaces') {
+            return http.Response(jsonEncode({'talk': true}), 200, headers: headers);
+          }
+          if (request.url.path == '/api/chat/messages' && request.method == 'GET') {
+            // The forward sync after the 429 returns the server's rejected row.
+            return http.Response(
+              jsonEncode({
+                'messages': [
+                  {
+                    'id': 10,
+                    'session_key': 'web:private:account-3',
+                    'role': 'user',
+                    'content': '被拒的话',
+                    'created_at': 0,
+                    'state': 'rejected',
+                    'reason': 'abuse_rate_limited',
+                  }
+                ],
+              }),
+              200,
+              headers: headers,
+            );
+          }
+          // POST talk: the pipeline refused with a short token.
+          return http.Response(
+            jsonEncode({'detail': 'abuse_rate_limited'}),
+            429,
+            headers: headers,
+          );
+        }),
+      );
+      final session = SessionRow.fromJson({
+        'session_key': 'web:private:account-3',
+        'message_count': 0,
+        'last_at': 0,
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: ChatScreen(api: api, session: session, accountId: 3),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '被拒的话');
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pumpAndSettle();
+
+      // The optimistic bubble is gone; the server row shows the rejection badge
+      // with the short reason token (the timeline matches what other ends see).
+      expect(find.text('发送中'), findsNothing);
+      expect(find.text('被拒的话'), findsOneWidget);
+      expect(find.text('被拒绝 (abuse_rate_limited)'), findsOneWidget);
+    });
+
+    testWidgets('a network failure keeps the bubble marked send-failed', (tester) async {
+      final api = ChatApi(
+        baseUrl: 'http://test',
+        client: MockClient((request) async {
+          final headers = <String, String>{'content-type': 'application/json'};
+          if (request.url.path == '/api/chat/surfaces') {
+            return http.Response(jsonEncode({'talk': true}), 200, headers: headers);
+          }
+          if (request.url.path == '/api/chat/messages' && request.method == 'GET') {
+            return http.Response(
+              jsonEncode({'messages': <dynamic>[]}),
+              200,
+              headers: headers,
+            );
+          }
+          throw Exception('network down');
+        }),
+      );
+      final session = SessionRow.fromJson({
+        'session_key': 'web:private:account-3',
+        'message_count': 0,
+        'last_at': 0,
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: ChatScreen(api: api, session: session, accountId: 3),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '发不出去');
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pumpAndSettle();
+
+      // Nothing reached the server, so the bubble stays — visibly failed, not gone.
+      expect(find.text('发不出去'), findsOneWidget);
+      expect(find.text('发送失败'), findsOneWidget);
+    });
+  });
 }

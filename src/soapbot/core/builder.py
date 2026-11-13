@@ -16,6 +16,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
+from soapbot.accounts.mapper import SessionMapper
 from soapbot.ai.compressor import CompressionConfig, ContextCompressor
 from soapbot.ai.engine import AIEngine
 from soapbot.ai.persona import PersonaStore
@@ -696,6 +697,9 @@ def build_runtime(
         scene=scene_layer,
         layers=layers,
         skills=skill_forge,
+        # 统一会话映射：内存库不存在时（如不落库的测试装配）跳过——映射器依赖
+        # 账号数据库，没有库就没有绑定，映射也永远不命中。
+        session_mapper=SessionMapper(memory.db) if memory is not None else None,
     )
 
 

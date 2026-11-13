@@ -264,12 +264,31 @@ async def _v5_artifact_index(conn: Any) -> None:
         await conn.execute(text(statement))
 
 
+async def _v6_message_state_and_binding(conn: Any) -> None:
+    """Delivery state on messages; QQ-user binding on accounts (unified chat).
+
+    Two columns on ``messages`` (``state`` / ``reason``) make delivery outcomes
+    visible to every client: a send failure used to be indistinguishable from "no
+    reply", and a pipeline refusal before the persist stage left no row at all.
+    ``accounts.qq_user_id`` is the owner-set trust link that lets one QQ private
+    conversation join the account's unified session. Both are nullable: legacy rows
+    read as ``ok``, unbound accounts read as unbound.
+    """
+    await _add_column(conn, "messages", "state", "VARCHAR(16)")
+    await _add_column(conn, "messages", "reason", "VARCHAR(64)")
+    if await _table_exists(conn, "accounts"):
+        await _add_column(conn, "accounts", "qq_user_id", "VARCHAR(32)")
+        await conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_accounts_qq_user ON accounts (qq_user_id)")
+        )
+
+
 #: ``{target_version: step}``. The step moves the database *to* ``target_version``.
 #:
 #: Version 1 was the first schema and needed no step. Version 2 adds the index above.
 #: Version 3 adds the scene layer (cards, portraits, links). Version 4 adds the memory
 #: layer metadata (summary windows, archive flag, self-notes, timeline). Version 5 adds
-#: the artifact index.
+#: the artifact index. Version 6 adds message delivery state and the QQ binding.
 #: ``tests/test_migrations.py`` monkeypatches this table to exercise the loop, the gap
 #: check and rollback independently of the real step.
 MIGRATIONS: dict[int, MigrationStep] = {
@@ -277,6 +296,7 @@ MIGRATIONS: dict[int, MigrationStep] = {
     3: _v3_scene_layer,
     4: _v4_memory_layers,
     5: _v5_artifact_index,
+    6: _v6_message_state_and_binding,
 }
 
 

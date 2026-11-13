@@ -46,7 +46,7 @@ from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: How long SQLite waits for a competing writer before giving up, in seconds.
 #:
@@ -85,6 +85,13 @@ class MessageRow(Base):
     # message and never be read.
     trace_id: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    #: Delivery state, added in schema version 6. ``NULL`` is a legacy row written
+    #: before the column existed and is read as ``ok``. Values:
+    #: ``ok`` / ``send_failed`` (model replied, delivery to the platform failed) /
+    #: ``rejected`` (the pipeline refused the message; ``reason`` carries the short
+    #: token). Client-side "sending" is an optimistic UI state and never stored.
+    state: Mapped[str | None] = mapped_column(String(16), default=None)
+    reason: Mapped[str | None] = mapped_column(String(64), default=None)
 
     __table_args__ = (
         Index("ix_messages_session_time", "session_key", "created_at"),
@@ -358,6 +365,14 @@ class AccountRow(Base):
     created_at: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     created_by: Mapped[int] = mapped_column(Integer, default=0)
     last_login_at: Mapped[float] = mapped_column(Float, default=0.0)
+    #: QQ platform user id this account is bound to (unified chat). ``NULL``/empty
+    #: means unbound. Unique and nullable: SQLite unique indexes allow many NULLs, so
+    #: unbound accounts never collide. Set only by the owner via the accounts API —
+    #: the binding is the trust link that lets a QQ private conversation join the
+    #: account's unified session (see ``docs/chat-archive.md``).
+    qq_user_id: Mapped[str | None] = mapped_column(String(32), default=None)
+
+    __table_args__ = (Index("uq_accounts_qq_user", "qq_user_id", unique=True),)
 
 
 class AccountInviteRow(Base):

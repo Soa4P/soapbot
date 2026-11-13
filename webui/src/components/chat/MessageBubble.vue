@@ -9,6 +9,18 @@ const props = defineProps<{ message: ChatMessage; pending?: boolean }>()
 const mine = computed(() => props.message.role === 'assistant')
 const isNote = computed(() => props.message.role === 'note')
 
+/** Delivery state badges: server-archived outcomes, never model-authored. */
+const stateBadge = computed(() => {
+  if (props.message.state === 'rejected') {
+    const reason = props.message.reason ? ` (${props.message.reason})` : ''
+    return { cls: 'bubble__tag--rejected', text: t('chat.badge.rejected', { reason }) }
+  }
+  if (props.message.state === 'send_failed') {
+    return { cls: 'bubble__tag--muted', text: t('chat.badge.sendFailed') }
+  }
+  return null
+})
+
 const roleLabel = computed(() => {
   if (isNote.value) return t('chat.role.note')
   if (mine.value) return t('chat.role.assistant')
@@ -39,6 +51,7 @@ const imageHref = computed(() => {
       <span class="bubble__who">{{ roleLabel }}</span>
       <span v-if="isNote" class="bubble__tag">{{ t('chat.badge.note') }}</span>
       <span v-if="pending" class="bubble__tag bubble__tag--muted">{{ t('chat.badge.notSent') }}</span>
+      <span v-if="stateBadge" class="bubble__tag" :class="stateBadge.cls">{{ stateBadge.text }}</span>
       <time v-if="time" class="bubble__time">{{ time }}</time>
     </header>
 
@@ -110,6 +123,12 @@ const imageHref = computed(() => {
 .bubble__tag--muted {
   border-color: var(--idle-line);
   color: var(--ink-3);
+}
+
+.bubble__tag--rejected {
+  border-color: var(--danger-line, #e11d4844);
+  background: var(--danger-soft, #fef2f2);
+  color: var(--danger, #be123c);
 }
 
 .bubble__time {

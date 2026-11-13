@@ -60,12 +60,14 @@ class FakeEventSource {
   close(): void {}
 }
 
-const mk = (id: number, content: string, role = 'user') => ({
+const mk = (id: number, content: string, role = 'user', state?: string, reason?: string) => ({
   id,
   session_key: 'web:private:account-3',
   role,
   content,
   created_at: 0,
+  state,
+  reason,
 })
 
 describe('ChatView paging and talk', () => {
@@ -177,6 +179,57 @@ describe('ChatView paging and talk', () => {
     await vi.advanceTimersByTimeAsync(31_000)
     await flushPromises()
     expect(chatApi.sessions.mock.calls.length).toBeGreaterThanOrEqual(2)
+    wrapper.unmount()
+  })
+
+  it('replaces the optimistic bubble with the server rejected row on a 429', async () => {
+    const ApiError = (await import('@/api/client')).ApiError as unknown as new (
+      status: number,
+    ) => Error & { status: number }
+    chatApi.talk.mockRejectedValueOnce(new ApiError(429))
+    const wrapper = await mountView()
+    // The server archived a rejected row; the tail sync must pull it, not keep the
+    // optimistic bubble (otherwise the end would show two copies of one message).
+    chatApi.messages.mockResolvedValueOnce({
+      session_key: 'web:private:account-3',
+      messages: [
+        mk(11, 'refused-msg', 'user', 'rejected', 'abuse_rate_limited'),
+      ],
+      has_older: false,
+    })
+    await wrapper.find('textarea').setValue('refused-msg')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    const badges = wrapper.findAll('.bubble__tag--rejected').map((n) => n.text())
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toContain('abuse_rate_limited')
+    wrapper.unmount()
+  })
+
+  it('marks the bubble send-failed when the request never reaches the server', async () => {
+    chatApi.talk.mockRejectedValueOnce(new TypeError('network down'))
+    const wrapper = await mountView()
+    await wrapper.find('textarea').setValue('undelivered')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    // No server row exists, so the optimistic bubble stays but is visibly failed.
+    const failed = wrapper.findAll('.bubble__tag--muted').map((n) => n.text())
+    expect(failed).toContain('Send failed')
+    const contents = wrapper.findAll('.bubble__body').map((n) => n.text())
+    expect(contents).toContain('undelivered')
+    wrapper.unmount()
+  })
+
+  it('renders server-archived send_failed rows with a badge', async () => {
+    chatApi.messages.mockResolvedValueOnce({
+      session_key: 'web:private:account-3',
+      messages: [{ ...mk(12, 'never-arrived', 'assistant', 'send_failed') }],
+      has_older: false,
+    })
+    const wrapper = await mountView()
+    expect(wrapper.findAll('.bubble__tag--muted').some((n) => n.text() === 'Send failed')).toBe(true)
     wrapper.unmount()
   })
 })

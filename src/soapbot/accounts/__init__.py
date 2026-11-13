@@ -11,6 +11,7 @@ from soapbot.accounts.service import (
     Account,
     AccountError,
     authenticate,
+    bind_qq_user,
     count_accounts,
     create_invite,
     create_owner,
@@ -20,12 +21,14 @@ from soapbot.accounts.service import (
     list_memberships,
     redeem_invite,
     set_account_status,
+    unbind_qq_user,
 )
 
 __all__ = [
     "Account",
     "AccountError",
     "authenticate",
+    "bind_qq_user",
     "count_accounts",
     "create_invite",
     "create_owner",
@@ -35,4 +38,5 @@ __all__ = [
     "list_memberships",
     "redeem_invite",
     "set_account_status",
+    "unbind_qq_user",
 ]
