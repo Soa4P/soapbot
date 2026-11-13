@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-12T19:00:00+08:00",
+  "updated_at": "2026-11-14T12:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3555,6 +3555,60 @@
         }
       ],
       "goal": "把「自行查找并改写、不要全盘照抄」落成可核实的分析文档与本仓库自己的写作规矩"
+    },
+    {
+      "id": "a15",
+      "index": "A15",
+      "name": "统一排期：未完成目标与待拍板项",
+      "status": "doing",
+      "tasks": [
+        {
+          "id": "a15-t1",
+          "name": "温度模型 v2（伤害不对称 + 日常值回归）",
+          "status": "done",
+          "note": "PR #65。WarmthParams.penalty_decay 对数衰减、有史会话 baseline 下限、零交互读 0；负向通道在 memory/stages._APOLOGY_MARKERS 命中道歉时 record_penalty，不写审计不写日志。设计附记见 qq-autonomy-design.md §6.1"
+        },
+        {
+          "id": "a15-t2",
+          "name": "轻任务模型槽（light）：摘要/压缩可走便宜模型",
+          "status": "done",
+          "note": "CapabilitySlot.LIGHT + providers.yaml extra.light 按实例指派；指派是加选不摘出主聊链，未指派回落 CHAT 链（默认行为不变）。文档见 model-providers.md「轻任务模型槽」，7 项用例 test_provider_light_slot.py"
+        },
+        {
+          "id": "a15-t3",
+          "name": "插件仓库第三/四批收尾：sticker-album 0.2.0 顺手收藏 + auto-chat 0.3.0 重启语义",
+          "status": "done",
+          "note": "插件仓库 PR #6（cb80d11）：media_observe 路的 /meme-keep、重启语义文档化；sticker-album-0.2.0 与 auto-chat-0.3.0 Release 已发"
+        },
+        {
+          "id": "a15-t4",
+          "name": "极致压缩上下文（路线图功能序第一）",
+          "status": "todo",
+          "note": "压缩已有分层管线（trim/fold/extract/shrink/budget）；本项指把压缩做到极致：与 light 槽联动（摘要走便宜模型已就绪）、多级缓存与指标上板"
+        },
+        {
+          "id": "a15-t5",
+          "name": "xingxi 星图前端",
+          "status": "todo"
+        },
+        {
+          "id": "a15-t6",
+          "name": "diary 定时语义任务",
+          "status": "todo"
+        },
+        {
+          "id": "a15-t7",
+          "name": "done_at 假完成识别（面板侧）",
+          "status": "todo"
+        },
+        {
+          "id": "a15-t8",
+          "name": "待拍板项：bilibili 写面 / qzone 启用 / screen 控制面",
+          "status": "todo",
+          "note": "三项均为「边界必须显式」的写面/控制面能力，等操作者逐项拍板后才动工；设计前置见 qq-autonomy-design.md §6 与 autonomous-capabilities-design.md"
+        }
+      ],
+      "goal": "把散在各批次的未完成目标收进一张清单：已收口的写明证据，未动工的标 todo，需要操作者决策的单独列出"
     }
   ],
   "archive": [

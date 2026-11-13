@@ -230,8 +230,13 @@ class ProviderRouter:
 
     def _available(self, slot: CapabilitySlot) -> list[BaseProvider]:
         now = time.time()
+        ordered = self._ordered()
+        if slot is CapabilitySlot.LIGHT and not any(p.supports(slot) for p in ordered):
+            # 没有任何实例被指派为轻任务：回落到主聊链，而不是让摘要失败。
+            # 配了 light 实例后本回落自然失效——这正是配置生效的判定点。
+            slot = CapabilitySlot.CHAT
         out: list[BaseProvider] = []
-        for p in self._ordered():
+        for p in ordered:
             if not p.supports(slot):
                 continue
             stat = self._stats.get(p.id)

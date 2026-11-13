@@ -420,13 +420,15 @@ class AIEngine:
             return ""
 
     async def _summarize(self, prompt: str) -> str:
+        # 轻任务槽：摘要/压缩走 LIGHT——操作者可用 extra.light 把一个便宜模型
+        # 指派给它；没指派时路由回落主聊链，默认行为不变。
         resp = await self.router.chat(
             ChatRequest(
                 messages=[ChatMessage(role="user", content=prompt)],
                 max_tokens=600,
                 temperature=0.3,
             ),
-            slot=CapabilitySlot.CHAT,
+            slot=CapabilitySlot.LIGHT,
         )
         return resp.content.strip()
 

@@ -173,6 +173,10 @@ class CapabilitySlot(StrEnum):
     VISION = "vision"
     EMBED = "embed"
     TRANSCRIBE = "transcribe"
+    LIGHT = "light"
+    """Lightweight host-side tasks (rolling summary, context compression): same
+    completion contract, but a provider the operator designates as cheap. Only
+    the host picks this slot — a model or plugin cannot route a task here."""
 
 
 @dataclass(slots=True)
@@ -292,6 +296,11 @@ class BaseProvider(ABC):
         return self.config.id
 
     def supports(self, slot: CapabilitySlot) -> bool:
+        if slot is CapabilitySlot.LIGHT:
+            # 轻任务是按实例指派的（providers.yaml 里 ``extra: {light: true}``），
+            # 不由 provider kind 决定：同一个 kind 既可能是贵的主聊，也可能是
+            # 指向便宜模型的轻任务实例。指派是「加选」，不把该实例从主聊链里摘出。
+            return bool(self.config.extra.get("light"))
         return slot in self.slots
 
     @abstractmethod
