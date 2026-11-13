@@ -251,9 +251,32 @@ async def send_message(
     if ctx is None:
         raise HTTPException(status_code=503, detail="chat talk is not available")
     if ctx.halted and not ctx.model_reply:
-        # The pipeline refused and said nothing (quota window, guard). The reason is a
+        # The pipeline refused and said nothing (guard, dedup, ...). The reason is a
         # short stable token, not prose: the client maps it, the log keeps the detail.
-        raise HTTPException(status_code=429, detail=ctx.halt_reason or "refused")
+        reason = (ctx.halt_reason or "refused")[:64]
+        # 被拒也要可见：PersistStage 之前的 halt（guard/dedup/whitelist）不会落用户行，
+        # 发送方在时间线里只能看到「凭空消失」。这里补一条 rejected 行——仅限本
+        # 已认证的 talk 路径（身份是登录账号，不是平台来的未验证文本），QQ 侧的
+        # 拒绝仍不留痕。若 PersistStage 已经落过行（halt 发生在其后），不重复写。
+        memory = _memory(request)
+        if memory is not None and await memory.find_message(session_key, event.message_id) is None:
+            try:
+                await memory.archive_message(
+                    session_key=session_key,
+                    role="user",
+                    content=payload.content[:MAX_NOTE_LENGTH],
+                    adapter="web",
+                    scene="private",
+                    user_id=f"account-{account.id}",
+                    user_name=account.username,
+                    message_id=event.message_id,
+                    trace_id=event.trace_id,
+                    state="rejected",
+                    reason=reason,
+                )
+            except Exception as exc:
+                logger.warning("failed to archive rejected talk message: %s", exc)
+        raise HTTPException(status_code=429, detail=reason)
     return {
         "session_key": session_key,
         "reply": ctx.model_reply,

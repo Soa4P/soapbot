@@ -46,6 +46,7 @@ class BotRuntime:
         layers=None,
         skills=None,
         locale: str = "",
+        session_mapper=None,
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
         self.pipeline = pipeline or Pipeline()
@@ -155,6 +156,14 @@ class BotRuntime:
                 plugins.install_bilibili_client(self.bilibili)
         self.locks = SessionLockManager()
         self.sessions = SessionStore()
+        self.session_mapper = session_mapper
+        """Optional session mapper (unified chat).
+
+        Called in :meth:`dispatch` *before* the session lock, because a successful
+        mapping changes the lock key: a bound QQ private event joins the account's
+        ``web:private:account-<id>`` session instead of its derived platform key.
+        Hand-assembled test runtimes leave it ``None`` and keep the derived key.
+        """
         self._unsubscribers: list[Any] = []
         self._running = False
         self.metrics: dict[str, Any] = {
@@ -292,6 +301,12 @@ class BotRuntime:
         if adapter is None:
             logger.warning("event from unknown adapter %s", event.adapter)
             return None
+        if self.session_mapper is not None and not event.session_key_override:
+            # Unified chat: a bound QQ private message joins the account's web session.
+            # Must run before the lock — the key it produces *is* the lock key.
+            mapped = await self.session_mapper(event)
+            if mapped:
+                event.session_key_override = mapped
         async with self.locks.get(event.session_key):
             ctx = PipelineContext(event=event, adapter=adapter, locale=self.locale)
             try:

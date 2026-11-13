@@ -201,6 +201,17 @@ class IncomingMessage:
     looks like it ignored the rest of the question.
     """
 
+    session_key_override: str = ""
+    """Replace the derived session key when set (unified chat).
+
+    Only the host's session mapper sets this, and only when the operator bound the
+    sender's platform identity to an account (``accounts.qq_user_id``): the QQ private
+    message then joins the account's ``web:private:account-<id>`` session so every
+    client sees one continuous conversation. ``adapter`` stays ``onebot11`` — the
+    reply must still route back to the platform the message came from. Default empty
+    means "use the derived key"; unset it never happens by accident.
+    """
+
     def __post_init__(self) -> None:
         """Bound and sanitise the message at construction, once.
 
@@ -272,6 +283,8 @@ class IncomingMessage:
     @property
     def session_key(self) -> str:
         """Stable key used for conversation isolation and per-session locking."""
+        if self.session_key_override:
+            return self.session_key_override
         if self.scene is MessageScene.GROUP:
             return f"{self.adapter}:group:{self.group_id}"
         return f"{self.adapter}:private:{self.sender.user_id}"

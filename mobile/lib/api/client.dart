@@ -34,8 +34,11 @@ class SessionRow {
         lastAt: (json['last_at'] as num?)?.toDouble() ?? 0,
       );
 
-  /// `qq:group:123` reads as `群 123`; unknown shapes are shown verbatim.
+  /// `qq:group:123` reads as `群 123`; the account's own talk session reads as
+  /// 「与机器人的对话」 — the web/app/desktop ends all render that same session,
+  /// and a bare `私聊 account-3` would hide that this is the conversation.
   String get label {
+    if (sessionKey.startsWith('web:private:account-')) return '与机器人的对话';
     final parts = sessionKey.split(':');
     if (parts.length < 3) return sessionKey;
     final kind = parts[1];
@@ -48,6 +51,23 @@ class SessionRow {
   bool isWebTalk(String accountId) => sessionKey == 'web:private:account-$accountId';
 }
 
+/// Delivery state of one archived message (schema v6). `sending` never comes from
+/// the server: it is the optimistic state a client shows before the request settles.
+enum DeliveryState { ok, sendFailed, rejected, sending }
+
+DeliveryState? parseDeliveryState(String? raw) {
+  switch (raw) {
+    case 'send_failed':
+      return DeliveryState.sendFailed;
+    case 'rejected':
+      return DeliveryState.rejected;
+    case 'ok':
+      return DeliveryState.ok;
+    default:
+      return null; // legacy rows (NULL) and unknown tokens read as ok/absent
+  }
+}
+
 class Message {
   const Message({
     required this.id,
@@ -57,6 +77,8 @@ class Message {
     required this.createdAt,
     this.userName = '',
     this.imageDesc,
+    this.state,
+    this.reason = '',
   });
 
   final int id;
@@ -66,6 +88,9 @@ class Message {
   final double createdAt;
   final String userName;
   final String? imageDesc;
+  final DeliveryState? state;
+  /// Short stable token for `rejected` rows — never prose, never the message body.
+  final String reason;
 
   bool get isNote => role == 'note';
 
@@ -77,6 +102,8 @@ class Message {
         createdAt: (json['created_at'] as num?)?.toDouble() ?? 0,
         userName: json['user_name'] as String? ?? '',
         imageDesc: json['image_desc'] as String?,
+        state: parseDeliveryState(json['state'] as String?),
+        reason: json['reason'] as String? ?? '',
       );
 }
 
