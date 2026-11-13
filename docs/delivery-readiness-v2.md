@@ -205,7 +205,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
 | **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
 | **外部仓库分析与去 AI 味规范** | **本轮新增（文档 / 工具）** | `tests/test_ai_flavor_check.py`（7 项）；两处链接拼写纠正由 GitHub API 核实，`dsh-longing` 适配为只读 `warmth-observer` 示例插件。**`Fangi8` 仍 404，待用户提供正确地址**；`ai_flavor_scan.py` 是可选自查工具，不进 CI |
-| **人格卡自主字段 / 温度 / WBI 字幕** | **本轮新增** | `tests/test_persona_autonomy_warmth.py`（13 项）；修好回滚丢 `extra` 的旧缺陷。`voice_self_select` 只是配置开关，**自主挑音色管线未实现**；字幕未做真实 B 站联调 |
+| **人格卡自主字段 / 温度 / WBI 字幕** | **本轮新增** | `tests/test_persona_autonomy_warmth.py`（17 项）；修好回滚丢 `extra` 的旧缺陷。挑音色管线已实现（voice/picker.py，候选表+缓存+回退，#55）；字幕已做六条真实视频实测（aid/cid 修复，#59） |
 | **QQ 空间读写能力面** | **本轮新增（默认完全关闭）** | `tests/test_qzone_surface.py`（15 项）；读写分开审批、四个白名单协议动作、写三重确认、审计零正文。**未做真实协议端联调**，官方机器人无此接口，个人号风控/冻结风险由操作者承担 |
 | **手机审批页 + 可下载 debug APK** | **本轮新增（客户端 / CI）** | `mobile/test/approval_test.dart`（5 项）；CI `mobile` job 现构建 debug APK 并上传 artifact（14 天）。owner 账号可在手机上批准/驳回，member 收 403。**未做真机 / 模拟器端到端实测**；release 签名与上架仍不做 |
 | **审批通知：QQ / Webhook / 手机 feed** | **本轮新增（服务端）** | `tests/test_approval_notifications.py`（13 项）；单一订阅点 + `(request_id, kind)` 幂等 + HMAC 签名 + 密钥零泄漏。三条通道默认全关，需运维逐项配置；**未做真实通道实测**，Flutter 审批页在下一阶段 |
