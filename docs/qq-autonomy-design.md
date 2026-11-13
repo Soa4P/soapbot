@@ -125,3 +125,23 @@ SECURITY.md 反复声明的风控区：个人号行为可能触发平台风控�
 **bilibili 写面待决**：bili-cli 的运营全套需要 bilibili 能力的写动作（发动态等）。
 按 qzone 模式（动作白名单 + SESSDATA 宿主注入 + 独立审批 + 显式确认 + 风险自负）
 可实现，但写 B 站等于以操作者账号发声，是否启用等操作者拍板后再做。
+
+### 6.1 v2 落地记录（2026-11-14，PR #65）
+
+§6 的两条设计输入已按原文落地，语义与设计一一对应：
+
+1. **伤害不对称**：`WarmthParams.penalty_decay`（默认 0.05）按对数衰减计入
+   （`penalty_decay * log1p(penalties)`）——第一次负向事件伤害最大，之后边际递减，
+   与正向的 `log1p` 增量形式对称。负向通道的记录点在 `memory/stages.py`
+   （`_APOLOGY_MARKERS` 命中道歉/认错即 `record_penalty`），不写审计不写日志——
+   惩罚计数本身是会话敏感信号。
+2. **日常值回归**：`compute_warmth` 对有过交互史的会话取 `max(score, baseline)`
+   下限——闲置衰减推得到日常（baseline），推不到 0。**从未交互过的会话仍是 0**：
+   交互与惩罚都为 0 时先返回 0.0，再谈下限。「日常」只属于有过交流的关系。
+
+实现约束逐条兑现：纯内存（重启归零是有意的诚实）、两侧都有界（各 2000 会话 /
+500 事件）、不由模型或插件写入（`record_penalty` 只有宿主 Persist 阶段调用）、
+`session.view` 只读暴露。人格卡 `warmth.penalty_decay` 可配，非法值回落保守默认。
+
+测试钉住：`tests/test_persona_autonomy_warmth.py` 的惩罚不对称 / 惩罚出窗 /
+闲置下限 / 零交互读 0 四项（PR #65）。
