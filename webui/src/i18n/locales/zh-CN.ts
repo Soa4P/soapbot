@@ -1124,6 +1124,7 @@ export default {
   'chat.role.user': '对方',
   'chat.role.assistant': '机器人',
   'chat.role.note': '备注',
+'chat.stream.reconnecting': '连接中断，重连中…',
   'chat.newMessages': '有新消息',
   'chat.loadEarlier': '加载更早的消息',
   'chat.loadEarlier.loading': '正在读取更早的消息…',

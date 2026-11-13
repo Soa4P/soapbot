@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 import { t } from '@/i18n'
 
@@ -9,12 +9,16 @@ import { t } from '@/i18n'
  * The input, submit wiring and styles are shared so the two modes cannot drift
  * visually — only the copy and the submit target differ.
  */
-const props = withDefaults(defineProps<{ disabled?: boolean; saving?: boolean; mode?: 'note' | 'talk' }>(), {
+const props = withDefaults(defineProps<{ disabled?: boolean; saving?: boolean; mode?: 'note' | 'talk'; modelValue?: string }>(), {
   mode: 'note',
+  modelValue: '',
 })
-const emit = defineEmits<{ submit: [text: string] }>()
+const emit = defineEmits<{ submit: [text: string]; 'update:modelValue': [text: string] }>()
 
-const text = ref('')
+const text = computed({
+  get: () => props.modelValue ?? '',
+  set: (v: string) => emit('update:modelValue', v),
+})
 const canSubmit = computed(() => text.value.trim().length > 0 && !props.disabled && !props.saving)
 
 const label = computed(() => (props.mode === 'talk' ? t('chat.talk.label') : t('chat.composer.label')))
