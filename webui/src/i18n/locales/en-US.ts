@@ -1128,6 +1128,7 @@ export default {
   'chat.role.user': 'Contact',
   'chat.role.assistant': 'Bot',
   'chat.role.note': 'Note',
+'chat.stream.reconnecting': 'Connection lost, reconnecting…',
   'chat.newMessages': 'New messages',
   'chat.loadEarlier': 'Load earlier messages',
   'chat.loadEarlier.loading': 'Loading earlier messages…',

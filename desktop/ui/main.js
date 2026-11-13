@@ -30,8 +30,39 @@ function setState(state, message) {
   online.hidden = state !== 'online'
 }
 
-async function probe() {
-  setState('probing', '正在检查本机服务…')
+/**
+ * 后端由壳拉起后需要几秒到几十秒启动（Python 冻结体 + SQLite 迁移）。离线时
+ * 自动每 2 秒重探一次、最多 90 秒并显示已等待时长——操作者不必盯着「重新检测」
+ * 手动点。超时后停回手动模式，避免无限轮询掩盖「服务真的没起来」这个事实。
+ */
+let autoPollTimer = null
+const AUTO_POLL_INTERVAL_MS = 2000
+const AUTO_POLL_MAX_MS = 90_000
+
+function startAutoPoll() {
+  if (autoPollTimer !== null) return
+  const startedAt = Date.now()
+  autoPollTimer = setInterval(() => {
+    const waited = Math.round((Date.now() - startedAt) / 1000)
+    if (waited > AUTO_POLL_MAX_MS / 1000) {
+      clearInterval(autoPollTimer)
+      autoPollTimer = null
+      setState('offline', '等待超时——请确认服务已安装，或点「重新检测」')
+      return
+    }
+    void probe(`后端启动中…（已等待 ${waited} 秒，自动重试）`)
+  }, AUTO_POLL_INTERVAL_MS)
+}
+
+function stopAutoPoll() {
+  if (autoPollTimer !== null) {
+    clearInterval(autoPollTimer)
+    autoPollTimer = null
+  }
+}
+
+async function probe(statusMessage = '正在检查本机服务…') {
+  setState('probing', statusMessage)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
   try {
@@ -43,10 +74,12 @@ async function probe() {
       mode: 'no-cors',
       cache: 'no-store',
     })
+    stopAutoPoll()
     setState('online', '服务已就绪')
   } catch (error) {
     console.error('health probe failed', error)
     setState('offline', '本机服务没有响应')
+    startAutoPoll()
   } finally {
     clearTimeout(timer)
   }
