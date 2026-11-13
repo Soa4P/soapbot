@@ -10,6 +10,15 @@
 
 ## [Unreleased]
 
+### 代码层全面审计（160 文件 47,801 行，只读）
+
+云鼎三层扫描 + AST 结构分析 + code-vuln-crossreview 双视角覆盖 src/soapbot 全部：
+**0 P0 / 0 P1**。危险模式命中（md5/sha1/verify=False）逐处核实均为协议要求、
+文件名摘要或防御声明；循环内 execute 全部为启动期 PRAGMA/迁移；索引覆盖完整。
+报告在 docs/code-audit-2026-11.md，含 P2/P3 维护清单（装配函数拆分时机、插件
+生命周期编排、长会话交接语义）与明确不做项（create_app 纯结构搬移回归风险大于
+收益）。
+
 ### 流畅度与部署优化：面板 KeepAlive、pinned 安装变体
 
 原来错在哪：十五个面板页没有 KeepAlive——每次切换都整页重挂载，滚动位置、筛选
