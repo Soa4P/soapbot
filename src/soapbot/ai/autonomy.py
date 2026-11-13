@@ -32,13 +32,17 @@ class WarmthParams:
     growth: float = 0.15
     decay_per_hour: float = 0.01
     threshold: float = 0.60
+    penalty_decay: float = 0.05
+    """每次道歉/负向事件的对数衰减系数——v2 的「伤害不对称」：一次负向事件的
+    减量大于一次正向交互的增量（longing 复核的设计输入，见
+    docs/qq-autonomy-design.md §6）。"""
 
     @classmethod
     def from_mapping(cls, raw: Any) -> WarmthParams:
         if not isinstance(raw, dict):
             return cls()
         values: dict[str, float] = {}
-        for name in ("baseline", "growth", "decay_per_hour", "threshold"):
+        for name in ("baseline", "growth", "decay_per_hour", "threshold", "penalty_decay"):
             try:
                 value = float(raw.get(name, getattr(cls(), name)))
             except (TypeError, ValueError):
@@ -90,12 +94,31 @@ def parse_autonomy(persona: Any) -> AutonomyConfig:
 
 
 def compute_warmth(
-    interactions: int, hours_since_last: float, params: WarmthParams | None = None
+    interactions: int,
+    hours_since_last: float,
+    params: WarmthParams | None = None,
+    *,
+    penalties: int = 0,
 ) -> float:
-    """Log-normalised recent activity minus a linear idle decay, clamped to [0, 1]."""
+    """Log-normalised activity minus penalty decay minus idle decay.
+
+    v2 的两处语义（longing 复核的设计输入）：
+
+    * **伤害不对称**：负向事件按对数衰减（``penalty_decay * log1p(penalties)``），
+      第一次道歉伤害最大，之后的边际递减——与正向的 log1p 增量对称；
+    * **日常值回归**：有过交互史的会话，闲置衰减推得到日常（baseline），
+      **推不到 0**——长期冷落被读成「回到了平常」，而不是「关系归零」。
+      从未交互过的会话仍是 0。
+    """
     p = params or WarmthParams()
     score = p.baseline + p.growth * math.log1p(max(0, interactions))
+    score -= p.penalty_decay * math.log1p(max(0, penalties))
     score -= p.decay_per_hour * max(0.0, hours_since_last)
+    if interactions == 0 and penalties == 0:
+        # 从未交互过的会话保持 0——「日常」只属于有过交流的关系。
+        return 0.0
+    # 有过交互史的会话不会因闲置被读成「关系归零」。
+    score = max(score, p.baseline)
     return min(1.0, max(0.0, score))
 
 
@@ -109,6 +132,7 @@ class WarmthTracker:
 
     def __init__(self) -> None:
         self._events: dict[str, list[float]] = {}
+        self._penalties: dict[str, list[float]] = {}
         self._lock = threading.Lock()
         self._max_sessions = 2000
 
@@ -123,6 +147,21 @@ class WarmthTracker:
             cutoff = ts - WINDOW_SECONDS
             self._events[session_key] = [t for t in events if t >= cutoff][-500:]
 
+    def record_penalty(self, session_key: str, *, now: float | None = None) -> None:
+        """Record one negative event (道歉/说错话的确定性识别，见 memory/stages）。
+
+        与正向事件同一套有界窗口；惩罚按对数衰减计入 warmth，随窗口一起过期。
+        """
+        ts = time.time() if now is None else now
+        with self._lock:
+            if session_key not in self._penalties and len(self._penalties) >= self._max_sessions:
+                oldest = min(self._penalties, key=lambda k: self._penalties[k][-1])
+                del self._penalties[oldest]
+            penalties = self._penalties.setdefault(session_key, [])
+            penalties.append(ts)
+            cutoff = ts - WINDOW_SECONDS
+            self._penalties[session_key] = [t for t in penalties if t >= cutoff][-500:]
+
     def warmth(
         self,
         session_key: str,
@@ -133,13 +172,23 @@ class WarmthTracker:
         ts = time.time() if now is None else now
         with self._lock:
             events = [t for t in self._events.get(session_key, []) if ts - t <= WINDOW_SECONDS]
-        if not events:
+            penalties = [
+                t for t in self._penalties.get(session_key, []) if ts - t <= WINDOW_SECONDS
+            ]
+        if not events and not penalties:
             return 0.0
-        return compute_warmth(len(events), (ts - max(events)) / 3600.0, params)
+        last = max(events or penalties)
+        return compute_warmth(
+            len(events),
+            (ts - last) / 3600.0,
+            params,
+            penalties=len(penalties),
+        )
 
     def clear(self) -> None:
         with self._lock:
             self._events.clear()
+            self._penalties.clear()
 
 
 #: One process owns one pipeline; the same object is read by ``SessionView`` and
