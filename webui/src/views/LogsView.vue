@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
@@ -47,6 +47,11 @@ watch([level, contains, limit], () => {
 // 250 ms of typing leaves a pending callback that fires against a disposed hook — a
 // reload nobody asked for, on a page that no longer exists, in the middle of the next
 // page's first paint.
+onActivated(() => void logs.reload())
+
+// KeepAlive 下导航离开触发 deactivated（清防抖定时器）；应用整体卸载仍走
+// onBeforeUnmount——两处都要，因为语义不同。
+onDeactivated(() => clearTimeout(timer))
 onBeforeUnmount(() => clearTimeout(timer))
 
 const canLoadMore = computed(() => limit.value < LIMIT_MAX)

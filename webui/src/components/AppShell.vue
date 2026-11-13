@@ -172,7 +172,14 @@ onBeforeUnmount(() => {
         <!-- One sentence per page saying what it is for. Rendered here rather than in
              twelve views so a new page cannot ship without that sentence existing. -->
         <PageIntro />
-        <RouterView />
+        <!-- KeepAlive: 十五个面板页切换时不再整页重挂载——状态与滚动位置保留，
+             useAsync 的缓存让回访页面零请求渲染。带连接/定时器的三个视图
+             （Chat/Logs/Pipeline）已各自配对 onActivated/onDeactivated。 -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive>
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </div>
     </main>
 

@@ -10,6 +10,24 @@
 
 ## [Unreleased]
 
+### 流畅度与部署优化：面板 KeepAlive、pinned 安装变体
+
+原来错在哪：十五个面板页没有 KeepAlive——每次切换都整页重挂载，滚动位置、筛选
+状态、展开的面板全部丢失；useAsync 的缓存只解决数据，不解决组件状态。另外部署
+只有「跟随 master」一种远程安装方式，分支一变下载内容就变，想要可复现安装没有
+选项（安全审查 P2-1）。
+
+现在：
+
+- **面板 KeepAlive**：AppShell 用 KeepAlive 包裹 RouterView，十五页切换零重挂载。
+  带连接与定时器的三个视图配对 onActivated 与 onDeactivated：ChatView 离开时关
+  SSE 与会话轮询、回来重建；LogsView 清防抖定时器、回来刷一次；PipelineView
+  恢复 live 轮询（同 LIVE_INTERVAL_MS）。
+- **pinned 安装变体**：install.ps1 加 -Tag 参数、install.sh 加 --tag 参数——从
+  refs/tags/<tag> 下载，tag 不可变所以安装可复现；格式校验拒绝分支名伪装
+  （v[0-9]* 才放行）。deploy-quickstart.md 两种命令各加一条。
+- install.ps1 PowerShell 语法解析验证通过。
+
 ### 项目定位随主体方向更新（多端 AI 陪伴框架）
 
 原来错在哪：README 第一行还是「QQ 群里的 AI 机器人」，pyproject 简介、mobile 的
