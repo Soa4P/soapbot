@@ -8,6 +8,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.sh | bash
 #   ./install.sh --dir /opt/soapbot --port 6185
+#   ./install.sh --tag v0.1.0   # pinned: a branch ref can change, a tag cannot
 set -euo pipefail
 
 DIR="${SOAPBOT_DIR:-/opt/soapbot}"
@@ -15,18 +16,28 @@ PORT="${SOAPBOT_PORT:-6185}"
 SERVICE=soapbot
 FORCE=0
 NO_SERVICE=0
+TAG=""
 TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/heads/master"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
+    --tag) TAG="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --no-service) NO_SERVICE=1; shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# A tag must look like v<digit>… so a branch name can never be smuggled in as a "pin".
+if [ -n "$TAG" ]; then
+  case "$TAG" in
+    v[0-9]*) TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/tags/$TAG" ;;
+    *) echo "--tag must look like v0.1.0 (a tag ref, not a branch)" >&2; exit 2 ;;
+  esac
+fi
 
 step() { printf '==> %s\n' "$1"; }
 ok()   { printf '    %s\n' "$1"; }

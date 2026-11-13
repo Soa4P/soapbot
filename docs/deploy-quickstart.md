@@ -25,6 +25,12 @@ irm https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.ps1 -
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1"
 ```
 
+要可复现安装（固定到某个发布 tag，内容不会像分支那样变化）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1" -Tag v0.1.0
+```
+
 ### Windows 无 Python
 
 在管理员 PowerShell 里：
@@ -57,6 +63,13 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1" -Dir D:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Soa4P/soapbot/master/scripts/install.sh -o /tmp/soapbot-install.sh
 bash /tmp/soapbot-install.sh
+```
+
+要可复现安装（固定 tag，内容不变；本地脚本支持 `--tag`，或直接改下载 URL 的
+`refs/heads/master` 为 `refs/tags/v0.1.0`）：
+
+```bash
+bash /tmp/soapbot-install.sh --tag v0.1.0
 ```
 
 默认 `/opt/soapbot`，以 root 运行时注册 `soapbot.service` 并 `systemctl enable --now`。
