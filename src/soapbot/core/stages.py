@@ -12,6 +12,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
+from soapbot.config import settings
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
@@ -159,6 +160,21 @@ class WhitelistStage(Stage):
             # the panel manages. The QQ paths below stay deny-by-default; this branch
             # is reachable only for events the runtime accepted from the in-process
             # web adapter, which itself only exists when chat_talk_enabled is on.
+            ctx.extras["memory_collect"] = True
+            ctx.extras["replies_here"] = True
+            return StageResult()
+        if (
+            ctx.event.adapter == "onebot11"
+            and ctx.event.scene is MessageScene.PRIVATE
+            and ctx.event.session_key_override
+            and getattr(settings, "chat_unified_enabled", False)
+        ):
+            # Unified chat: this private message's session was rewritten by the host's
+            # session mapper, which only fires for a platform user the operator bound
+            # to an account (accounts.qq_user_id) with the unified flag explicitly on.
+            # The trust chain is therefore three links — owner binding, flag, and the
+            # mapper's active-account check — and every one of them is set by the
+            # operator, not by the message. Same archive posture as web talk.
             ctx.extras["memory_collect"] = True
             ctx.extras["replies_here"] = True
             return StageResult()

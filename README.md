@@ -115,6 +115,10 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 手机上**和机器人对话**，设 `SOAPBOT_CHAT_TALK_ENABLED=true` 并在第 15 页给账号授权自己的
 会话；此后 `POST /api/chat/messages` 存在，每条消息走与 QQ 消息同一条管线（注入检测、
 按适配器限频），机器人的回复只出现在该成员自己的 `web:private:account-<id>` 会话里。
+要让**四个端看到同一份连续对话**（App/网页/桌面发消息、QQ 里也接着聊），在第 15 页给账号
+绑定 QQ 号，并设 `SOAPBOT_CHAT_UNIFIED_ENABLED=true`：此后被绑定用户的 QQ 私聊落进同一
+会话——信任链是 owner 绑定 + 该显式开关 + 既有 membership 三重，缺一即回到旧的隔离。发送失败与被拒不再无痕：消息行带 `state`（`ok`/`send_failed`/`rejected`
+加短 reason），四端都能看到。
 手机端和桌面壳默认关闭（`SOAPBOT_CHAT_APP_ENABLED` / `SOAPBOT_CHAT_DESKTOP_ENABLED`），
 因为它们是装到别人设备上的二进制；三个端开关全关时 `/api/chat/*` 返回 404，像这个部署
 从没有过这些路由。完整语义见 [docs/chat-archive.md](docs/chat-archive.md)。

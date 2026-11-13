@@ -236,8 +236,15 @@ class MemoryStore:
         message_id: str = "",
         trace_id: str = "",
         created_at: float | None = None,
+        state: str = "ok",
+        reason: str = "",
     ) -> int:
-        """Append one message. Never mutates existing rows."""
+        """Append one message. Never mutates existing rows.
+
+        ``state`` is the delivery outcome every client renders: ``ok`` (default),
+        ``send_failed`` (model replied, platform delivery failed) or ``rejected``
+        (the pipeline refused; ``reason`` is a short stable token, not prose).
+        """
         ts = created_at if created_at is not None else time.time()
         async with self.db.write() as session:
             row = MessageRow(
@@ -253,6 +260,8 @@ class MemoryStore:
                 message_id=message_id,
                 trace_id=trace_id,
                 created_at=ts,
+                state=state,
+                reason=reason,
             )
             session.add(row)
             # flush 取到自增 id 后再写 FTS，最后统一 commit：
@@ -434,6 +443,8 @@ class MemoryStore:
                 "user_name": r.user_name,
                 "created_at": r.created_at,
                 "trace_id": r.trace_id,
+                "state": r.state or "ok",
+                "reason": r.reason or "",
             }
             for r in reversed(rows)
         ]
@@ -512,6 +523,8 @@ class MemoryStore:
                 "user_name": row.user_name,
                 "adapter": row.adapter,
                 "created_at": row.created_at,
+                "state": row.state or "ok",
+                "reason": row.reason or "",
             }
             for row in rows
         ]

@@ -122,9 +122,15 @@ export const api = {
 
   // Archive accounts (owner-only endpoints; the panel token is the credential).
   accounts: () =>
-    request<{ accounts: Array<{ id: number; username: string; role: string; status: string }> }>(
-      '/api/accounts',
-    ),
+    request<{
+      accounts: Array<{
+        id: number
+        username: string
+        role: string
+        status: string
+        qq_user_id?: string
+      }>
+    }>('/api/accounts'),
   createInvite: (body: {
     role?: string
     hours?: number
@@ -145,6 +151,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ account_id: accountId, session_key: sessionKey }),
     }),
+  bindQqUser: (accountId: number, qqUserId: string) =>
+    request<{ ok: boolean; account: { id: number; qq_user_id: string } }>(
+      `/api/accounts/${accountId}/binding`,
+      { method: 'PUT', body: JSON.stringify({ qq_user_id: qqUserId }) },
+    ),
+  unbindQqUser: (accountId: number) =>
+    request<{ ok: boolean; account: { id: number; qq_user_id: string } }>(
+      `/api/accounts/${accountId}/binding`,
+      { method: 'DELETE' },
+    ),
 
   /** The full card, body included. The list endpoint truncates the prompt, and saving
    * a truncated prompt back would destroy the rest of it. */
@@ -891,6 +907,10 @@ export interface ChatMessage {
   user_name?: string
   adapter?: string
   created_at: number
+  /** Delivery state (schema v6): ok / send_failed / rejected. Legacy rows read as ok. */
+  state?: 'ok' | 'send_failed' | 'rejected' | string
+  /** Short stable reason token for rejected rows (never prose). */
+  reason?: string
 }
 
 export interface ChatMessagePage {

@@ -176,6 +176,19 @@ class Settings(BaseSettings):
     screen, per-adapter rate limit) as a QQ message.
     """
 
+    chat_unified_enabled: bool = False
+    """Join a bound QQ private conversation into the account's web session.
+
+    Off by default. This is the second, deeper half of the talk boundary: with it on,
+    a QQ user the owner has bound to an account (``accounts.qq_user_id``) chats in the
+    same ``web:private:account-<id>`` session the web/app clients use, so all four
+    ends see one continuous conversation and the model keeps its context across
+    devices. The trust chain is three links — operator-set binding, this explicit
+    flag, and the existing membership row — and removing any one of them restores the
+    old isolation. Unbound QQ users are unaffected: private stays deny-by-default,
+    groups keep their own sessions.
+    """
+
     bili_cookie: SecretStr = SecretStr("")
     """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
     capability.

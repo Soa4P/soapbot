@@ -19,7 +19,13 @@ import { useAsync } from '@/lib/useAsync'
 
 const accounts = useAsync(() => api.accounts())
 
-type AccountRow = { id: number; username: string; role: string; status: string }
+type AccountRow = {
+  id: number
+  username: string
+  role: string
+  status: string
+  qq_user_id?: string
+}
 
 const rows = computed<AccountRow[]>(() => accounts.data.value?.accounts ?? [])
 
@@ -45,6 +51,44 @@ const grantBusy = ref(false)
 
 const statusBusyId = ref(0)
 const statusError = ref('')
+
+// QQ binding (unified chat): the owner draws the identity link between a QQ number
+// and an account. Inline edit per row — the list stays the single place to see and
+// change bindings, and an unbind is a deliberate click, not a text field emptied.
+const bindingEditId = ref(0)
+const bindingValue = ref('')
+const bindingBusyId = ref(0)
+const bindingError = ref('')
+const bindingMessage = ref('')
+
+function startBinding(row: AccountRow): void {
+  bindingEditId.value = row.id
+  bindingValue.value = row.qq_user_id ?? ''
+  bindingError.value = ''
+  bindingMessage.value = ''
+}
+
+async function submitBinding(row: AccountRow): Promise<void> {
+  const value = bindingValue.value.trim()
+  bindingBusyId.value = row.id
+  bindingError.value = ''
+  bindingMessage.value = ''
+  try {
+    if (value) {
+      await api.bindQqUser(row.id, value)
+      bindingMessage.value = t('accounts.binding.ok')
+    } else {
+      await api.unbindQqUser(row.id)
+      bindingMessage.value = t('accounts.binding.removed')
+    }
+    bindingEditId.value = 0
+    await accounts.reload()
+  } catch (err) {
+    bindingError.value = err instanceof Error ? err.message : t('accounts.binding.error')
+  } finally {
+    bindingBusyId.value = 0
+  }
+}
 
 const webTalkKey = (accountId: number): string => `web:private:account-${accountId}`
 
@@ -133,6 +177,7 @@ async function toggleStatus(row: AccountRow): Promise<void> {
               <th scope="col">{{ t('accounts.username') }}</th>
               <th scope="col">{{ t('accounts.role.title') }}</th>
               <th scope="col">{{ t('common.status') }}</th>
+              <th scope="col">{{ t('accounts.binding.title') }}</th>
               <th scope="col">{{ t('accounts.actions') }}</th>
             </tr>
           </thead>
@@ -149,6 +194,32 @@ async function toggleStatus(row: AccountRow): Promise<void> {
                 <span class="tag" :class="row.status === 'active' ? 'ok' : 'bad'">
                   {{ row.status === 'active' ? t('accounts.status.active') : t('accounts.status.disabled') }}
                 </span>
+              </td>
+              <td>
+                <div v-if="bindingEditId === row.id" class="accounts__actions">
+                  <input
+                    v-model="bindingValue"
+                    class="field mono"
+                    type="text"
+                    inputmode="numeric"
+                    style="max-width: 14ch"
+                    :placeholder="t('accounts.binding.placeholder')"
+                    :aria-label="t('accounts.binding.title')"
+                  />
+                  <button type="button" class="btn" :disabled="bindingBusyId === row.id" @click="submitBinding(row)">
+                    {{ t('accounts.binding.save') }}
+                  </button>
+                  <button type="button" class="btn" @click="bindingEditId = 0">
+                    {{ t('common.cancel') }}
+                  </button>
+                </div>
+                <div v-else class="accounts__actions">
+                  <code v-if="row.qq_user_id" class="mono">{{ row.qq_user_id }}</code>
+                  <span v-else class="tag">{{ t('accounts.binding.unbound') }}</span>
+                  <button type="button" class="btn" @click="startBinding(row)">
+                    {{ row.qq_user_id ? t('accounts.binding.rebind') : t('accounts.binding.bind') }}
+                  </button>
+                </div>
               </td>
               <td>
                 <div class="accounts__actions">
@@ -179,6 +250,10 @@ async function toggleStatus(row: AccountRow): Promise<void> {
   </section>
 
   <div v-if="statusError" class="error-banner">{{ statusError }}</div>
+  <div v-if="bindingError" class="error-banner">{{ bindingError }}</div>
+  <p v-if="bindingMessage" class="hint" style="margin: 8px 16px; color: var(--ok, var(--ink))">
+    {{ bindingMessage }}
+  </p>
 
   <section class="panel">
     <div class="panel__head">

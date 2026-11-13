@@ -183,6 +183,21 @@ class _ChatScreenState extends State<ChatScreen> {
       _error = '';
     });
     _talkController.clear();
+    // Optimistic bubble: shown immediately as `sending`, then replaced by the real
+    // server rows. On a refusal it becomes `rejected`; if the request never reached
+    // the server it stays as a visible failed bubble instead of vanishing.
+    final pendingId = -DateTime.now().millisecondsSinceEpoch;
+    final optimistic = Message(
+      id: pendingId,
+      sessionKey: widget.session.sessionKey,
+      role: 'user',
+      content: text,
+      createdAt: DateTime.now().millisecondsSinceEpoch / 1000,
+      userName: '',
+      state: DeliveryState.sending,
+    );
+    setState(() => _messages.add(optimistic));
+    _scrollToEnd();
     try {
       final reply = await widget.api.talk(text);
       // The pipeline archived both rows (the user message and the reply), so one
@@ -190,6 +205,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final page = await widget.api.messages(widget.session.sessionKey, afterId: _cursor);
       if (!mounted) return;
       setState(() {
+        _messages.removeWhere((m) => m.id == pendingId);
         for (final row in page.messages) {
           if (row.id > _cursor) {
             _messages.add(row);
@@ -204,7 +220,64 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       _scrollToEnd();
     } on ApiException catch (err) {
+      if (!mounted) return;
+      if (err.status == 429) {
+        // The pipeline refused the message and the server archived a `rejected`
+        // row for it; pull it so the timeline shows the same state everywhere.
+        try {
+          final page = await widget.api.messages(widget.session.sessionKey, afterId: _cursor);
+          if (!mounted) return;
+          setState(() {
+            _messages.removeWhere((m) => m.id == pendingId);
+            for (final row in page.messages) {
+              if (row.id > _cursor) {
+                _messages.add(row);
+                _cursor = row.id;
+              }
+            }
+          });
+        } on ApiException {
+          // degraded: the server row arrives on the next poll; keep the bubble.
+        }
+        _scrollToEnd();
+      } else {
+        // Network/5xx: nothing reached the server, so no server row will arrive.
+        // Mark the bubble failed instead of silently deleting it.
+        setState(() {
+          final index = _messages.indexWhere((m) => m.id == pendingId);
+          if (index >= 0) {
+            _messages[index] = Message(
+              id: pendingId,
+              sessionKey: optimistic.sessionKey,
+              role: 'user',
+              content: text,
+              createdAt: optimistic.createdAt,
+              state: DeliveryState.sendFailed,
+              reason: 'network',
+            );
+          }
+        });
+      }
       if (mounted) setState(() => _error = err.message);
+    } catch (err) {
+      // Raw transport failure (socket, timeout): the request never reached the
+      // server, so the same visible outcome as a 5xx — a failed bubble, not silence.
+      if (!mounted) return;
+      final index = _messages.indexWhere((m) => m.id == pendingId);
+      if (index >= 0) {
+        setState(() {
+          _messages[index] = Message(
+            id: pendingId,
+            sessionKey: optimistic.sessionKey,
+            role: 'user',
+            content: text,
+            createdAt: optimistic.createdAt,
+            state: DeliveryState.sendFailed,
+            reason: 'network',
+          );
+        });
+      }
+      setState(() => _error = err.toString());
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -344,6 +417,15 @@ class _Bubble extends StatelessWidget {
         : TimeOfDay.fromDateTime(
                 DateTime.fromMillisecondsSinceEpoch((message.createdAt * 1000).round()))
             .format(context);
+    // Delivery state badges: server-archived outcomes plus the client-side
+    // optimistic states. `ok`/null renders nothing — normal messages stay clean.
+    final String? stateLabel = switch (message.state) {
+      DeliveryState.sending => '发送中',
+      DeliveryState.sendFailed => '发送失败',
+      DeliveryState.rejected => '被拒绝${message.reason.isEmpty ? '' : ' (${message.reason})'}',
+      DeliveryState.ok || null => null,
+    };
+    final stateColour = message.state == DeliveryState.rejected ? danger : ink3;
 
     return Align(
       alignment: note || mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -367,6 +449,11 @@ class _Bubble extends StatelessWidget {
                   const SizedBox(width: 6),
                   const Text('仅记录',
                       style: TextStyle(fontSize: 10, color: warn)),
+                ],
+                if (stateLabel != null) ...[
+                  const SizedBox(width: 6),
+                  Text(stateLabel,
+                      style: TextStyle(fontSize: 10, color: stateColour)),
                 ],
                 const Spacer(),
                 Text(time, style: const TextStyle(fontSize: 10, color: ink3)),

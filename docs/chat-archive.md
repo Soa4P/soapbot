@@ -7,7 +7,9 @@
 ## 信源：按会话前缀分
 
 - `qq:*` 会话（`onebot11:group:…`、`qq_official:…`）的信源是 QQ：这些行只由适配器
-  侧的管线写入，`api/chat.py` 到今天也不持有任何 QQ 适配器的引用。
+  侧的管线写入，`api/chat.py` 到今天也不持有任何 QQ 适配器的引用。**唯一例外**见下文
+  「统一会话」：owner 绑定 + 显式开关同时成立时，被绑定用户的 QQ *私聊*落进其账号的
+  `web:private:*` 会话——落库的行仍然如实记 `adapter=onebot11`，信源仍是 QQ 平台。
 - `web:private:account-<id>` 会话的信源是网页/手机端自己：`POST /api/chat/messages`
   构造一条进程内消息交给 `runtime.dispatch`，**由管线**（Guard → 注入检测 → 白名单 →
   限频 → 人格 → 模型 → 回复 → 落库）写出 user 与 assistant 两行。端点本身仍然没有
@@ -19,6 +21,7 @@ GET  /api/chat/messages                 读（三种翻页模式，见下）
 GET  /api/chat/stream                   读（SSE，1.5 秒游标轮询）
 POST /api/chat/notes                    写一行 role="note"，永不投递
 POST /api/chat/messages                 对话（SOAPBOT_CHAT_TALK_ENABLED=true 时才存在）
+PUT  /api/accounts/<id>/binding         QQ 号绑定（owner，SOAPBOT_CHAT_UNIFIED_ENABLED 用）
 ```
 
 备注在 QQ 侧不可见，也不会被下一条群消息「带出去」。不要把它当草稿箱，它不是。
@@ -75,6 +78,44 @@ POST /api/chat/messages                 对话（SOAPBOT_CHAT_TALK_ENABLED=true 
 4. **开关改动要重启**：web 适配器在启动时随 `chat_talk_enabled` 注册，进程内没有
    热加载。
 
+## 统一会话：四端一份连续对话
+
+`SOAPBOT_CHAT_UNIFIED_ENABLED=false`（默认）时什么都不发生——QQ 私聊仍按原规则默认拒绝，
+`qq:private:*` 与 `web:private:*` 互不相干。开启后，**第 15 页由 owner 把 QQ 号绑定到
+账号**（`PUT /api/accounts/<id>/binding`，`DELETE` 解绑），该 QQ 号的私聊事件在
+`runtime.dispatch` 里被会话映射器改写：
+
+- 映射发生在**会话锁之前**——映射改变的就是锁键本身（`core/runtime.py` dispatch 开头）；
+- 事件的 `adapter` 保持 `onebot11`：机器人的回复仍走 QQ 协议端发回去（回复只回来源端，
+  不跨端推送），落库的行也如实记录 `adapter=onebot11`；
+- 落点是 `web:private:account-<id>`：网页/App/桌面壳读到的与 QQ 里说的从此是同一条
+  时间线，模型的上下文跨设备连续。
+
+信任链三重，缺一即回到旧隔离：
+
+1. **owner 绑定**（`accounts.qq_user_id`，唯一索引，QQ 号与账号一一对应）——QQ 用户
+   无法自助认领，冒用别人的号发消息进不了别人的会话；
+2. **显式开关** `SOAPBOT_CHAT_UNIFIED_ENABLED`（默认关）；
+3. **既有 membership 授权**——统一会话沿用 web talk 的逐账号授权，被停用的账号映射
+   不到会话（`account_by_qq_user` 拒绝 disabled 行）。
+
+白名单对这条路径有显式分支（`core/stages.py`）：PRIVATE + onebot11 + 会话已被映射 +
+flag 开 → 放行；**未绑定** QQ 私聊的默认拒绝一字未动。配额仍按 `adapter:user_id` 独立
+计数——同一个账号在网页和 QQ 里是两个独立的限频窗口。
+
+## 消息状态：发送失败与被拒可见
+
+消息行带 `state`（schema v6 起；旧行为 NULL，一律按 `ok` 读）：
+
+- `ok`：正常送达；
+- `send_failed`：模型回了但平台投递失败——以前这种情况**一行都不写**，客户端看到的
+  是沉默；现在回复照落库，四端渲染灰色失败徽标；
+- `rejected`：管线拒绝了这条消息（Guard 限频、注入检测等），`reason` 是短 token
+  （不是正文）。只对已认证的 talk 路径补写这种行——QQ 平台来的未验证文本被拒时仍然
+  不留痕（平台信源原则）。
+
+客户端的「发送中」是乐观 UI 状态，永远不进数据库：请求返回后由服务端行替代或转为失败。
+
 ## 账号
 
 - 登录：`POST /api/accounts/login`，用户名 + 密码，签发与面板相同的会话 Cookie。
@@ -104,6 +145,7 @@ POST /api/chat/messages                 对话（SOAPBOT_CHAT_TALK_ENABLED=true 
 | `SOAPBOT_CHAT_APP_ENABLED` | `false` | 手机端可以访问 `/api/chat/*` |
 | `SOAPBOT_CHAT_DESKTOP_ENABLED` | `false` | 桌面壳可以访问 `/api/chat/*` |
 | `SOAPBOT_CHAT_TALK_ENABLED` | `false` | 对话端点 `POST /api/chat/messages` 是否存在 |
+| `SOAPBOT_CHAT_UNIFIED_ENABLED` | `false` | 已绑定 QQ 号的私聊落进账号的 web 会话（见「统一会话」） |
 
 三个全关时 `/api/chat/*` 返回 404，像这个部署里没有这些路由一样。目的很直接：装到别人
 设备上的客户端不该默认能读存档。talk 开关单独管发送；关掉时同样的 404，开启时也仍要
