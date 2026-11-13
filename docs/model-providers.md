@@ -153,6 +153,44 @@ providers:
 LM Studio、vLLM、llama.cpp 之类只要开了 OpenAI 兼容服务，就按上一节「表里没有的厂商」
 处理：填它给你的地址和端口，Key 留空或随便填一个占位值（有些服务端要求非空）。
 
+## 轻任务模型槽：让摘要走一个便宜的模型
+
+机器人有两类模型调用：
+
+- **主聊**：回复用户，走 `priority` 最靠前的可用厂商；
+- **轻任务**：宿主自己发起的小活——目前是会话摘要 / 上下文压缩（`ai/engine.py`
+  的 summariser）。量小、频次高、对模型智力要求低，用贵的主聊模型做是浪费。
+
+给轻任务指派一个便宜模型：在 `providers.yaml` 的任一条目里加 `extra: {light: true}`：
+
+```yaml
+providers:
+  - id: deepseek
+    kind: openai_compat
+    label: DeepSeek（主聊）
+    base_url: https://api.deepseek.com/v1
+    api_key: env:DEEPSEEK_API_KEY
+    model: deepseek-chat
+    priority: 10
+
+  - id: cheap-summary
+    kind: openai_compat
+    label: 便宜小模型（摘要）
+    base_url: https://api.deepseek.com/v1
+    api_key: env:DEEPSEEK_API_KEY
+    model: deepseek-chat-lite      # 换成你厂商的便宜/小杯模型 ID
+    priority: 90
+    extra: { light: true }
+```
+
+三条规则（`tests/test_provider_light_slot.py` 钉住）：
+
+1. **指派是加选**：被标记的实例不会被从主聊链里摘出去，单厂商部署不会因此坏掉；
+2. **轻任务优先走被指派的实例**：多个 `light: true` 时仍按 `priority` 排序；
+3. **没指派就回落主聊链**：默认部署行为与从前完全一致，不配也能跑。
+
+轻任务只由宿主挑选——模型与插件都无法把请求路由进这个槽。
+
 ## 报错了怎么读
 
 | 现象 | 原因 | 怎么办 |
