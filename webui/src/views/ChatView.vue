@@ -29,9 +29,31 @@ const detailOpen = ref(false)
 const unread = ref(0)
 
 const scroller = ref<HTMLElement | null>(null)
+const streamState = ref<'live' | 'reconnecting' | 'off'>('off')
+const draft = ref('')
 let source: EventSource | null = null
 let pendingId = -1
 let sessionsTimer: ReturnType<typeof setInterval> | null = null
+
+const DRAFT_PREFIX = 'soapbot.draft.'
+
+function loadDraft(session: string): string {
+  try {
+    return localStorage.getItem(DRAFT_PREFIX + session) ?? ''
+  } catch {
+    // degraded: storage 被禁/满时草稿不可用，空串继续——不影响消息读取。
+    return ''
+  }
+}
+
+function saveDraft(session: string, text: string): void {
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + session, text)
+    else localStorage.removeItem(DRAFT_PREFIX + session)
+  } catch {
+    // degraded: storage 满或被禁时草稿不持久化，当前输入不受影响。
+  }
+}
 
 /** This account's conversation session; empty when talk is off. */
 const talkKey = computed(() =>
@@ -114,7 +136,12 @@ function openStream(): void {
   }
   source.onerror = () => {
     // EventSource retries on its own; closing here would turn a transient proxy
-    // restart into a permanently dead stream until the user reloads.
+    // restart into a permanently dead stream until the user reloads. The badge
+    // below tells the user the stream is down instead of silently stalling.
+    streamState.value = 'reconnecting'
+  }
+  source.onopen = () => {
+    streamState.value = 'live'
   }
 }
 
@@ -123,6 +150,8 @@ async function openSession(key: string): Promise<void> {
     detailOpen.value = true
     return
   }
+  if (activeKey.value) saveDraft(activeKey.value, draft.value)
+  draft.value = loadDraft(key)
   activeKey.value = key
   detailOpen.value = true
   messages.value = []
@@ -394,6 +423,14 @@ onActivated(() => {
           <h2>{{ activeKey ? sessionLabel(activeKey) : t('chat.sessions') }}</h2>
           <p v-if="activeKey" class="chat__keyline">{{ activeKey }}</p>
         </div>
+        <span
+          v-if="streamState !== 'live'"
+          class="chat__stream"
+          :class="{ 'chat__stream--down': streamState === 'reconnecting' }"
+          role="status"
+        >
+          {{ streamState === 'reconnecting' ? t('chat.stream.reconnecting') : '' }}
+        </span>
         <span class="chat__scope">
           {{ scope === 'all' ? t('chat.info.scopeAll') : t('chat.info.scopeMember') }}
         </span>
@@ -440,6 +477,7 @@ onActivated(() => {
       <p v-if="noteError" class="chat__noteerror" role="alert">{{ noteError }}</p>
 
       <NoteComposer
+        v-model="draft"
         :disabled="!activeKey || loadingMessages"
         :saving="saving"
         :mode="isTalkSession ? 'talk' : 'note'"
@@ -684,6 +722,19 @@ onActivated(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat__stream {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.chat__stream--down {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--warn);
 }
 
 .chat__scope {
