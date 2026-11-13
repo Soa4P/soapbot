@@ -42,6 +42,7 @@
     "pipeline.stage.persona": "人格注入",
     "pipeline.stage.recall": "记忆召回",
     "pipeline.stage.knowledge": "知识检索",
+    "pipeline.stage.screen_frame": "屏幕帧注入",
     "pipeline.stage.model": "模型调用",
     "pipeline.stage.safety": "安全检查",
     "pipeline.stage.reply": "发送回复",

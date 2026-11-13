@@ -77,6 +77,16 @@ def _frame_signature(img: Image.Image, size: int = 16) -> bytes:
     return small.tobytes()
 
 
+def frame_signature(img: Image.Image) -> bytes:
+    """Public alias of the near-duplicate filter for other frame pipelines.
+
+    The screen capability reuses the same cheap signature to drop near-identical
+    screenshots; keeping one implementation means the "near-identical" threshold
+    cannot drift between the GIF path and the screen path.
+    """
+    return _frame_signature(img)
+
+
 def prepare_image(data: bytes, *, max_frames: int = DEFAULT_FRAMES, label_frames: bool = True) -> ImagePayload:
     """Turn raw bytes into a single image payload, tiling animated images."""
     img = Image.open(io.BytesIO(data))
@@ -159,6 +169,16 @@ def _tile(frames: list[Image.Image], *, label_frames: bool = True) -> Image.Imag
         if label_frames:
             draw.text((x + 2, y + cell_h + 2), f"#{i + 1}", fill=(180, 220, 255))
     return canvas
+
+
+def tile_frames(frames: list[Image.Image], *, label_frames: bool = True) -> Image.Image:
+    """Public alias of the grid tiler for other frame pipelines.
+
+    The screen capability tiles separately-captured screenshots into one image with
+    this; the animated-GIF path feeds the same private function, so the grid look
+    and the token cost stay identical whichever pipeline captured the frames.
+    """
+    return _tile(frames, label_frames=label_frames)
 
 
 def prepare_from_path(path: Path, **kwargs) -> ImagePayload:

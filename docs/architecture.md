@@ -185,7 +185,7 @@
 
 ## 6.2 流水线顺序不可由 UI 修改
 
-22 个 Stage 的顺序是安全语义（`guard` 在 `whitelist` 前、`sanitize` 在
+23 个 Stage 的顺序是安全语义（`guard` 在 `whitelist` 前、`sanitize` 在
 `injection_screen` 前、`safety` 在 `reply` 前）。因此 09 页只提供**只读拓扑**与一个
 **沙箱**：可以拖拽试排，页面会指出破坏了哪一条具体约束，但结果不写回任何地方。
 

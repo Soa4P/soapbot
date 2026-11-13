@@ -151,6 +151,7 @@ ALLOWED_SURFACES = frozenset(
         "send.message",
         "send_media.request",
         "media.observe",
+        "screen.capture",
         "browse.read",
         "browse.propose",
         "qzone.read",
@@ -458,6 +459,16 @@ class _RemoteCtx:
         over the pipe to the plugin; the parent audits a count, never a URL.
         """
         return _call("media.observe", {})
+
+    async def screen_capture(self, frames=1):
+        """Ask the host to look at the dedicated machine's display, view only.
+
+        No pixels come back over the pipe — the tile stays in the parent's inbox
+        and reaches the model context through ScreenFrameStage; the reply carries
+        a ref plus metadata only. The parent re-checks the capability, the flag
+        and the dedicated-machine declaration on every call.
+        """
+        return _call("screen.capture", {"frames": int(frames)})
 
     #: Raw escape hatch, present so the wire can be exercised end to end (including
     #: by a hostile plugin). It grants nothing: every request still lands in the
