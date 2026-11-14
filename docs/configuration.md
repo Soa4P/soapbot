@@ -153,6 +153,11 @@ OneBot 11 网关（阶段二）用四个变量：
 （键鼠注入，真的「玩」游戏）有独立的三前置条件，尚未开工——见
 [autonomous-capabilities-design.md](./autonomous-capabilities-design.md)。
 
+急停开关不靠配置：四端发 `/panic [原因]` 或面板安全页一键拉闸，都会写
+`data/control_kill.switch`——门禁每次现读这个文件，急停优先于一切 flag，文件损坏仍
+视为已停。**恢复**只有两条路：面板安全页（owner + Token 凭据）或亲手删掉那个文件；
+聊天侧没有恢复命令。每次看屏幕操作（成功或被拒）都进操作日志，面板安全页实时可见。
+
 > `NAPCAT_*` 是历史命名：它们指的是「协议端 WebSocket 端口 / 目录」，在官方机器人
 > 路线上不使用。官方机器人的 AppID/AppSecret 写在 `config/adapters.yaml` 的
 > `kind: qq_official` 条目里，AppSecret 建议引用环境变量（例如 `env:QQ_BOT_SECRET`），
