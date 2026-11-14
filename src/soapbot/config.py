@@ -215,6 +215,29 @@ class Settings(BaseSettings):
     screen_capture_interval_ms: int = 500
     """Gap between frames in one capture, so the model sees change over time."""
 
+    compression_reserve_for_reply: int = 1200
+    """Tokens held back from the prompt budget so the completion has room to speak.
+
+    Part of the compression family (with the panel-writable ``max_prompt_tokens`` and
+    ``history_turns``): raise it when replies routinely get cut off, lower it when the
+    provider's context is tight and history is being folded more aggressively than
+    you would like.
+    """
+
+    compression_extraction: bool = True
+    """Key-fact extraction when the summary alone still leaves the prompt over budget.
+
+    On by default: it is a cheap regex pass, not a model call. Turn it off if the
+    fact block feels redundant next to your personas' style.
+    """
+
+    compression_image_shrink: bool = True
+    """Replace older image attachments with their cached text descriptions.
+
+    On by default — images are the biggest token sink and the descriptions are
+    already cached, so this is free. Turn it off only to debug vision behaviour.
+    """
+
     bili_cookie: SecretStr = SecretStr("")
     """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
     capability.

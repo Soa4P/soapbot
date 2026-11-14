@@ -139,8 +139,8 @@ class AIEngine:
         compressor: ContextCompressor | None = None,
         descriptions: DescriptionCache | None = None,
         history_provider: HistoryProvider | None = None,
-        summary_loader: Callable[[str], Awaitable[str]] | None = None,
-        summary_saver: Callable[[str, str, int], Awaitable[None]] | None = None,
+        summary_loader: Callable[[str], Awaitable[Any]] | None = None,
+        summary_saver: Callable[..., Awaitable[None]] | None = None,
         default_max_tokens: int = 800,
     ) -> None:
         self.router = router
@@ -244,9 +244,16 @@ class AIEngine:
         # message with no reply: the summary is an improvement to context, not a
         # precondition for answering. Failures are logged, never raised.
         prior_summary = ""
+        prior_watermark = 0
         if self._summary_loader is not None:
             try:
-                prior_summary = await self._summary_loader(req.session_key)
+                loaded = await self._summary_loader(req.session_key)
+                # New contract: (summary, watermark). A plain str (older test
+                # stand-ins) still works — it just means "no incremental anchor".
+                if isinstance(loaded, tuple):
+                    prior_summary, prior_watermark = loaded
+                else:
+                    prior_summary = loaded
             except Exception as exc:
                 logger.warning(
                     "summary load failed session=%s err=%s",
@@ -254,10 +261,13 @@ class AIEngine:
                     type(exc).__name__,
                 )
 
-        compressed = await self.compressor.compress(messages, prior_summary=prior_summary)
+        compressed = await self.compressor.compress(
+            messages, prior_summary=prior_summary, prior_watermark=prior_watermark
+        )
 
         # Persist before the model call. If the provider fails after folding removed
         # those turns from the request, the summary is the only copy of them left.
+        # The watermark rides along: it is what makes the next fold incremental.
         if (
             self._summary_saver is not None
             and compressed.summary
@@ -265,7 +275,11 @@ class AIEngine:
         ):
             try:
                 await self._summary_saver(
-                    req.session_key, compressed.summary, compressed.folded_turns
+                    req.session_key,
+                    compressed.summary,
+                    compressed.folded_turns,
+                    watermark=compressed.watermark,
+                    window_start=compressed.window_start,
                 )
             except Exception as exc:
                 logger.warning(

@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-15T09:00:00+08:00",
+  "updated_at": "2026-11-15T11:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3583,8 +3583,8 @@
         {
           "id": "a15-t4",
           "name": "极致压缩上下文（路线图功能序第一）",
-          "status": "todo",
-          "note": "压缩已有分层管线（trim/fold/extract/shrink/budget）；本项指把压缩做到极致：与 light 槽联动（摘要走便宜模型已就绪）、多级缓存与指标上板"
+          "status": "done",
+          "note": "PR #70：增量折叠（行号水印，候选为空零摘要调用）+ 压缩指标上板（trace 白名单 + 流水线页）+ 三运维旋钮。light 槽（#66）是它的模型侧前置"
         },
         {
           "id": "a15-t5",

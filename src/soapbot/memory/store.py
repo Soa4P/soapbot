@@ -320,13 +320,27 @@ class MemoryStore:
         """Delegate to the shared module-level helper."""
         await _fts_index(session, table, content, row_id)
 
-    async def save_summary(self, session_key: str, summary: str, folded: int) -> None:
+    async def save_summary(
+        self,
+        session_key: str,
+        summary: str,
+        folded: int,
+        *,
+        watermark: int = 0,
+        window_start: int | None = None,
+    ) -> None:
         """Persist a rolling summary, refusing one that asserts authority.
 
         Same guard as :meth:`add_memory`, and for the same reason: a summary is a
         persistence layer for whatever it contains. It is re-fed on every later turn, so a
         planted claim in it outlives the message that carried it — which is the definition
         of memory poisoning.
+
+        ``watermark`` is the row id of the last message the summary covers
+        (incremental folding). ``window_start`` is the first covered row id when the
+        compressor knows it (first fold); ``None`` keeps whatever the earlier row had.
+        Both fill columns that used to sit unused, and ``latest_summary_meta`` reads
+        ``window_end`` back as the anchor for the next fold.
 
         Returns nothing either way. Callers that need to know whether it was stored should
         call :func:`soapbot.security.injection.vet_memory` first; refusing here is the last
@@ -342,12 +356,25 @@ class MemoryStore:
             return
 
         async with self.db.write() as session:
+            prior_start: int | None = None
+            if window_start is None:
+                row = (
+                    await session.execute(
+                        select(SummaryRow.window_start)
+                        .where(SummaryRow.session_key == session_key)
+                        .order_by(SummaryRow.id.desc())
+                        .limit(1)
+                    )
+                ).first()
+                prior_start = int(row[0]) if row and row[0] else None
             session.add(
                 SummaryRow(
                     session_key=session_key,
                     summary=summary,
                     folded_message_count=folded,
                     created_at=time.time(),
+                    window_start=window_start if window_start is not None else prior_start,
+                    window_end=watermark if watermark > 0 else None,
                 )
             )
 
@@ -361,6 +388,25 @@ class MemoryStore:
             )
             row = result.first()
             return str(row[0]) if row else ""
+
+    async def latest_summary_meta(self, session_key: str) -> tuple[str, int]:
+        """The newest summary plus its incremental watermark (last covered row id).
+
+        ``(summary, watermark)`` — a watermark of ``0`` means "covers nothing
+        anchored", so the next fold re-summarises the whole window (the legacy
+        behaviour, still correct, just not incremental).
+        """
+        async with self.db.session_factory()() as session:
+            result = await session.execute(
+                select(SummaryRow.summary, SummaryRow.window_end)
+                .where(SummaryRow.session_key == session_key)
+                .order_by(SummaryRow.id.desc())
+                .limit(1)
+            )
+            row = result.first()
+            if row is None:
+                return "", 0
+            return str(row[0]), int(row[1] or 0)
 
     # ------------------------------------------------------------------ reads
     async def history(
@@ -380,7 +426,7 @@ class MemoryStore:
             content = r.content
             if r.image_desc:
                 content = f"{content}\n[图片内容：{r.image_desc}]".strip()
-            out.append({"role": r.role, "content": content})
+            out.append({"role": r.role, "content": content, "_id": r.id})
         return out
 
     async def find_message(
