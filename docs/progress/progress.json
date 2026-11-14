@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-15T11:00:00+08:00",
+  "updated_at": "2026-11-15T12:30:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3732,6 +3732,45 @@
         }
       ],
       "goal": "把控制面三前置中 ②一键断连 ③操作日志实时可见 的软件侧落地；第二阶段键鼠开工的硬条件"
+    },
+    {
+      "id": "a19",
+      "index": "A19",
+      "name": "插件生态收口：一键安装与官方索引默认接入",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a19-t1",
+          "name": "IndexClient 同源拉取 plugin_versions.json（digest/download 锚，占位拒绝）",
+          "status": "done",
+          "note": "缺失/损坏 → 空表降级 + 面板警告；解析经同一套防护"
+        },
+        {
+          "id": "a19-t2",
+          "name": "默认索引 URL 指向官方目录（air-gapped 可设空）",
+          "status": "done",
+          "note": "拉取失败优雅降级，已装插件不受影响；测试套件强制空 URL 防真实出站"
+        },
+        {
+          "id": "a19-t3",
+          "name": "POST /api/plugins/install-from-index：下载 → SHA-256 比对 → 同一安装器 → approved:false",
+          "status": "done",
+          "note": "信任链三段；digest 不一致硬拒绝并带双前缀；blocked 与占位照旧拒绝"
+        },
+        {
+          "id": "a19-t4",
+          "name": "升级徽标（数字段比较，非法版本不渲染）+ 面板卡片安装按钮 + i18n",
+          "status": "done",
+          "note": "三处旧立场注释按新信任链改写"
+        },
+        {
+          "id": "a19-t5",
+          "name": "测试专项用例文件与文档四处同步",
+          "status": "done",
+          "note": "真坑：zipfile.writestr 把当前分钟写进条目头——digest 锚必须对只构建一次的包计算"
+        }
+      ],
+      "goal": "把「怎么添加插件」的链路补齐：默认能看到官方目录、一键下载并 digest 校验安装、有升级可见；审批照旧是人"
     }
   ],
   "archive": [

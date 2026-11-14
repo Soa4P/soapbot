@@ -329,9 +329,9 @@ export const api = {
   deletePlugin: (name: string) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   /**
-   * The community catalogue. Read-only discovery: nothing here is installable in one
-   * click, and the response is advisory — `available: false` means "cannot discover",
-   * which the page renders as a note, not an error.
+   * The community catalogue, plus one-click install. The install endpoint downloads
+   * the release zip, verifies it against the index-declared SHA-256, and runs the
+   * same installer — landing as `approved: false`. Approval stays on the plugins page.
    */
   discoverPlugins: (refresh = false) =>
     request<{
@@ -351,6 +351,11 @@ export const api = {
       error: string
       warnings: string[]
     }>(`/api/plugins/discover${refresh ? '?refresh=true' : ''}`),
+  installFromIndex: (name: string, version: string) =>
+    request<{ name: string; version: string; approved: boolean }>('/api/plugins/install-from-index', {
+      method: 'POST',
+      body: JSON.stringify({ name, version }),
+    }),
 
   // External tool sources. `refreshMcp` is a write, not a read: it spawns the
   // configured server processes again and re-decides which tools the model may see.

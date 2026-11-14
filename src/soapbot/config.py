@@ -758,14 +758,18 @@ class Settings(BaseSettings):
     that is reported as ``unknown`` and never blocked, in either mode.
     """
 
-    plugin_index_url: str = ""
-    """Community plugin index, fetched read-only for *discovery* only.
+    plugin_index_url: str = "https://raw.githubusercontent.com/Soa4P/soapbot-plugins/main/plugins.json"
+    """Community plugin index, fetched read-only. Defaults to the official catalogue.
 
-    Empty means "no index": the panel shows installed plugins and nothing else. Setting
-    it does **not** make anything installable — the index lists versions and digests, and
-    installation still goes through the local upload → approve → load path. Treating a
-    remote list as a trust source would move the approval decision to whoever controls
-    the JSON file, which is exactly the decision this project keeps local.
+    The index answers "what exists" and, together with ``plugin_versions.json``
+    (fetched from the same directory), "what exactly was published per version". It is
+    still not a trust source for what a plugin *can do*: one-click install downloads
+    the release zip, verifies it against the index-declared SHA-256, and runs the same
+    installer — the approval screen (a human ticking capability boxes) is unchanged. A
+    compromised index therefore degrades to "the download doesn't match what was
+    published, so it is refused", not to code execution. Air-gapped deployments can
+    set this empty to remove the only outbound call; every fetch failure degrades to
+    "index unavailable" without touching the installed plugins.
     """
 
     plugin_index_timeout_seconds: Annotated[float, Field(ge=0.5, le=15.0)] = 5.0
