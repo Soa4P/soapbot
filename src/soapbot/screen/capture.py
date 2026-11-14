@@ -25,6 +25,7 @@ import io
 import socket
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
@@ -70,22 +71,31 @@ class ScreenPolicy:
     dedicated_machine: str = ""
     frames_max: int = 6
     interval_ms: int = 500
+    kill_file: Path | None = None
+    """The control kill switch, resolved by ``from_settings``. Read fresh on every
+    gate check — the operator's file, not a cached runtime flag."""
 
     @classmethod
     def from_settings(cls, settings: Any) -> ScreenPolicy:
+        from soapbot.screen.kill import kill_file
+
         return cls(
             enabled=bool(getattr(settings, "screen_enabled", False)),
             dedicated_machine=str(getattr(settings, "screen_dedicated_machine", "") or "").strip(),
             frames_max=max(1, min(MAX_FRAMES_PER_REQUEST, int(getattr(settings, "screen_frames_max", 6) or 6))),
             interval_ms=max(0, int(getattr(settings, "screen_capture_interval_ms", 500) or 0)),
+            kill_file=kill_file(settings),
         )
 
     def check_machine(self, *, hostname: str | None = None) -> None:
-        """Raise :class:`ScreenRefusedError` unless this host is the declared one.
+        """Raise :class:`ScreenRefusedError` unless capture may proceed.
 
-        The comparison is case-insensitive: Windows hostnames are case-preserving
-        but every writer on earth types them differently.
+        Order matters: the kill switch first, before anything else — the operator's
+        emergency stop outranks the flag, so flipping the flag back on while the
+        switch is engaged cannot revive capture.
         """
+        if self.kill_file is not None and self.kill_file.exists():
+            raise ScreenRefusedError("control_killed")
         if not self.enabled:
             raise ScreenRefusedError("screen_disabled")
         declared = self.dedicated_machine.lower()
