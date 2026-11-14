@@ -1,26 +1,25 @@
 """Read-only client for the community plugin index.
 
-What this module is **not**
---------------------------
-It is not a trust source. Nothing here can approve, install, or load anything. The index
-answers one question — "does a newer version of this plugin exist, and what does its
-author claim about it?" — and the answer is rendered as text next to a plugin the
-operator already has, or as a card they can download *manually* and upload through the
-existing path.
+What this module decides
+------------------------
+The index answers two questions — "what exists" (``plugins.json``) and "what exactly
+was published per version" (``plugin_versions.json``, the digest/download anchor). It
+is still not a trust source for *what a plugin can do*: installing from it is now
+one click, but the chain is
 
-That distinction is the whole design. An index is a JSON file on someone else's server.
-If installing from it were one click, then compromising that file would be equivalent to
-remote code execution on every deployment, and the approval screen — the one place a
-human is meant to look at capabilities — would be decoration. So:
+    索引决定「有什么」 → digest 校验决定「拿到的是不是声明的那个」
+    → 审批屏（人勾能力清单）决定「能做什么」
 
-* fetching is a plain ``GET`` with a timeout, no credentials, no redirects to other hosts;
-* the payload is size-capped before it is parsed, and parsed with the same depth guard as
-  every other untrusted JSON in this project;
-* a failure is reported as "cannot discover", never as an exception that reaches the
-  panel as a 500, because a plugin page that breaks when GitHub is slow is worse than a
-  plugin page without a catalogue;
-* blocked versions are *merged* with the local list, never replaced by it. A remote index
-  may add a block; it can never lift one this repository decided on.
+The old stance ("nothing here is installable in one click") predates per-version
+digests: back then, compromising the index *was* remote code execution. With a
+verified digest, a compromised index degrades to "the download doesn't match what
+was published, so it is refused" — a denial of service, not an execution. Approval
+stays exactly where it was.
+
+Fetch guards (unchanged): plain ``GET``, no credentials, no redirects to other hosts;
+size-capped before parsing; depth guard like every other untrusted JSON; failures are
+reported as degraded states, never exceptions that reach the panel as a 500; blocked
+versions are *merged* with the local list, never replaced by it.
 """
 
 from __future__ import annotations
@@ -88,6 +87,13 @@ class IndexSnapshot:
     entries: tuple[IndexEntry, ...] = ()
     blocked: dict[str, str] = field(default_factory=dict)
     """``"name@version" -> reason``. Merged local + remote."""
+    versions: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    """``name -> version -> {digest, download, released_at}`` from
+    ``plugin_versions.json`` (fetched alongside the catalogue). This is what makes
+    one-click install possible: the digest is the anchor that turns "the index says
+    this exists" into "what you download is byte-for-byte what was published".
+    Empty when the versions file is missing or broken — one-click install refuses
+    without it, discovery still works."""
     source: str = ""
     fetched_at: float = 0.0
     error: str = ""
@@ -101,6 +107,7 @@ class IndexSnapshot:
             "available": self.available,
             "entries": [e.to_dict() for e in self.entries],
             "blocked": dict(self.blocked),
+            "versions": self.versions,
             "source": self.source,
             "fetched_at": self.fetched_at,
             "error": self.error,
@@ -116,6 +123,24 @@ class IndexSnapshot:
         with no visible reason.
         """
         return self.blocked.get(block_key(name, version), "")
+
+    def version_meta(self, name: str, version: str) -> dict[str, str] | None:
+        """The published metadata for one version, or ``None``.
+
+        Returns ``None`` when the version is unknown **or** its digest is a
+        placeholder: a draft entry must not be one-click installable, and the caller
+        cannot tell the two cases apart in a way that would matter.
+        """
+        meta = self.versions.get(name, {}).get(version)
+        if not isinstance(meta, dict):
+            return None
+        digest = str(meta.get("digest", ""))
+        download = str(meta.get("download", ""))
+        if not digest.startswith("sha256:") or digest == "sha256:" + "0" * 64:
+            return None
+        if not download.startswith("https://"):
+            return None
+        return meta
 
 
 def _text(value: Any, limit: int = 300) -> str:
@@ -374,14 +399,85 @@ class IndexClient:
         # require the local key to be absent, which it is not.
         blocked.update(_parse_blocked(payload.get("blocked_versions")))
 
-        logger.info("plugin index loaded: %d entries, %d blocked", len(entries), len(blocked))
+        versions, versions_warning = await self._fetch_versions()
+        warnings = tuple(w for w in (versions_warning,) if w)
+
+        logger.info(
+            "plugin index loaded: %d entries, %d blocked, %d versioned",
+            len(entries),
+            len(blocked),
+            len(versions),
+        )
         return IndexSnapshot(
             available=True,
             entries=entries,
             blocked=blocked,
+            versions=versions,
             source=self.url,
             fetched_at=time.time(),
+            warnings=warnings,
         )
+
+    def _versions_url(self) -> str:
+        """``plugin_versions.json`` next to the catalogue (same directory, same origin).
+
+        The catalogue file answers "what exists"; this one answers "what exactly was
+        published per version" (digest/download). Same-directory derivation means an
+        operator who points the index at their own fork gets their own versions file —
+        there is no hidden second source.
+        """
+        base = self.url.rsplit("/", 1)[0]
+        return f"{base}/plugin_versions.json"
+
+    async def _fetch_versions(self) -> tuple[dict[str, dict[str, dict[str, str]]], str]:
+        """Fetch the per-version metadata. Missing or broken → empty + a warning:
+        discovery keeps working, one-click install refuses (it refuses *any* version
+        without a real digest anyway)."""
+        url = self._versions_url()
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                follow_redirects=False,
+                transport=self._transport,
+            ) as client:
+                response = await client.get(
+                    url, headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"}
+                )
+        except httpx.HTTPError:
+            return {}, "版本元数据不可达，一键安装暂不可用"
+        if response.status_code != 200:
+            return {}, f"版本元数据返回 {response.status_code}，一键安装暂不可用"
+        body = response.content
+        if len(body) > MAX_INDEX_BYTES:
+            return {}, "版本元数据体积超出上限，一键安装暂不可用"
+        try:
+            check_depth(body, limit=MAX_INDEX_DEPTH)
+            payload = json.loads(body)
+        except (JsonTooDeepError, json.JSONDecodeError, UnicodeDecodeError):
+            return {}, "版本元数据不是合法 JSON，一键安装暂不可用"
+        versions_map = payload.get("versions") if isinstance(payload, dict) else None
+        if not isinstance(versions_map, dict):
+            return {}, "版本元数据结构不正确，一键安装暂不可用"
+
+        out: dict[str, dict[str, dict[str, str]]] = {}
+        for name, entries in versions_map.items():
+            if not isinstance(name, str) or not isinstance(entries, list):
+                continue
+            per_version: dict[str, dict[str, str]] = {}
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                version = _text(entry.get("version"), 32)
+                if not version:
+                    continue
+                per_version[version] = {
+                    "digest": _text(entry.get("digest"), 80),
+                    "download": _text(entry.get("download"), 400),
+                    "released_at": _text(entry.get("released_at"), 20),
+                }
+            if per_version:
+                out[name] = per_version
+        return out, ""
 
     def invalidate(self) -> None:
         """Drop the cache. Called after an install so a just-blocked version is not

@@ -312,7 +312,13 @@ export default {
   'plugins.blockedInstall': '该版本已被封禁，安装会被拒绝。',
   'plugins.installedBlocked': '当前安装的 {version} 已被封禁；重载或重启后将拒绝加载',
   'plugins.officialEmpty': '没有随包发布的插件。',
-  'plugins.communityHint': '索引只列出名称与版本；安装请下载包后从上方上传。',
+  'plugins.communityHint': '一键安装 = 下载 + digest 校验 + 落盘；装完仍需在插件页勾选能力并加载。',
+  'plugins.installBtn': '安装 {version}',
+  'plugins.installing': '下载校验中…',
+  'plugins.installDone': '已安装 {name} {version}（未批准）。去插件页勾选能力后加载。',
+  'plugins.installFailed': '一键安装失败。',
+  'plugins.updateAvailable': '有新版本',
+  'plugins.updateHint': '社区索引声明了更新的版本；升级包请到社区页一键安装。',
 
   // ---------------------------------------------------------------- 04 security
   'security.integrityTitle': '完整性信号',

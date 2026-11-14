@@ -266,6 +266,11 @@ async function deletePlugin(plugin: any): Promise<void> {
                   {{ plugin.pending.length ? t('plugins.partial') : t('plugins.full') }}
                 </span>
                 <span v-else class="faint">{{ t('plugins.notApproved') }}</span>
+                <!-- 有新版本：索引声明了比已装版本更新的 latest（数字段比较，
+                     非法版本不显示——「无法判断」绝不渲染成「有更新」）。 -->
+                <span v-if="plugin.update_available" class="tag" :title="t('plugins.updateHint')">
+                  {{ t('plugins.updateAvailable') }}
+                </span>
                 <!-- Code changed after approval. Shown here, before anyone presses Load:
                      the server enforces it on load (block by default), and learning about
                      it from a failed load with a stack trace is the wrong first notice. -->

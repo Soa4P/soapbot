@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * The community catalogue, rendered as a list of *claims*.
+ * The community catalogue, rendered as a list of *claims*, with one-click install.
  *
- * There is no install button here on purpose. The index is a JSON file on someone else's
- * server; if a card in this list could install, then compromising that file would be
- * equivalent to running arbitrary code on every deployment, and the approval screen —
- * the one place a human reads the capability list — would become decoration. So this
- * panel answers "what exists and what is its latest version", and installation stays
- * where it was: download, upload, approve, per capability.
+ * The install chain (server side, `POST /api/plugins/install-from-index`) is what
+ * makes this safe now: download the release zip → verify it against the index-declared
+ * SHA-256 → run the same installer → land as `approved: false`. A compromised index
+ * therefore degrades to "the download doesn't match what was published, so it is
+ * refused" — a denial of service, not an execution. The approval screen, where a human
+ * ticks capability boxes, is unchanged and is still the gate that matters.
  */
 import { computed, ref } from 'vue'
 
@@ -25,6 +25,9 @@ const forceNext = ref(false)
 const catalogue = useAsync(() => api.discoverPlugins(forceNext.value))
 
 const refreshing = ref(false)
+const installing = ref('')
+const installNote = ref('')
+const installError = ref('')
 
 const entries = computed(() => catalogue.data.value?.entries ?? [])
 const blocked = computed<Record<string, string>>(() => catalogue.data.value?.blocked ?? {})
@@ -52,6 +55,24 @@ async function refresh(): Promise<void> {
   } finally {
     forceNext.value = false
     refreshing.value = false
+  }
+}
+
+async function install(name: string, version: string): Promise<void> {
+  installing.value = `${name}@${version}`
+  installNote.value = ''
+  installError.value = ''
+  try {
+    const result = await api.installFromIndex(name, version)
+    installNote.value = t('plugins.installDone', {
+      name: String(result.name ?? name),
+      version: String(result.version ?? version),
+    })
+    await catalogue.reload()
+  } catch (err) {
+    installError.value = err instanceof Error ? err.message : t('plugins.installFailed')
+  } finally {
+    installing.value = ''
   }
 }
 </script>
@@ -117,14 +138,34 @@ async function refresh(): Promise<void> {
           <span class="hint">{{ t('plugins.blockedReason', { reason: item.reason }) }}</span>
           <!-- Says what will actually happen, not just that the version is listed as
                bad. The install path refuses it server-side, so an operator who reads
-               only "Blocked" and then uploads the package gets a rejection with no
-               warning that this card already knew. -->
+               only "Blocked" and then installs gets a rejection with no warning that
+               this card already knew. -->
           <span class="hint">{{ t('plugins.blockedInstall') }}</span>
         </div>
 
+        <!-- One-click = download + digest verify + install. Approval is still a
+             separate screen: the button says what happens after it, not "install and
+             run". -->
+        <div class="card__actions">
+          <button
+            class="btn"
+            type="button"
+            :disabled="installing !== ''"
+            @click="install(entry.name, entry.latest)"
+          >
+            {{
+              installing === `${entry.name}@${entry.latest}`
+                ? t('plugins.installing')
+                : t('plugins.installBtn', { version: entry.latest })
+            }}
+          </button>
+        </div>
         <p class="hint" style="margin: 0">{{ t('plugins.communityHint') }}</p>
       </article>
     </div>
+
+    <p v-if="installNote" class="hint" role="status" style="margin: 0">{{ installNote }}</p>
+    <p v-if="installError" class="error-banner" role="alert">{{ installError }}</p>
 
     <p v-if="catalogue.data.value?.source" class="hint" style="margin: 0">
       {{ t('plugins.source') }}: <span class="mono">{{ catalogue.data.value.source }}</span>
@@ -204,5 +245,11 @@ async function refresh(): Promise<void> {
   padding: 8px 10px;
   background: var(--danger-soft);
   border-radius: 8px;
+}
+
+.card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 </style>
