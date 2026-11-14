@@ -68,6 +68,7 @@ from soapbot.api.napcat import router as napcat_router
 from soapbot.api.pipeline import router as pipeline_router
 from soapbot.api.plugins import router as plugins_router
 from soapbot.api.protocol import router as protocol_router
+from soapbot.api.screen import router as screen_router
 from soapbot.api.security import router as security_router
 from soapbot.api.settings import router as settings_router
 from soapbot.config import settings
@@ -908,6 +909,8 @@ def create_app() -> FastAPI:
     app.include_router(accounts_router)
     app.include_router(chat_router)
     app.include_router(security_router)
+    # Screen safety: kill switch + operation log, owner + token credential only.
+    app.include_router(screen_router)
     app.include_router(admin_router)
     # After the admin router: both serve /api/personas, and the growth routes add a
     # sub-path rather than replacing anything.

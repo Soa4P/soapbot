@@ -137,3 +137,26 @@ UIA 覆盖不到的自绘界面回退；窗口绑定（只操作声明过的窗�
 **接线注意**（写给将来动这块的人）：插件命令的回复会短路模型（`PluginCommandStage`
 设 `skip_model`），所以帧注入不能挂在命令阶段里，必须是独立 Stage 且紧贴 ModelStage
 ——这个顺序进了 `core/trace.py` 的 `STAGE_ORDER`，被两个测试钉住。
+
+### 1.6 急停开关与操作日志（三前置 ②③ 的软件侧，2026-11-14）
+
+三前置里能由软件承担的部分已落地（`screen/kill.py`、`screen/opslog.py`、`api/screen.py`，
+测试 `tests/test_screen_kill_switch.py`）：
+
+1. **急停（②的软件侧）**：`data/control_kill.switch` 文件——`engage` 写入（owner API
+   `POST /api/screen/kill` 或四端 `/panic` 命令），**每次门禁现读文件**，不存在任何
+   缓存窗口；损坏的文件仍视为已急停（fail closed——操作者按了按钮，最没用的回应是
+   忘掉它）。急停优先于 flag：被劫持的运行时把 flag 改回 true 也救不活。**复活只有
+   两条路**：owner + Token 凭据的面板 API（`DELETE /api/screen/kill`）、或操作者亲手
+   删文件——命令、surface、模型可调用的路径都不导入 `revive`，被劫持的聊天永远救不
+   活它。**② 的硬件开关仍归操作者**：软件急停断的是本进程的操作，物理断连（拔线/
+   硬件开关）是最后一道，机器接线是操作者的动作。
+2. **操作日志（③）**：`SCREEN_OPS` 有界环（200 条），记录每次抓帧尝试（allow/deny）、
+   急停与恢复——只有元数据（动作/结果/会话/帧数/字节/原因），**永不记录画面内容**；
+   `GET /api/screen/ops`（owner + Token）返回急停状态与日志；面板安全页有「看屏幕·
+   安全隔离」卡片（5 秒轮询 + 急停/恢复按钮）。
+3. **对第二阶段的硬约束**：键鼠控制面开工时，其模块**必须读同一把闸**（`is_killed`
+   或等价文件检查，同样现读、同样 fail closed）——这不是惯例，是开工前置；急停文件
+   的文件名与语义已经为它留好。
+
+`/panic` 命令（MANAGE_CONFIG）：只许拉闸、不许合闸——revive 的不对称是设计的一部分。

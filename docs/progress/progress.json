@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-14T23:30:00+08:00",
+  "updated_at": "2026-11-15T09:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3693,6 +3693,45 @@
         }
       ],
       "goal": "把「四端指挥机器人看屏幕」落成受审能力面（第一阶段只看不碰）；控制面第二阶段三前置未齐继续关闭"
+    },
+    {
+      "id": "a18",
+      "index": "A18",
+      "name": "安全隔离：控制面急停开关与操作日志",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a18-t1",
+          "name": "急停开关 control_kill.switch：门禁现读、损坏 fail closed、急停优先于 flag",
+          "status": "done",
+          "note": "engage 走 write_private_file（0600）；文件在 data/ 下，独立于进程内存——运行时被改也救不活"
+        },
+        {
+          "id": "a18-t2",
+          "name": "拉闸两条路：四端 /panic（MANAGE_CONFIG）+ 面板 owner 按钮；恢复只有 owner+Token API 或删文件",
+          "status": "done",
+          "note": "revive 不被命令/surface/模型路径导入——被劫持的聊天永远救不活（不对称是设计的一部分）"
+        },
+        {
+          "id": "a18-t3",
+          "name": "SCREEN_OPS 操作日志环（200 条，元数据 only，存副本防事后注入）+ GET /api/screen/ops（owner+Token）",
+          "status": "done",
+          "note": "记录每次抓帧 allow/deny 与 kill/revive；帧字节零出现被测试钉住"
+        },
+        {
+          "id": "a18-t4",
+          "name": "面板安全页「看屏幕·安全隔离」卡片（状态横幅 + 急停/恢复按钮 + 5 秒轮询操作表）",
+          "status": "done",
+          "note": "复用 LogsView 轮询模式；hidden tab 跳过轮询；i18n 中英双份"
+        },
+        {
+          "id": "a18-t5",
+          "name": "测试 +14（test_screen_kill_switch.py）与文档四处同步；控制面第二阶段「必须读同一把闸」写进设计为开工前置",
+          "status": "done",
+          "note": "硬件物理断连仍是操作者侧动作，软件急停断的是本进程操作"
+        }
+      ],
+      "goal": "把控制面三前置中 ②一键断连 ③操作日志实时可见 的软件侧落地；第二阶段键鼠开工的硬条件"
     }
   ],
   "archive": [

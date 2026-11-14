@@ -369,6 +369,32 @@ export const api = {
     request<any>(`/api/security/audit?limit=${limit}&kind=${encodeURIComponent(kind)}`),
   denials: (limit = 100) => request<any>(`/api/security/denials?limit=${limit}`),
 
+  /** Screen safety (owner + token credential): the control kill switch and the
+   * metadata-only operation ring for the bot's look/capture actions. */
+  screenOps: (limit = 100) =>
+    request<{
+      killed: boolean
+      kill: { reason: string; by: string; ts: number } | null
+      ops: Array<{
+        ts: number
+        action: string
+        outcome: string
+        session: string
+        plugin: string
+        frames: number
+        bytes: number
+        reason: string
+        by: string
+      }>
+    }>(`/api/screen/ops?limit=${limit}`),
+  screenKill: (reason: string) =>
+    request<{ ok: boolean; killed: boolean }>('/api/screen/kill', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  screenRevive: () =>
+    request<{ ok: boolean; killed: boolean }>('/api/screen/kill', { method: 'DELETE' }),
+
   /** Replace the QQ allow-lists. Owner-only on the server; the response carries the
    * normalized lists back so the form shows what was actually written. */
   writeAuthority: (payload: { owners: string[]; admins: string[]; members: string[] }) =>

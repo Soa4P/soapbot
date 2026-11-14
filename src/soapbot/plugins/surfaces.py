@@ -362,6 +362,12 @@ class SurfaceRouter:
         except ScreenRefusedError as exc:
             # Same shape as the design's "说出原因的拒绝": a short token, never prose
             # that could carry frame content (nothing leaked, but also nothing vague).
+            from soapbot.screen.opslog import SCREEN_OPS
+
+            SCREEN_OPS.record(
+                action="screen.capture", outcome="deny", reason=exc.reason,
+                session=session_key, plugin=self._plugin,
+            )
             if self._audit is not None:
                 self._audit.record(
                     kind="plugin",
@@ -371,6 +377,13 @@ class SurfaceRouter:
                     plugin=self._plugin,
                 )
             raise PermissionError(exc.reason) from exc
+        from soapbot.screen.opslog import SCREEN_OPS
+
+        SCREEN_OPS.record(
+            action="screen.capture", outcome="allow",
+            session=session_key, plugin=self._plugin,
+            frames=result.frames_captured, bytes_written=result.size_bytes,
+        )
         SCREEN_INBOX.put(session_key, result.payload)
         if self._audit is not None:
             self._audit.record(
