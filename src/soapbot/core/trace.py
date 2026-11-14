@@ -173,6 +173,12 @@ class MessageTrace:
     stream: dict[str, Any] = field(default_factory=dict)
     """Progressive-delivery timings: first token, first send, interruption."""
 
+    compression: dict[str, Any] = field(default_factory=dict)
+    """Context-compression outcome for this turn: original/compressed tokens, ratio,
+    strategies, folded turns. Whitelisted out of ``ai_result`` the same way ``stream``
+    is — the raw dict comes from the model layer and would otherwise die at the
+    ``to_dict`` boundary the panel reads through."""
+
     def to_dict(self, *, include_conversation: bool = True) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
@@ -185,6 +191,7 @@ class MessageTrace:
             "slowest": self.slowest(),
             "chunks": list(self.chunks) if include_conversation else [],
             "stream": dict(self.stream),
+            "compression": dict(self.compression),
         }
 
     def slowest(self) -> dict[str, Any] | None:
@@ -347,6 +354,20 @@ class TraceStore:
                     "truncated",
                 )
             }
+        ai_result = extras.get("ai_result")
+        if isinstance(ai_result, dict):
+            compression = ai_result.get("compression")
+            if isinstance(compression, dict):
+                trace.compression = {
+                    key: compression.get(key)
+                    for key in (
+                        "original_tokens",
+                        "compressed_tokens",
+                        "ratio",
+                        "strategies",
+                        "folded_turns",
+                    )
+                }
         self._traces.append(trace)
         self._maybe_sample()
 

@@ -33,12 +33,18 @@ class _RecordingCompressor:
 
     def __init__(self, summary: str = "folded") -> None:
         self.prior: list[str] = []
+        self.watermarks: list[int] = []
         self.summary = summary
 
     async def compress(
-        self, messages: list[dict[str, Any]], *, prior_summary: str = ""
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        prior_summary: str = "",
+        prior_watermark: int = 0,
     ) -> CompressionResult:
         self.prior.append(prior_summary)
+        self.watermarks.append(prior_watermark)
         return CompressionResult(
             messages=messages,
             summary=self.summary,
@@ -72,11 +78,11 @@ async def test_summary_round_trips_across_turns() -> None:
     """Turn 2 must be told what turn 1 folded away."""
     saved: dict[str, tuple[str, int]] = {}
 
-    async def saver(key: str, summary: str, folded: int) -> None:
+    async def saver(key: str, summary: str, folded: int, **_kw) -> None:
         saved[key] = (summary, folded)
 
-    async def loader(key: str) -> str:
-        return saved.get(key, ("", 0))[0]
+    async def loader(key: str) -> tuple[str, int]:
+        return saved.get(key, ("", 0))
 
     recorder = _RecordingCompressor("第一轮的折叠摘要")
     engine = _engine(recorder, loader=loader, saver=saver)

@@ -10,6 +10,32 @@
 
 ## [Unreleased]
 
+### 极致压缩上下文：增量折叠 + 压缩指标上板
+
+原来错在哪：折叠不是增量的——每次提示词超预算，压缩器把**整个旧窗口从零重新摘要**，
+且新旧摘要靠字符串拼接无限增长；light 模型（摘要槽）每轮重复为它已经摘要过的文本
+付费。`summaries` 表的 `window_start/window_end` 列（v4 迁移建的）在引擎路径上从未被
+写。同时压缩数据死在 trace 边界：`AIResult.compression` 进了 `ctx.extras["ai_result"]`，
+但 `MessageTrace.to_dict` 不序列化它——面板上没有任何一处显示「这轮压缩省了多少」。
+
+现在：
+
+- **增量折叠**：`memory.history()` 的每条历史带 `"_id"` 行号标记（compressor 既有
+  的 `_` 前缀剥除机制保证它不进 provider 载荷）；折叠候选 = 超出保留窗口且**行号大于
+  水印**的消息。候选为空 → **完全跳过摘要调用**（旧代码每轮超预算都要付一次）；有候选
+  → 摘要 prompt = 旧摘要文本 + 仅新老化出的切片。水印随 `save_summary` 写进
+  `window_end`（首次折叠写 `window_start`），`latest_summary_meta` 读回。
+- **向后兼容**：消息无 `_id`（测试、无 store 的调用方）→ 旧的全窗口折叠，行为不变；
+  engine 的 loader 同时接受新契约 `(summary, watermark)` 与旧的纯字符串。
+- **指标上板**：`MessageTrace.compression`（白名单五键，同 stream 模式）进 `to_dict`；
+  流水线页 trace 详情新增「上下文压缩」块——原始→压缩 tokens、压缩率、折叠轮数、
+  策略列表。无压缩数据的 trace 渲染空（诚实缺省）。
+- **运维旋钮**：`COMPRESSION_RESERVE_FOR_REPLY` / `COMPRESSION_EXTRACTION` /
+  `COMPRESSION_IMAGE_SHRINK` 三个新 settings（builder 接线 + 面板第 12 页可写 +
+  .env.example/configuration.md 同步）；死字段 `fold_batch_turns` 删除。
+- 测试 +10（`test_incremental_fold.py`：二轮只付新切片、零候选零调用、无 _id 回退、
+  摘要隔离仍推进水印、水印落库回读、trace 白名单、builder 接线）。
+
 ### 安全隔离：控制面急停开关 + 看屏幕操作日志
 
 原来错在哪：设计（§1.1）要求控制面开工前落地「操作者一键断连」与「机器人操作日志

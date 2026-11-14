@@ -684,6 +684,15 @@ export interface MessageTrace {
    */
   chunks?: string[]
   stream?: StreamStats
+  /** Context-compression outcome for this turn (whitelisted out of `ai_result`).
+   * Empty object = the turn never needed compression, or predates the feature. */
+  compression?: {
+    original_tokens?: number
+    compressed_tokens?: number
+    ratio?: number
+    strategies?: string[]
+    folded_turns?: number
+  }
 }
 
 export interface TraceSummary {
