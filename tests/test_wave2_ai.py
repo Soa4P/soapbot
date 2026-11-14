@@ -155,7 +155,6 @@ async def test_compression_reduces_200_turns_under_budget() -> None:
         reserve_for_reply=400,
         keep_recent_turns=4,
         max_turns=60,
-        fold_batch_turns=10,
     )
     comp = ContextCompressor(cfg, summarizer=_no_summarizer)
 

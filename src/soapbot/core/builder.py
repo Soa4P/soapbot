@@ -500,7 +500,9 @@ def build_runtime(
             or ContextCompressor(
                 CompressionConfig(
                     max_prompt_tokens=settings.max_prompt_tokens,
-                    reserve_for_reply=1200,
+                    reserve_for_reply=settings.compression_reserve_for_reply,
+                    enable_extraction=settings.compression_extraction,
+                    enable_image_shrink=settings.compression_image_shrink,
                     # Folding is a *second* model call. It is worth paying once in a
                     # long conversation, not on every message of an ordinary one, so
                     # the recent window is kept wide enough that most replies never
@@ -513,7 +515,9 @@ def build_runtime(
             # Same store as RecallStage: the summary it writes here is the one
             # MemoryStage injects as 【会话摘要】 on the next turn. Without these two,
             # L1 has a reader and an injector but no writer, so it is always empty.
-            summary_loader=memory.latest_summary if memory is not None else None,
+            # latest_summary_meta also returns the incremental watermark, so a fold
+            # only pays for the turns that aged out since the last one.
+            summary_loader=memory.latest_summary_meta if memory is not None else None,
             summary_saver=memory.save_summary if memory is not None else None,
         )
     else:

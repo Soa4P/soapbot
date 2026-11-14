@@ -60,6 +60,11 @@ WRITABLE: dict[str, str] = {
     "stream_reply": "SOAPBOT_STREAM_REPLY",
     "history_turns": "SOAPBOT_HISTORY_TURNS",
     "max_prompt_tokens": "SOAPBOT_MAX_PROMPT_TOKENS",
+    # 压缩家族的其余旋钮：预算留给回复的空间、两个免费层的开关。与上面两条同属
+    # 「机器人话变贵/变糙时，操作者先调这里」的观测面。
+    "compression_reserve_for_reply": "SOAPBOT_COMPRESSION_RESERVE_FOR_REPLY",
+    "compression_extraction": "SOAPBOT_COMPRESSION_EXTRACTION",
+    "compression_image_shrink": "SOAPBOT_COMPRESSION_IMAGE_SHRINK",
 }
 
 #: Keys are checked against this before anything is formatted into the file.

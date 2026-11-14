@@ -642,6 +642,10 @@ export default {
   'pipeline.wholeReply': '整条回复',
   'pipeline.streamNote': '三条共用同一刻度。首 token 到首句送达之间是分句等待，首句到整条之间是后续句子——你等的是前者。',
   'pipeline.notStreamed': '本次为单条发送，未分句。只有模型流式输出且回复被切成多句时才会出现分句记录。',
+  'pipeline.compression.title': '上下文压缩',
+  'pipeline.compression.tokens': '提示词 tokens（原始 → 压缩后）',
+  'pipeline.compression.ratio': '压缩率',
+  'pipeline.compression.folded': '折叠轮数',
 
   // ---------------------------------------------------------------- 10 metrics
   'metrics.overview': '概览',
