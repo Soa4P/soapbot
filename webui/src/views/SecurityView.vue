@@ -43,6 +43,56 @@ function loadMoreAudit(): void {
   auditLimit.value = Math.min(auditLimit.value + AUDIT_STEP, AUDIT_MAX)
 }
 
+// --- screen safety: kill switch + operation ring -----------------------------
+// Owner + token credential on the server; the buttons only render for a panel
+// owner. The ring polls every 5s while the page is open — the operator should see
+// what the bot did on the dedicated machine without refreshing by hand.
+const screenOps = useAsync(() => api.screenOps(100))
+const screenOpsTimer: ReturnType<typeof setInterval> = setInterval(() => {
+  // Skip the poll while the tab is hidden: the ring is a watch-view, not a feed.
+  if (!document.hidden) void screenOps.reload()
+}, 5_000)
+const screenKillBusy = ref(false)
+const screenNote = ref('')
+const screenError = ref('')
+const screenKilled = computed(() => screenOps.data.value?.killed ?? false)
+const screenKill = computed(() => screenOps.data.value?.kill ?? null)
+const screenOpsRows = computed(() => screenOps.data.value?.ops ?? [])
+
+onUnmounted(() => clearInterval(screenOpsTimer))
+
+async function engageScreenKill(): Promise<void> {
+  const reason = window.prompt(t('security.screen.reasonPrompt'))
+  if (!reason) return
+  screenKillBusy.value = true
+  screenNote.value = ''
+  screenError.value = ''
+  try {
+    await api.screenKill(reason)
+    screenNote.value = t('security.screen.killedNote')
+    await screenOps.reload()
+  } catch (err) {
+    screenError.value = err instanceof Error ? err.message : t('security.screen.error')
+  } finally {
+    screenKillBusy.value = false
+  }
+}
+
+async function reviveScreen(): Promise<void> {
+  screenKillBusy.value = true
+  screenNote.value = ''
+  screenError.value = ''
+  try {
+    await api.screenRevive()
+    screenNote.value = t('security.screen.revivedNote')
+    await screenOps.reload()
+  } catch (err) {
+    screenError.value = err instanceof Error ? err.message : t('security.screen.error')
+  } finally {
+    screenKillBusy.value = false
+  }
+}
+
 // ``useAsync`` already reloads on the global refresh signal; only the local filter and
 // the requested window need their own trigger.
 watch([kind, auditLimit], () => void audit.reload())
@@ -406,6 +456,70 @@ async function revokeEveryToken(): Promise<void> {
         </tbody>
       </table>
       <p v-else class="hint">{{ t('security.noRevoked') }}</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>{{ t('security.screen.title') }}</h2>
+      <span class="strip__spacer" />
+      <span class="tag" :class="screenKilled ? 'bad' : 'ok'">
+        {{ screenKilled ? t('security.screen.killed') : t('security.screen.armed') }}
+      </span>
+      <button
+        v-if="!screenKilled"
+        class="btn ghost"
+        type="button"
+        :disabled="screenKillBusy"
+        @click="engageScreenKill"
+      >
+        {{ t('security.screen.killBtn') }}
+      </button>
+      <button
+        v-else
+        class="btn"
+        type="button"
+        :disabled="screenKillBusy"
+        @click="reviveScreen"
+      >
+        {{ t('security.screen.reviveBtn') }}
+      </button>
+    </div>
+    <div class="panel__body stack">
+      <p class="hint">{{ t('security.screen.hint') }}</p>
+      <p v-if="screenKilled && screenKill" class="hint" role="alert" style="color: var(--danger)">
+        {{ t('security.screen.killedDetail', { reason: screenKill.reason, when: datetime(screenKill.ts) }) }}
+      </p>
+      <p v-if="screenNote" class="hint" role="status">{{ screenNote }}</p>
+      <p v-if="screenError" class="hint" role="alert" style="color: var(--danger)">
+        {{ screenError }}
+      </p>
+      <table v-if="screenOpsRows.length" class="data">
+        <caption class="visually-hidden">{{ t('security.screen.title') }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{{ t('security.screen.colTime') }}</th>
+            <th scope="col">{{ t('security.screen.colAction') }}</th>
+            <th scope="col">{{ t('common.status') }}</th>
+            <th scope="col">{{ t('security.screen.colSession') }}</th>
+            <th scope="col">{{ t('security.screen.colFrames') }}</th>
+            <th scope="col">{{ t('security.screen.colReason') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, index) in screenOpsRows" :key="index">
+            <td class="mono">{{ datetime(row.ts) }}</td>
+            <td class="mono">{{ row.action }}</td>
+            <td>
+              <span class="tag" :class="row.outcome === 'allow' ? 'ok' : 'bad'">{{ row.outcome }}</span>
+            </td>
+            <td class="mono">{{ row.session || row.plugin || '—' }}</td>
+            <td>{{ row.frames || '—' }}</td>
+            <td class="mono">{{ row.reason || '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="hint">{{ t('security.screen.opsEmpty') }}</p>
     </div>
   </section>
 

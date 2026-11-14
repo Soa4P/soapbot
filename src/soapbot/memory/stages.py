@@ -490,6 +490,9 @@ class CommandStage(Stage):
         # 专用机器声明」双重门（screen/capture.py），关着时任何人输入都只得到一句带
         # 原因 token 的拒绝，不产生任何抓帧。与 budget/bili 同一条设计逻辑。
         "look": Permission.USE_COMMAND,
+        # 急停：只许拉闸、不许合闸——MANAGE_CONFIG 起步。复活没有命令（见
+        # screen/kill.py），被劫持的聊天永远救不活它；这个不对称是设计的一部分。
+        "panic": Permission.MANAGE_CONFIG,
         # Group moderation. These make the bot do something *to a person* in front
         # of the whole group, under the owner's name, so they need their own
         # permission rather than riding on USE_COMMAND.
@@ -868,10 +871,23 @@ class CommandStage(Stage):
         try:
             result = await capture_tile(policy, frames=frames)
         except ScreenRefusedError as exc:
+            from soapbot.screen.opslog import SCREEN_OPS
+
+            SCREEN_OPS.record(
+                action="screen.look", outcome="deny", reason=exc.reason,
+                session=ctx.event.session_key,
+            )
             return f"看不了屏幕（{exc.reason}）。"
         except ScreenUnavailableError as exc:
             return f"看不了屏幕：{exc}"
 
+        from soapbot.screen.opslog import SCREEN_OPS
+
+        SCREEN_OPS.record(
+            action="screen.look", outcome="allow",
+            session=ctx.event.session_key,
+            frames=result.frames_captured, bytes_written=result.size_bytes,
+        )
         _, _, b64 = result.payload.data_url.partition("base64,")
         segments = list(ctx.extras.get("clean_segments") or ctx.event.segments)
         from soapbot.core.message import MessageSegment
@@ -888,6 +904,36 @@ class CommandStage(Stage):
             trace_id=ctx.event.trace_id,
         )
         return None
+
+    async def _cmd_panic(self, ctx: PipelineContext, args: list[str]) -> str:
+        """急停：立刻切断看屏幕（以及将来的控制面）的所有操作。
+
+        只许拉闸不许合闸：复活只能走面板（owner + Token 凭据）或直接删
+        ``data/control_kill.switch`` 文件——这里没有任何恢复命令，chat 侧被劫持时
+        急停依然有效。原因取参数里的自由文本（可选），只进急停文件与审计。
+        """
+        from soapbot.config import settings
+        from soapbot.screen.kill import engage, is_killed
+        from soapbot.screen.opslog import SCREEN_OPS
+
+        if is_killed(settings) is not None:
+            return "急停已经拉下了。恢复请到面板（需要 owner 令牌）。"
+        reason = " ".join(args).strip()[:200] or "operator"
+        by = str(ctx.extras.get("principal") or "operator")
+        engage(settings, reason=reason, by=by)
+        SCREEN_OPS.record(
+            action="screen.kill", outcome="allow", reason=reason, by=by,
+            session=ctx.event.session_key,
+        )
+        self.audit.record(
+            kind="command",
+            action="cmd:panic",
+            outcome="allow",
+            principal=ctx.extras.get("principal"),
+            detail=f"reason={reason}",
+            trace_id=ctx.event.trace_id,
+        )
+        return "急停已拉下：看屏幕（及将来的键鼠控制面）全部停止。恢复请到面板。"
 
     # ------------------------------------------------------------- moderation
     async def _cmd_mute(self, ctx: PipelineContext, args: list[str]) -> str:
