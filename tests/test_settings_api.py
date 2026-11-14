@@ -46,6 +46,9 @@ def client(env_file, tmp_path, monkeypatch):
 def test_read_reports_values_and_capabilities(client: TestClient) -> None:
     body = client.get("/api/settings").json()
     assert body["writable"] == [
+        "compression_extraction",
+        "compression_image_shrink",
+        "compression_reserve_for_reply",
         "default_locale",
         "history_turns",
         "max_prompt_tokens",

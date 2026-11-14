@@ -5,7 +5,7 @@ import { api, type MessageTrace, type PipelineTopology, type TraceSummary } from
 import EmptyState from '@/components/EmptyState.vue'
 import StageGraph from '@/components/StageGraph.vue'
 import { t } from '@/i18n'
-import { clock } from '@/lib/format'
+import { clock, num } from '@/lib/format'
 import { refreshWouldDisrupt } from '@/lib/polling'
 
 /**
@@ -147,6 +147,16 @@ function fmtMs(value: number): string {
 
 const stream = computed(() => selected.value?.stream ?? {})
 const chunks = computed(() => selected.value?.chunks ?? [])
+const compression = computed(() => selected.value?.compression ?? {})
+
+/** Only render the compression block when the trace actually carries numbers:
+ * an empty dict (pre-feature trace, or a turn under budget with no fold) is the
+ * honest "nothing happened" and gets no card at all. */
+const compressionRows = computed(() =>
+  Object.keys(compression.value).length > 0 && Number(compression.value.original_tokens ?? 0) > 0
+    ? [compression.value]
+    : [],
+)
 
 /**
  * Whether the reply went out in pieces.
@@ -348,6 +358,40 @@ onActivated(() => {
             </template>
 
             <p v-else class="stream__note">{{ t('pipeline.notStreamed') }}</p>
+          </section>
+
+          <!-- Context compression, after streaming: what the compressor did to this
+               turn's prompt before the model saw it. Gated on the data actually
+               arriving (the server serialises `compression` per trace), so a trace
+               from before this feature or a turn that never needed compression
+               renders nothing instead of an empty box. -->
+          <section v-if="compressionRows.length" class="panel" style="margin-top: 12px">
+            <div class="panel__head">
+              <span class="eyebrow">{{ t('pipeline.compression.title') }}</span>
+            </div>
+            <div class="panel__body">
+              <div class="grid cols-3">
+                <div class="readout">
+                  <span class="readout__label">{{ t('pipeline.compression.tokens') }}</span>
+                  <span class="readout__value mono">
+                    {{ num(compression.original_tokens) }} → {{ num(compression.compressed_tokens) }}
+                  </span>
+                </div>
+                <div class="readout">
+                  <span class="readout__label">{{ t('pipeline.compression.ratio') }}</span>
+                  <span class="readout__value">
+                    −{{ Math.round((1 - Number(compression.ratio ?? 1)) * 100) }}%
+                  </span>
+                </div>
+                <div class="readout">
+                  <span class="readout__label">{{ t('pipeline.compression.folded') }}</span>
+                  <span class="readout__value">{{ num(compression.folded_turns) }}</span>
+                </div>
+              </div>
+              <p v-if="compression.strategies?.length" class="hint" style="margin: 8px 0 0">
+                <span class="mono">{{ compression.strategies.join(' · ') }}</span>
+              </p>
+            </div>
           </section>
         </template>
 

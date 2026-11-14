@@ -633,6 +633,10 @@ export default {
   'pipeline.wholeReply': 'Whole reply',
   'pipeline.streamNote': 'All three share one scale. The gap from first token to first sentence sent is the split wait; the rest is the remaining sentences — you were waiting on the first.',
   'pipeline.notStreamed': 'Sent as a single message, no splitting. Chunk records only exist when the model streams and the reply splits into several sentences.',
+  'pipeline.compression.title': 'Context compression',
+  'pipeline.compression.tokens': 'Prompt tokens (original → compressed)',
+  'pipeline.compression.ratio': 'Compression ratio',
+  'pipeline.compression.folded': 'Turns folded',
 
   // ---------------------------------------------------------------- 10 metrics
   'metrics.overview': 'Overview',
