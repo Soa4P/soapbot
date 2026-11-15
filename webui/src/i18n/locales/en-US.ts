@@ -298,7 +298,13 @@ export default {
   'plugins.blockedInstall': 'This version is blocked; installing it will be refused.',
   'plugins.installedBlocked': 'Installed {version} is blocked; reload and restart will refuse to load it',
   'plugins.officialEmpty': 'No plugins ship with this build.',
-  'plugins.communityHint': 'The index lists names and versions only; download a package and upload it above to install.',
+  'plugins.communityHint': 'One click = download + digest verify + install; approval and loading still happen on the plugins page.',
+  'plugins.installBtn': 'Install {version}',
+  'plugins.installing': 'Downloading & verifying…',
+  'plugins.installDone': 'Installed {name} {version} (not approved). Tick capabilities on the plugins page, then load.',
+  'plugins.installFailed': 'One-click install failed.',
+  'plugins.updateAvailable': 'Update available',
+  'plugins.updateHint': 'The community index lists a newer version; install it from the community tab.',
 
   // ---------------------------------------------------------------- 04 security
   'security.integrityTitle': 'Integrity signals',

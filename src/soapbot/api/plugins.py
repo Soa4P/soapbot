@@ -20,6 +20,7 @@ assumption that the process is listening somewhere private.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -180,6 +181,133 @@ async def install_plugin(request: Request) -> dict:
     return result.to_dict()
 
 
+@router.post("/install-from-index")
+async def install_from_index(body: InstallFromIndexRequest, request: Request) -> dict:
+    """One-click install from the community index — download, verify, install.
+
+    The old stance ("nothing here is installable in one click") predates per-version
+    digests; the chain that makes this safe now:
+
+    1. **索引决定「有什么」**：version metadata comes from the index snapshot
+       (``plugin_versions.json``, fetched with the same guards as the catalogue);
+    2. **digest 决定「拿到的是不是声明的那个」**：the release zip is downloaded and
+       hashed; a mismatch with the index-declared digest is a hard 400 — a compromised
+       index degrades to "the download is refused", not to code execution;
+    3. **审批决定「能做什么」**：this endpoint calls the same ``install_from_zip`` and
+       returns ``approved: false`` — the operator still ticks capabilities on the
+       approval screen, and load still refuses anything not approved.
+
+    Refusals that are by design: versions without a real digest (draft placeholders),
+    versions on the blocklist, archives that fail any installer check.
+    """
+    _authorize(request)
+    from soapbot.plugins.installer import MAX_ARCHIVE_BYTES, InstallError, install_from_zip
+    from soapbot.plugins.sandbox import assert_url_allowed
+
+    manager = _manager()
+    snapshot = await manager.index.snapshot()
+    if not snapshot.available:
+        raise HTTPException(status_code=503, detail="插件索引不可用，无法一键安装")
+    meta = snapshot.version_meta(body.name, body.version)
+    if meta is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"索引里没有 {body.name} {body.version} 的可用版本元数据",
+        )
+    blocked_reason = snapshot.blocked_reason(body.name, body.version)
+    if blocked_reason:
+        raise HTTPException(status_code=400, detail=f"该版本已被封禁：{blocked_reason}")
+
+    download_url = str(meta.get("download", ""))
+    try:
+        assert_url_allowed(download_url, allowed_hosts=None)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"下载地址未通过安全检查：{exc}") from exc
+
+    try:
+        payload = await _download_release(download_url)
+    except Exception:
+        logger.warning("plugin download failed name=%s", body.name)
+        raise HTTPException(status_code=502, detail="下载发布包失败") from None
+    if len(payload) > MAX_ARCHIVE_BYTES:
+        raise HTTPException(status_code=413, detail="发布包超出安装器体积上限")
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    expected = str(meta.get("digest", ""))
+    if digest != expected:
+        # 信任链的锚：下载内容与索引声明不一致，一律拒绝——不管看起来多像。
+        # 详情带两个哈希前缀：这是操作者能自查「索引还是源被换了」的唯一线索，
+        # 且哈希前缀不构成任何内容泄漏。
+        logger.warning(
+            "plugin digest mismatch name=%s got=%s want=%s", body.name, digest[:19], expected[:19]
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"发布包 digest 与索引声明不一致（{digest[:19]}… != {expected[:19]}…）",
+        )
+
+    loader = manager.loader
+    blocked = dict(manager.index.local_blocked)
+    blocked.update(snapshot.blocked)
+    try:
+        result = install_from_zip(
+            payload,
+            loader.plugins_dir,
+            host_version=loader.host_version,
+            blocked=blocked,
+        )
+    except InstallError as exc:
+        logger.warning("plugin install rejected: %s", exc)
+        raise HTTPException(status_code=400, detail=safe_detail(400, exc, "plugins")) from exc
+    manager.index.invalidate()
+    logger.info("plugin installed from index name=%s version=%s", body.name, body.version)
+    return result.to_dict()
+
+
+class InstallFromIndexRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    version: str = Field(..., min_length=1, max_length=32)
+
+
+async def _download_release(url: str) -> bytes:
+    """Fetch one release archive. One short-lived client per call (same pattern as
+    ``IndexClient._fetch``): a rare 50MiB download gains nothing from connection
+    pooling, and a shared pool would bind its transport into whatever test double or
+    event loop the caller brought — measured, not hypothetical.
+
+    Non-200 raises, so the caller's single ``except`` covers both transport and
+    status failures — "下载失败" is one error shape for the operator, not two.
+    """
+    import httpx
+
+    from soapbot.net.client import build_timeout
+
+    async with httpx.AsyncClient(
+        timeout=build_timeout(15.0), follow_redirects=False, trust_env=False
+    ) as http:
+        response = await http.get(url, headers={"user-agent": "soapbot-plugin-install"})
+    if response.status_code != 200:
+        raise RuntimeError(f"release download returned {response.status_code}")
+    return response.content
+
+
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    """Numeric version key for "is there a newer version", or ``None`` when the
+    string is not plain numeric segments (``1.2.3``). ``None`` means "cannot tell" —
+    and "cannot tell" must never render as an update badge."""
+    parts = version.strip().split(".")
+    if not parts or not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
+
+
+def _update_available(installed: str, latest: str) -> bool:
+    installed_key = _version_tuple(installed)
+    latest_key = _version_tuple(latest)
+    if installed_key is None or latest_key is None:
+        return False
+    return latest_key > installed_key
+
+
 @router.get("")
 async def list_plugins(request: Request) -> dict:
     """Installed plugins: what is on disk, what is loaded, what is approved."""
@@ -245,10 +373,16 @@ async def list_plugins(request: Request) -> dict:
     # changed is its own outage — but it must be visible, because "this is known bad and
     # still running" is the state an operator needs to see.
     snapshot = await manager.index.snapshot()
+    catalogue_latest = {e.name: e.latest for e in snapshot.entries if e.latest}
     for item in installed:
         reason = snapshot.blocked_reason(item["name"], item["version"])
         if reason:
             item["blocked"] = {"version": item["version"], "reason": reason}
+        # 升级提示：索引声明了更新的版本就标出来——「能不能升」由操作者决定，
+        # 「有新版」必须可见（fish-memory 的教训：装了旧版无人提醒）。
+        item["update_available"] = _update_available(
+            str(item["version"]), catalogue_latest.get(item["name"], "")
+        )
 
     return {
         "installed": installed,
@@ -272,9 +406,9 @@ async def discover(request: Request, refresh: bool = Query(False)) -> dict:
     is actually on disk. ``refresh=true`` bypasses the cache, which is what the panel's
     "重新获取" button sends.
 
-    Nothing here is installable in one click. The response carries names, versions and
-    digests; the operator still downloads a package and uploads it through
-    ``POST /install``, which is where approval lives.
+    Cards here carry a one-click install (``POST /install-from-index``): the download is
+    verified against the index-declared digest and installed through the same installer
+    — and it still lands as ``approved: false``. Approval remains the human gate.
     """
     _authorize(request)
     manager = _manager()

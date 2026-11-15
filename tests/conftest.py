@@ -243,6 +243,9 @@ def _isolated_runtime(monkeypatch, tmp_path):
 
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     monkeypatch.setattr(settings, "enable_runtime", False)
+    # 默认索引 URL 指向官方目录（生产默认），但测试套件绝不发真实网络请求——
+    # 需要索引的测试自带 MockTransport 或显式 settings 覆盖。
+    monkeypatch.setattr(settings, "plugin_index_url", "")
     yield
     for key in set(os.environ) - set(saved_env):
         os.environ.pop(key, None)
