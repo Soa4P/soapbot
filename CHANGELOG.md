@@ -10,6 +10,25 @@
 
 ## [Unreleased]
 
+### Dream 记忆提炼：闲置边界「先写记忆、再压缩」（A15-t6，qq-dsh-bridge + SeekMemory 设计输入落地）
+
+原来错在哪：闲置折叠把旧轮次从提示词里移除后，那些轮次的内容只剩摘要文本——细节
+随每次再折叠逐级丢失（摘要的摘要）。qq-dsh-bridge 的实测链路是「先让模型写记忆、
+再压缩」；SeekMemory 的 Dream 给了预算模板（calls ≤ 12/day、幂等断点续跑）。
+
+现在（`DREAM_ENABLED`，默认关——成本 opt-in 立场）：
+
+- 闲置折叠前对**将被折叠的候选轮次**（水印之上的 user/assistant 对，每会话每轮
+  ≤6 对）跑 LIGHT 槽模型提炼（`MemoryExtractor(enable_model=True)`），蒸馏进 L2
+  长期记忆（`scope=会话`）。
+- 每条提炼过 `vet_memory`（毒记忆隔离+审计，同 MemoryWriteStage）；**当日预算**
+  `DREAM_MAX_CALLS_PER_DAY`（默认 12，内存计数、重启清零），超限跳过提炼、折叠
+  照旧——提炼是增强，不是折叠的前置。
+- 水印协同：候选 = 水印之上的窗口消息（首次折叠 = 全部可折叠窗口）；Dream 不改
+  折叠的水印与摘要写入。
+- 测试 +6（`test_dream_extraction.py`：开关/提炼先于折叠/vet 隔离/预算上限/
+  失败不阻断折叠/水印协同）。
+
 ### 闲置边界折叠接线：调度器第三单元（qq-dsh-bridge 设计输入落地）
 
 原来错在哪：`memory/compaction.py` 的双门（闲置 ≥ 30 分钟 **且** 上下文 ≥ 阈值）
