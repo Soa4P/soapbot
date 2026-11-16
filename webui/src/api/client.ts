@@ -351,6 +351,19 @@ export const api = {
       error: string
       warnings: string[]
     }>(`/api/plugins/discover${refresh ? '?refresh=true' : ''}`),
+  pluginTasks: (limit = 200) =>
+    request<{
+      tasks: Array<{
+        plugin: string
+        task_id: string
+        description: string
+        state: 'done' | 'overdue' | 'running'
+        expected_within_hours: number
+        declared_at: number
+        done_at: number | null
+        note: string
+      }>
+    }>(`/api/plugins/tasks?limit=${limit}`),
   installFromIndex: (name: string, version: string) =>
     request<{ name: string; version: string; approved: boolean }>('/api/plugins/install-from-index', {
       method: 'POST',

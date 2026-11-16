@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-16T10:00:00+08:00",
+  "updated_at": "2026-11-17T11:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3594,7 +3594,8 @@
         {
           "id": "a15-t6",
           "name": "diary 定时语义任务",
-          "status": "todo"
+          "status": "done",
+          "note": "PR #81：Dream 记忆提炼（闲置折叠前对候选轮次跑 LIGHT 槽模型提炼，DREAM_ENABLED 默认关 + DREAM_MAX_CALLS_PER_DAY=12 预算）——「先写记忆、再压缩」，A20 闲置折叠的直接增强。diary 式人读日记未做（插件 mood-diary 已有确定性版）"
         },
         {
           "id": "a15-t7",

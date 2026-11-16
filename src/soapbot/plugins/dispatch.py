@@ -810,6 +810,7 @@ class PluginManager:
 
         from soapbot.config import settings
         from soapbot.plugins.index_client import IndexClient
+        from soapbot.plugins.tasks import PluginTaskStore
 
         # Discovery only. The index never approves, installs or loads anything; it is
         # here so the panel can say "a newer version exists" and so blocked versions
@@ -820,6 +821,10 @@ class PluginManager:
             timeout=settings.plugin_index_timeout_seconds,
             ttl=settings.plugin_index_ttl_seconds,
         )
+        # 长任务登记（ops-handoff 吸收 2）：插件经 tasks.update surface 声明/标记完成，
+        # 面板聚合展示「未确认完成」。固定路径（data/plugin-tasks.json），与 approvals
+        # 同模式——插件私有 storage 面板读不到，完成必须可见才算数。
+        self.tasks = PluginTaskStore(settings.data_dir / "plugin-tasks.json")
         # The loader owns *execution*, so it must own the decision not to execute a
         # blocked release. Hand it a live view of the merged blocklist rather than a
         # snapshot taken at construction: a block added to the index after startup has

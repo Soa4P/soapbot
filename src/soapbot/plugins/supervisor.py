@@ -152,6 +152,7 @@ ALLOWED_SURFACES = frozenset(
         "send_media.request",
         "media.observe",
         "screen.capture",
+        "tasks.update",
         "browse.read",
         "browse.propose",
         "qzone.read",
@@ -459,6 +460,24 @@ class _RemoteCtx:
         over the pipe to the plugin; the parent audits a count, never a URL.
         """
         return _call("media.observe", {})
+
+    async def task_update(self, task_id, description="", expected_within_hours=0, done=False, note=""):
+        """Declare or mark-done one long-running task (ops-handoff 吸收 2).
+
+        Rows are keyed by ``(plugin, task_id)`` in host-side state the panel reads;
+        a worker can only touch its own plugin's rows because the plugin name comes
+        from the invoke frame, not from the pipe.
+        """
+        return _call(
+            "tasks.update",
+            {
+                "task_id": str(task_id),
+                "description": str(description),
+                "expected_within_hours": float(expected_within_hours or 0),
+                "done": bool(done),
+                "note": str(note),
+            },
+        )
 
     async def screen_capture(self, frames=1):
         """Ask the host to look at the dedicated machine's display, view only.
