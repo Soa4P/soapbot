@@ -2,8 +2,8 @@
 
 What actually needs a clock
 ---------------------------
-Three things, and each was previously documented as "driven by the app" while no such
-driver existed:
+Four things, and the first three were previously documented as "driven by the app"
+while no such driver existed:
 
 1. **Plugin cron jobs.** ``PluginCronRunner.run_due`` checks expressions but has to be
    called by something; without a tick, a plugin's ``@ctx.cron("0 9 * * *")`` is a
@@ -12,8 +12,12 @@ driver existed:
    requests nobody answered. The read path also expires what it touches, but relying
    on that means an idle group keeps its allowance locked until someone happens to
    look at it — which is exactly when it does not matter.
-3. Nothing else. Persona and config files are read at startup; session locks are
-   per-event.
+3. **Idle-boundary folds.** ``IdleFoldRunner.run_due`` compacts quiet sessions'
+   prompts (qq-dsh-bridge's design input: never fold mid-conversation — the layout
+   change breaks provider prefix-cache hits exactly when the user is active; fold
+   while they are away instead). The two-sided gate and the write path live in
+   ``memory/idle_fold.py``; the tick is only the clock.
+4. Persona and config files are read at startup; session locks are per-event.
 
 Why one tick instead of one scheduler job per plugin job
 --------------------------------------------------------
@@ -70,7 +74,7 @@ class RuntimeScheduler:
             trigger="interval",
             seconds=self.tick_seconds,
             id=JOB_TICK,
-            name="plugin cron + budget expiry",
+            name="plugin cron + budget expiry + idle folds",
             # ``coalesce`` collapses missed runs into one: after a suspend or a long
             # stall we want the current state handled, not a burst replaying every
             # interval that was skipped.
@@ -124,6 +128,17 @@ class RuntimeScheduler:
                 self.last_error = f"budget: {type(exc).__name__}: {exc}"
                 logger.exception("budget sweep failed")
 
+        idle_folds = getattr(self.runtime, "idle_folds", None)
+        if idle_folds is not None:
+            try:
+                outcomes = await idle_folds.run_due()
+                folded = [o for o in outcomes if o.get("compacted")]
+                if folded:
+                    logger.info("idle fold ran for %d session(s)", len(folded))
+            except Exception as exc:
+                self.last_error = f"idle_fold: {type(exc).__name__}: {exc}"
+                logger.exception("idle fold tick failed")
+
     # ------------------------------------------------------------- introspection
     def status(self) -> dict[str, Any]:
         jobs: list[dict[str, Any]] = []
@@ -145,7 +160,7 @@ class RuntimeScheduler:
             "timezone": str(self._tz),
             "ticks": self.ticks,
             "last_error": self.last_error,
-            "purpose": "plugin_cron_and_budget_expiry",
+            "purpose": "plugin_cron_budget_and_idle_folds",
             "does_not_handle": ["message_receive", "model_generation", "adapter_connection"],
             "jobs": jobs,
             "plugin_cron": plugins.cron.schedule() if plugins is not None else [],
