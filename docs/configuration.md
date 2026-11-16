@@ -59,6 +59,8 @@
 | `SELF_NOTES_LIMIT` | `40` | L4 selfNote 保留条数，范围 `1..200`。同句只刷新时间不新增，超出按 `updated_at` 淘汰最旧的一条 |
 | `COMPACTION_IDLE_MINUTES` | `30` | 会话安静多少分钟后才有资格压缩，范围 `0..1440`；`0` 表示关闭。与 `COMPACTION_TOKEN_THRESHOLD` 同时满足才触发 |
 | `COMPACTION_TOKEN_THRESHOLD` | `6000` | 估算上下文达到多少 token 才值得多花一次模型调用，范围 `0..200000`；`0` 表示关闭 |
+| `DREAM_ENABLED` | `false` | **Dream 记忆提炼**：闲置折叠前对将被折叠的轮次跑一次模型提炼（LIGHT 槽），把内容蒸馏进 L2 再折叠——「先写记忆、再压缩」。提炼失败不阻断折叠；所有提炼行过 vet 守卫 |
+| `DREAM_MAX_CALLS_PER_DAY` | `12` | Dream 每日模型调用上限（SeekMemory 的 Dream 预算模板）。内存计数，重启清零；超限跳过提炼、折叠照旧 |
 | `TIMELINE_WINDOW` | `10` | 注入「近期事件」的条数上限，范围 `1..50`。时间线只记事件摘要，不复制消息正文 |
 | `SHUTDOWN_GRACE_SECONDS` | `10` | 关闭时等待适配器与后台任务收敛的秒数，范围 `1..120`。超时后进程照常退出，避免一个卡住的读循环让每次重启都像挂死 |
 | `ENABLE_RUNTIME` | `true` | 关掉则只提供 HTTP API |
