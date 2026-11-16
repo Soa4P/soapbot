@@ -318,6 +318,10 @@ export default {
   'plugins.installDone': '已安装 {name} {version}（未批准）。去插件页勾选能力后加载。',
   'plugins.installFailed': '一键安装失败。',
   'plugins.updateAvailable': '有新版本',
+  'plugins.tasks.col': '长任务',
+  'plugins.tasks.done': '{n} 项已完成',
+  'plugins.tasks.overdue': '{n} 项未确认完成',
+  'plugins.tasks.running': '{n} 项进行中',
   'plugins.updateHint': '社区索引声明了更新的版本；升级包请到社区页一键安装。',
 
   // ---------------------------------------------------------------- 04 security

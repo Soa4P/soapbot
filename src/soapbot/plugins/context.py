@@ -674,6 +674,34 @@ class PluginContext:
         )
         return result
 
+    async def task_update(
+        self,
+        task_id: str,
+        description: str = "",
+        expected_within_hours: float = 0.0,
+        done: bool = False,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Declare or mark-done one long-running task (ops-handoff 吸收 2).
+
+        Rows live in host-side state (``data/plugin-tasks.json``), keyed by
+        ``(plugin, task_id)`` — the plugin name comes from the host-bound caller, so
+        a plugin can only touch its own rows. The panel aggregates them and flags
+        tasks past ``expected_within_hours`` without ``done_at`` as
+        「未确认完成」——审批记录了「批了什么」，这里补上「真的做完了吗」的可见性。
+        """
+        return await self._surface_router().dispatch(
+            "tasks.update",
+            {
+                "task_id": str(task_id),
+                "description": str(description),
+                "expected_within_hours": float(expected_within_hours or 0),
+                "done": bool(done),
+                "note": str(note),
+            },
+            self._require_caller("task_update"),
+        )
+
     def _init_runtime_hooks(
         self, *, sender=None, sender_media=None, memory=None, kb=None, bilibili_host=None
     ) -> None:
