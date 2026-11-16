@@ -52,6 +52,32 @@ def test_a_conventional_commit_prefix_is_rejected() -> None:
     assert "前缀" in result.stderr
 
 
+def test_dependabot_automation_prefixes_are_accepted() -> None:
+    """机器前缀白名单：dependabot 的标题按它自己的约定生成，重写等于改 bot。
+
+    两个真实标题形状（#73/#77），长度上限对白名单仍然生效——超长照样拒绝。
+    """
+    for title in (
+        "chore(deps): bump actions/upload-artifact from 4 to 7",
+        "chore(deps-dev): bump types-pyyaml from 6.0.12.20261103 to 6.0.12.20261111",
+        "chore(deps): bump the python-minor-and-patch group with 3 updates",
+    ):
+        result = _run("--title", title)
+        assert result.returncode == 0, f"{title}: {result.stderr}"
+
+
+def test_an_automation_prefix_beyond_the_allowlist_is_still_rejected() -> None:
+    """白名单只放行依赖机器——ci( / docs( 等其他人写的前缀照旧被拒。"""
+    result = _run("--title", "chore(ci): tweak the workflow")
+    assert result.returncode == 1
+
+
+def test_an_overlong_automation_title_is_still_rejected() -> None:
+    result = _run("--title", "chore(deps): bump " + "x" * 100)
+    assert result.returncode == 1
+    assert "过长" in result.stderr
+
+
 def test_an_empty_object_is_rejected() -> None:
     result = _run("--title", "修复:   ")
     assert result.returncode == 1
