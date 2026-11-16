@@ -238,6 +238,21 @@ class Settings(BaseSettings):
     already cached, so this is free. Turn it off only to debug vision behaviour.
     """
 
+    dream_enabled: bool = False
+    """Let the idle-boundary fold run model-based memory extraction *before* it folds.
+
+    Off by default — this is the cost opt-in stance of ``enable_memory_extraction``:
+    a quiet session past the compaction gate gets one LIGHT-slot model call per
+    candidate turn-pair (capped per day), distilling what the folded turns said into
+    L2 long-term memory before the fold removes them from the prompt. The fold
+    itself is unaffected: extraction failures never block it, and every extracted
+    row passes the same vet guard as the turn-time write path.
+    """
+
+    dream_max_calls_per_day: int = 12
+    """LIGHT-slot model calls the idle Dream pass may spend per calendar day
+    (SeekMemory's Dream budget template). In-memory, resets on restart."""
+
     bili_cookie: SecretStr = SecretStr("")
     """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
     capability.
