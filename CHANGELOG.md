@@ -10,6 +10,35 @@
 
 ## [Unreleased]
 
+### 闲置边界折叠接线：调度器第三单元（qq-dsh-bridge 设计输入落地）
+
+原来错在哪：`memory/compaction.py` 的双门（闲置 ≥ 30 分钟 **且** 上下文 ≥ 阈值）
+与 `compact_if_idle` **只有测试调用、零生产接线**——调度器 docstring 写着
+「Nothing else」，而 settings、.env.example、configuration.md、memory-layers.md
+四处都声称这两个旋钮生效。组件都在，线没接——本仓库最引用的故障形态。
+
+同时它是第六批登记的设计输入（qq-dsh-bridge 实测：**永不压缩活跃会话**保 KV
+cache 命中、折叠挪到闲置边界，单步耗时 45~55s → 3~4s）。
+
+现在：
+
+- **`IdleFoldRunner`**（`memory/idle_fold.py`）：每个调度 tick 枚举会话、过双门、
+  把过门者跑一遍**引擎自己的增量折叠**——同 compressor（同 keep_recent_turns）、
+  同 summariser（LIGHT 槽）、经 `save_summary` 的 vet + 行号水印写入。产物就是
+  引擎折叠摘要本身，不产生第二套 L1 行。
+- **为什么走引擎路径而不是旧 `compact_if_idle` 的写法**：旧路径经
+  `layers.add_summary` 会把 **epoch 时间戳写进 `window_end` 水印列**（增量折叠的
+  候选过滤从此永远为空——折叠被永久打死），且绕过 vet_memory。旧写路径已删除，
+  门（`should_compact`）保留并被 runner 复用。
+- 每轮全局上限 3 个会话（冷启动不全量折叠打爆预算）；单会话失败隔离；与活跃
+  turn 竞争时 last-writer-wins（最坏重复一行摘要，L0 永不受影响）。
+- 调度器 docstring「Nothing else」改为四件事；`purpose`/`does_not_handle` 同步。
+- 测试 +10（`test_idle_fold.py`：门三态、水印落库读回「不是 epoch」的直接钉子、
+  去重不重复写、失败隔离、每轮上限、调度器驱动与异常隔离）；旧 `compact_if_idle`
+  的 3 个写语义用例随路径删除（职责由 runner 用例接管）。
+- 顺带验证了一个探明事实：两处「会话摘要」并存是有意的（RecallStage 的 600 字
+  【会话摘要】+ 引擎消息列表内的滚动摘要），builder 注释写明，未改动。
+
 ### 插件生态收口：一键安装 + 官方索引默认接入 + 升级徽标
 
 原来错在哪：七批改编产出了包，但「怎么添加到机器人」这条链路有三个断点——
