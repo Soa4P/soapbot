@@ -50,12 +50,11 @@ def depth_of(raw: bytes | str) -> int:
             depth += 1
             if depth > deepest:
                 deepest = depth
-        elif byte in _CLOSE:
+        elif byte in _CLOSE and depth:
             # Clamped at zero: an unbalanced ``}`` is a syntax error the parser will
             # report properly, and letting depth go negative would hide a later run of
             # opens behind the earlier closes.
-            if depth:
-                depth -= 1
+            depth -= 1
     return deepest
 
 
