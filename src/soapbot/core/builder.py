@@ -529,6 +529,21 @@ def build_runtime(
         # costs a call per qualifying message; group chats are chatty.
         extractor = MemoryExtractor(enable_model=False, summarizer=None)
 
+    # Dream 提炼（闲置边界「先写记忆、再压缩」）：独立于上面的运行时 extractor——
+    # 运行时 heuristic 提炼走管线 MemoryWriteStage；Dream 是调度器在闲置边界对
+    # 将被折叠的轮次跑模型提炼（LIGHT 槽），默认关、带当日预算。双门：总开关 +
+    # enable_memory_extraction（关掉记忆写入的部署不该有 Dream 写 L2）。
+    dream_extractor = None
+    if (
+        memory is not None
+        and engine is not None
+        and enable_memory_extraction
+        and settings.dream_enabled
+    ):
+        dream_extractor = MemoryExtractor(
+            enable_model=True, summarizer=engine._summarize
+        )
+
     plugin_manager = None
     if plugins_dir is not None:
         # Pass the stores through so ``ctx.memory`` / ``ctx.kb`` work out of the box.
@@ -721,6 +736,9 @@ def build_runtime(
                 history_limit=settings.history_turns,
                 idle_minutes=settings.compaction_idle_minutes,
                 token_threshold=settings.compaction_token_threshold,
+                extractor=dream_extractor,
+                dream_enabled=dream_extractor is not None,
+                dream_max_calls_per_day=settings.dream_max_calls_per_day,
             )
             if engine is not None and memory is not None
             else None
