@@ -117,8 +117,12 @@ async def test_capture_refuses_an_undeclared_machine() -> None:
 
 async def test_capture_compares_hostnames_case_insensitively(monkeypatch) -> None:
     """Windows hostnames are case-preserving; the gate must not be. A successful gate
-    then fails only on the missing mss dependency (not installed in CI) — which is the
-    *right* failure: it proves the gate passed."""
+    then fails only on the missing mss dependency — which is the *right* failure: it
+    proves the gate passed. Hiding mss from sys.modules keeps this independent of
+    whether the developer's venv happens to have the extra installed."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "mss", None)
     with pytest.raises(ScreenUnavailableError):
         await capture_tile(_policy(machine="bot-worker"), hostname="BOT-WORKER")
 

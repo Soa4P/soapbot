@@ -10,7 +10,7 @@
 #   python-multipart no endpoint accepts multipart/form-data
 #   edge-tts         voice output was never implemented; declaring it advertised a
 #                    capability the project does not have
-fastapi==0.162.0
+fastapi==0.162.5
 uvicorn[standard]==0.54.0
 pydantic==2.14.3
 pydantic-settings==2.16.2
