@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-15T12:30:00+08:00",
+  "updated_at": "2026-11-16T10:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3771,6 +3771,39 @@
         }
       ],
       "goal": "把「怎么添加插件」的链路补齐：默认能看到官方目录、一键下载并 digest 校验安装、有升级可见；审批照旧是人"
+    },
+    {
+      "id": "a20",
+      "index": "A20",
+      "name": "闲置边界折叠接线（调度器第三单元）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a20-t1",
+          "name": "IdleFoldRunner：双门复用（should_compact）→ 引擎增量折叠 → save_summary 水印写入",
+          "status": "done",
+          "note": "旧 compact_if_idle 的 layers 写路径删除：epoch 写进水印列会永久打死增量折叠，且绕过 vet"
+        },
+        {
+          "id": "a20-t2",
+          "name": "调度器第三单元：tick 驱动 run_due，异常隔离进 last_error；docstring/purpose 更新",
+          "status": "done",
+          "note": "BotRuntime.idle_folds 可选参数（budget 先例）；builder 在 engine+memory 就绪时装配"
+        },
+        {
+          "id": "a20-t3",
+          "name": "每轮全局上限 3 会话 + 单会话失败隔离 + 无新候选不写行（引擎同款去重）",
+          "status": "done",
+          "note": "qq-dsh-bridge 设计输入落地：活跃会话永不打断前缀缓存，折叠挪到闲置边界"
+        },
+        {
+          "id": "a20-t4",
+          "name": "测试 +10（test_idle_fold.py）+ 文档四处（memory-layers/architecture/CHANGELOG/verification）",
+          "status": "done",
+          "note": "test_memory_layers 的写语义用例随路径删除（职责移交 runner）；门用例保留"
+        }
+      ],
+      "goal": "把 compaction.py 的双门机器接进调度器、并按 qq-dsh-bridge 的实测收益落在闲置边界——A15-t4 增量折叠的「压缩时机」收口"
     }
   ],
   "archive": [

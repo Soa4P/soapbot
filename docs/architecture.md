@@ -248,7 +248,7 @@ soapbot/
 | `stages.py` | 准入类 Stage | `AccessPolicy`（群空=全开、私聊空=全关的不对称是有意的）、`WakePolicy`、`StripWakeWordStage`、`DedupStage`、`ReplyStage` |
 | `builder.py` | 唯一装配点 | `build_pipeline` / `build_runtime` / `build_plugin_manager`。测试与生产走同一条装配路径，否则「测试通过」不说明部署可用 |
 | `runtime.py` | 适配器 ↔ 流水线 | 按会话加锁保证同群串行；`NOTICE` 事件绕过流水线直接分发（通知不需要准入判断）；插件发消息只给 `session_key`，由运行时决定目标 |
-| `scheduler.py` | 周期任务 | 插件 cron、过期额度清扫、保留位回收 |
+| `scheduler.py` | 周期任务 | 插件 cron、过期额度清扫、闲置边界折叠（IdleFoldRunner）、保留位回收 |
 | `config_files.py` | 配置加载 | YAML 严格解析，引用了未设置的 `env:` 变量时**启动失败**——带着空 key 运行会变成一串 401 并被归咎于上游 |
 
 **`adapters/` — 接入层**

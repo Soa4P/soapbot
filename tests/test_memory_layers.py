@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from soapbot.memory.compaction import compact_if_idle, should_compact
+from soapbot.memory.compaction import should_compact
 from soapbot.memory.db import SCHEMA_VERSION, Database
 from soapbot.memory.layers import MemoryLayers
 
@@ -116,60 +116,4 @@ def test_compaction_needs_both_gates() -> None:
     assert ready.compacted is True
 
 
-async def test_compaction_writes_l1_and_an_optional_note(layers: MemoryLayers) -> None:
-    async def summarise() -> tuple[str, str | None]:
-        return "这段在讨论部署。", "少用术语"
 
-    outcome = await compact_if_idle(
-        layers,
-        "session:a",
-        now=10_000,
-        last_activity=0,
-        idle_minutes=30,
-        tokens=99_999,
-        token_threshold=6000,
-        summarize=summarise,
-    )
-
-    assert outcome.compacted is True
-    assert (await layers.latest_summary("session:a"))["summary"] == "这段在讨论部署。"
-    assert [n["content"] for n in await layers.self_notes()] == ["少用术语"]
-
-
-async def test_a_failed_summary_changes_nothing(layers: MemoryLayers) -> None:
-    async def boom() -> tuple[str, str | None]:
-        raise RuntimeError("provider down")
-
-    outcome = await compact_if_idle(
-        layers,
-        "session:a",
-        now=10_000,
-        last_activity=0,
-        idle_minutes=30,
-        tokens=99_999,
-        token_threshold=6000,
-        summarize=boom,
-    )
-
-    assert outcome.reason == "summarise_failed"
-    assert await layers.latest_summary("session:a") is None
-    assert await layers.self_notes() == []
-
-
-async def test_an_empty_summary_is_not_stored(layers: MemoryLayers) -> None:
-    async def blank() -> tuple[str, str | None]:
-        return "   ", None
-
-    outcome = await compact_if_idle(
-        layers,
-        "session:a",
-        now=10_000,
-        last_activity=0,
-        idle_minutes=30,
-        tokens=99_999,
-        token_threshold=6000,
-        summarize=blank,
-    )
-
-    assert outcome.reason == "empty_summary"
-    assert await layers.latest_summary("session:a") is None
