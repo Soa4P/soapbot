@@ -394,7 +394,51 @@ async def list_plugins(request: Request) -> dict:
             "error": snapshot.error,
             "entries": [e.to_dict() for e in snapshot.entries],
         },
+        "tasks": plugin_tasks_overview(),
     }
+
+
+def plugin_tasks_overview() -> dict[str, Any]:
+    """Aggregate the long-task registry for the panel (ops-handoff 吸收 2).
+
+    Every declared task with its state: done (with timestamp), or 「未确认完成」
+    when past its expected window without a done marker. Metadata only — the note
+    body is plugin-authored text rendered in the browser.
+    """
+    import time as _time
+
+    from soapbot.plugins.tasks import PluginTaskStore
+
+    store = PluginTaskStore(settings.data_dir / "plugin-tasks.json")
+    now = _time.time()
+    tasks: list[dict[str, Any]] = []
+    for plugin, rows in store.all_tasks().items():
+        for task_id, rec in rows.items():
+            tasks.append(
+                {
+                    "plugin": plugin,
+                    "task_id": task_id,
+                    "description": rec.description,
+                    "state": (
+                        "done"
+                        if rec.done_at is not None
+                        else ("overdue" if rec.overdue(now) else "running")
+                    ),
+                    "expected_within_hours": rec.expected_within_hours,
+                    "declared_at": rec.declared_at,
+                    "done_at": rec.done_at,
+                    "note": rec.note,
+                }
+            )
+    tasks.sort(key=lambda row: row["declared_at"], reverse=True)
+    return {"tasks": tasks}
+
+
+@router.get("/tasks")
+async def plugin_tasks(request: Request) -> dict[str, Any]:
+    """The long-task registry: what each plugin promised and whether it finished."""
+    _authorize(request)
+    return plugin_tasks_overview()
 
 
 @router.get("/discover")

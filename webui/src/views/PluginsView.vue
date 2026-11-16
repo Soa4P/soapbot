@@ -74,6 +74,44 @@ const tab = ref<Tab>('installed')
 const RISKY = new Set(['http', 'memory_read', 'kb_read', 'send', 'storage', 'cron', 'bilibili'])
 
 const installed = computed<any[]>(() => listing.data.value?.installed ?? [])
+
+/** 长任务登记（ops-handoff 吸收 2）：插件声明/标记完成，面板聚合可见。
+ * 挂在 listing 的重载上——安装/审批动作后一并刷新。 */
+const pluginTasks = useAsync(() => api.pluginTasks())
+const tasksByPlugin = computed<Record<string, any[]>>(() => {
+  const rows = pluginTasks.data.value?.tasks ?? []
+  const map: Record<string, any[]> = {}
+  for (const row of rows) {
+    (map[row.plugin] = map[row.plugin] || []).push(row)
+  }
+  return map
+})
+/** 一个插件的任务状态聚合：done > overdue > running（无任务 = 空）。 */
+function taskState(plugin: any): { state: string; label: string; title: string } {
+  const rows = tasksByPlugin.value[plugin.name] ?? []
+  if (!rows.length) return { state: 'none', label: '—', title: '' }
+  const done = rows.filter((r: any) => r.state === 'done')
+  if (done.length === rows.length) {
+    return {
+      state: 'done',
+      label: t('plugins.tasks.done', { n: done.length }),
+      title: done.map((r: any) => r.task_id).join(', '),
+    }
+  }
+  const overdue = rows.filter((r: any) => r.state === 'overdue')
+  if (overdue.length) {
+    return {
+      state: 'overdue',
+      label: t('plugins.tasks.overdue', { n: overdue.length }),
+      title: overdue.map((r: any) => `${r.task_id}: ${r.note || r.description}`).join('\n'),
+    }
+  }
+  return {
+    state: 'running',
+    label: t('plugins.tasks.running', { n: rows.length }),
+    title: rows.map((r: any) => r.task_id).join(', '),
+  }
+}
 const exported = computed<any[]>(() => installed.value.filter((p) => p.api))
 
 /**
@@ -231,6 +269,7 @@ async function deletePlugin(plugin: any): Promise<void> {
             <th scope="col">{{ t('plugins.trust') }}</th>
             <th scope="col">{{ t('plugins.declared') }}</th>
             <th scope="col">{{ t('plugins.granted') }}</th>
+            <th scope="col">{{ t('plugins.tasks.col') }}</th>
             <th scope="col">{{ t('common.status') }}</th>
             <th scope="col">{{ t('common.actions') }}</th>
           </tr>
@@ -295,6 +334,12 @@ async function deletePlugin(plugin: any): Promise<void> {
               <td>
                 <span class="pill" :class="plugin.loaded ? 'ok' : ''">
                   <i class="dot" />{{ plugin.loaded ? t('plugins.running') : t('plugins.notLoaded') }}
+                </span>
+              </td>
+              <td>
+                <span class="tag" :class="taskState(plugin).state === 'done' ? 'ok' : (taskState(plugin).state === 'overdue' ? 'bad' : '')"
+                      :title="taskState(plugin).title">
+                  {{ taskState(plugin).label }}
                 </span>
               </td>
               <td>
