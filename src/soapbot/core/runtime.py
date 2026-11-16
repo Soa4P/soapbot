@@ -47,6 +47,7 @@ class BotRuntime:
         skills=None,
         locale: str = "",
         session_mapper=None,
+        idle_folds=None,
     ) -> None:
         self.adapters: dict[str, Adapter] = {}
         self.pipeline = pipeline or Pipeline()
@@ -163,6 +164,15 @@ class BotRuntime:
         mapping changes the lock key: a bound QQ private event joins the account's
         ``web:private:account-<id>`` session instead of its derived platform key.
         Hand-assembled test runtimes leave it ``None`` and keep the derived key.
+        """
+
+        self.idle_folds = idle_folds
+        """Optional idle-boundary fold runner (``memory/idle_fold.py``).
+
+        Held on the runtime for the same reason as ``budget``: the periodic sweep in
+        the scheduler needs it, and only the runtime outlives a single message. The
+        scheduler's tick calls ``run_due``; a unit that would fold mid-conversation
+        does not exist — the runner only fires on sessions past the idle window.
         """
         self._unsubscribers: list[Any] = []
         self._running = False
