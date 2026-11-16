@@ -10,9 +10,14 @@ and reviewing the title by hand is exactly the step that gets dropped when the d
 large.
 
 This is a format check, not a taste check: it cannot tell whether the title describes
-the change. It only refuses the two things that make titles hard to scan — a
+the change. It refuses the two things that make titles hard to scan — a
 Conventional-Commits prefix (``feat:`` / ``fix:``) that this repository never agreed to,
-and a colon with nothing after it.
+and a colon with nothing after it — with one exception: **automation prefixes**.
+Dependabot titles (``chore(deps): bump …``) are machine-generated in a documented
+convention of their own; renaming them would mean re-writing the bot, and the gate's
+purpose (scannable human history) does not apply to a feed that is filtered by
+package name anyway. The exception is a strict allowlist — ``chore(deps)`` and
+``chore(deps-dev)`` only, not Conventional Commits at large.
 
 Exit codes: 0 = acceptable, 1 = rejected, 2 = no title was supplied at all (a wiring
 mistake, not a bad title; CI should fail loudly on it rather than pass silently).
@@ -34,6 +39,11 @@ CONVENTIONAL = re.compile(
     re.IGNORECASE,
 )
 
+#: Automation prefixes that are accepted verbatim. Strictly scoped: a dependency bot's
+#: titles follow its own documented convention, and the digest of what changed is the
+#: package name, not the prose. Anything outside this allowlist is still rejected.
+AUTOMATION = re.compile(r"^chore\((deps|deps-dev)\):", re.IGNORECASE)
+
 #: ``动作: 对象``. The action is 2–12 Chinese characters; the separator may be the
 #: half-width colon used by the real examples, or the full-width one a Chinese IME
 #: produces; the object must contain at least one non-space character.
@@ -50,6 +60,8 @@ def problems(title: str) -> list[str]:
     out: list[str] = []
     if len(text) > MAX_LENGTH:
         out.append(f"标题过长（{len(text)} > {MAX_LENGTH} 字符）")
+    if AUTOMATION.match(text):
+        return out  # 机器前缀：白名单放行（长度上限仍然生效）
     if CONVENTIONAL.match(text):
         out.append("不要用 feat:/fix: 这类英文前缀，改成「动作: 对象」")
     if not TITLE.match(text):

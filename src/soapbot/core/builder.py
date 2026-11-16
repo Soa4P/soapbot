@@ -42,6 +42,7 @@ from soapbot.core.stages import (
 from soapbot.core.trace import TraceStore
 from soapbot.memory.db import Database
 from soapbot.memory.extractor import MemoryExtractor
+from soapbot.memory.idle_fold import IdleFoldRunner
 from soapbot.memory.layers import MemoryLayers
 from soapbot.memory.scene import SceneMemory
 from soapbot.memory.skills import SkillForge
@@ -709,6 +710,21 @@ def build_runtime(
         # 统一会话映射：内存库不存在时（如不落库的测试装配）跳过——映射器依赖
         # 账号数据库，没有库就没有绑定，映射也永远不命中。
         session_mapper=SessionMapper(memory.db) if memory is not None else None,
+        # 闲置边界预折叠（qq-dsh-bridge 设计输入）：调度器 tick 在会话安静且上下文
+        # 达阈时提前跑引擎自己的折叠——活跃会话不打断前缀缓存。engine/compressor
+        # 不上 runtime，闭包这两个引用就够了。engine 不存在时没有折叠可跑。
+        idle_folds=(
+            IdleFoldRunner(
+                store=memory,
+                compressor=engine.compressor,
+                summarize=engine._summarize,
+                history_limit=settings.history_turns,
+                idle_minutes=settings.compaction_idle_minutes,
+                token_threshold=settings.compaction_token_threshold,
+            )
+            if engine is not None and memory is not None
+            else None
+        ),
     )
 
 
