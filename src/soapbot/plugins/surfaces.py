@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from soapbot.plugins.manifest import Capability
 from soapbot.plugins.memory_api import (
@@ -54,6 +54,9 @@ from soapbot.plugins.sandbox import (
     CapabilityGuard,
     StorageUnavailable,
 )
+
+if TYPE_CHECKING:
+    from soapbot.plugins.tasks import PluginTaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +276,44 @@ class SurfaceRouter:
                 plugin=self._plugin,
             )
         return {"images": images}
+
+    async def _task_update(self, args: dict[str, Any], caller) -> Any:
+        """Declare or mark-done one long-running task (ops-handoff 吸收 2).
+
+        Rows are keyed by ``(plugin, task_id)`` — the plugin name comes from the
+        router, never from args, so a plugin can only ever touch its own tasks. The
+        registry is host-side state (``data/plugin-tasks.json``): the panel reads it
+        and flags tasks past their expected window without ``done_at`` as
+        「未确认完成」. Audit records task_id and the done flag — never the note
+        body (plugin-authored text does not belong in the audit trail).
+        """
+
+        task_id = str(args.get("task_id") or "").strip()[:64]
+        if not task_id:
+            raise ValueError("task_id is required")
+        description = str(args.get("description") or "")[:300]
+        expected = float(args.get("expected_within_hours") or 0)
+        done = bool(args.get("done"))
+        note = str(args.get("note") or "")[:300]
+        manager = _task_store()
+        record = manager.update(
+            plugin=self._plugin,
+            task_id=task_id,
+            description=description,
+            expected_within_hours=expected,
+            done=done,
+            note=note,
+        )
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:tasks.update",
+                outcome="allow",
+                detail=f"plugin={self._plugin} task={task_id} done={done}",
+                plugin=self._plugin,
+            )
+        return {"task_id": task_id, "done": record.done_at is not None, "overdue": record.overdue(time.time())}
+
 
     async def _browse_page(self, url: str) -> Any:
         """Read one public page with a client that consumes the BROWSE capability.
@@ -594,6 +635,17 @@ def _default_bilibili_cookie() -> str:
     return value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
 
 
+
+def _task_store() -> PluginTaskStore:
+    """The host-side task registry, reached through the running manager."""
+    from soapbot.app import get_plugin_manager
+
+    manager = get_plugin_manager()
+    store = getattr(manager, "tasks", None) if manager is not None else None
+    if store is None:
+        raise RuntimeError("plugin task registry is not available")
+    return store
+
 #: Surface name -> handler. Kept as a module-level table so ``dispatch`` has exactly
 #: one lookup, and so adding a surface requires touching one obvious place.
 _SURFACE_TABLE = {
@@ -608,6 +660,7 @@ _SURFACE_TABLE = {
     "bilibili.subtitle": SurfaceRouter._bilibili_subtitle,
     "send_media.request": SurfaceRouter._send_media,
     "media.observe": SurfaceRouter._media_observe,
+    "tasks.update": SurfaceRouter._task_update,
     "screen.capture": SurfaceRouter._screen_capture,
     "browse.read": SurfaceRouter._browse_read,
     "browse.propose": SurfaceRouter._browse_propose,

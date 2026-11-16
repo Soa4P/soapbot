@@ -10,6 +10,27 @@
 
 ## [Unreleased]
 
+### 长任务登记与「未确认完成」（A15-t7，ops-handoff 吸收 2 落地）
+
+原来错在哪：审批总线记录的是「操作者批了什么」，但没有识别「被批的任务真的做完
+了吗」——一个插件跑的长任务（每夜同步、外部提醒）完成与否，面板上无处可见。
+reference-ops-handoff.md 吸收 2 的设计增补：审批记录增加 `done_at`（插件标记完成，
+面板可见），超时未标记的审批在面板标「未确认完成」。实现归属面板（本批）。
+
+现在：
+
+- **宿主任务登记**（`plugins/tasks.py`，`data/plugin-tasks.json`，仿 approvals 的
+  原子替换 + 0o600）：`(plugin, task_id)` 隔离——插件名来自宿主绑定的调用方，
+  插件不能碰别家的行；损坏文件降级为空表。
+- **surface `tasks.update`**（wire 白名单 + ctx.task_update shim）：声明/标记完成
+  二合一，`expected_within_hours` 是插件自报的软 SLA。审计只记 task_id 与 done
+  布尔，不记 note 正文。
+- **done_at 粘性**：一旦记录，后续 `done=False` 更新不能抹掉——未完成是谎报过去。
+- **面板**：`GET /api/plugins/tasks`（ADMIN）聚合全量；已装插件表格加「长任务」列
+  （✅ n 项已完成 / 🟡 n 项未确认完成 / n 项进行中）。
+- 测试 +7（`test_plugin_tasks.py`：按插件隔离、超时判定、done 粘性、损坏降级、
+  重启读回、surface 写穿透、返回形状）。
+
 ### Dream 记忆提炼：闲置边界「先写记忆、再压缩」（A15-t6，qq-dsh-bridge + SeekMemory 设计输入落地）
 
 原来错在哪：闲置折叠把旧轮次从提示词里移除后，那些轮次的内容只剩摘要文本——细节
