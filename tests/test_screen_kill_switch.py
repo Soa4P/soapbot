@@ -285,3 +285,76 @@ async def test_panic_is_idempotent(data_dir, monkeypatch) -> None:
     assert "急停已拉下" in first
     second = await stage._cmd_panic(ctx, [])
     assert "已经拉下" in second  # engaged already: no double-write, just a reminder
+
+
+# ------------------------------------------------------------------ 授权窗 API（v1.0 审计补测）
+async def test_hold_endpoints_engage_show_and_revoke(api_env) -> None:
+    """审计补测：hold 三端点此前无任何测试。owner+token 全流程走通并进操作日志。"""
+    empty = await api_env.client.get("/api/screen/hold")
+    assert empty.status_code == 200 and empty.json()["hold"] is None
+
+    engaged = await api_env.client.post("/api/screen/hold", json={"minutes": 20})
+    assert engaged.status_code == 200
+    hold = engaged.json()["hold"]
+    assert hold["minutes"] == 20 and hold["by"] == "1"
+
+    state = (await api_env.client.get("/api/screen/hold")).json()
+    assert state["hold"]["minutes"] == 20
+    ops = (await api_env.client.get("/api/screen/ops")).json()["ops"]
+    assert any(e["action"] == "control.hold" for e in ops)
+
+    revoked = await api_env.client.delete("/api/screen/hold")
+    assert revoked.status_code == 200
+    assert (await api_env.client.get("/api/screen/hold")).json()["hold"] is None
+
+
+async def test_hold_engagement_is_clamped_on_the_server(api_env) -> None:
+    """前端 Math.max/min 之外，服务端还有 Pydantic(ge/le) + engage(max_minutes) 两层。"""
+    huge = await api_env.client.post("/api/screen/hold", json={"minutes": 999})
+    assert huge.status_code == 422  # le=60 直接拒绝，不静默钳制
+    zero = await api_env.client.post("/api/screen/hold", json={"minutes": 0})
+    assert zero.status_code == 422  # ge=1
+    bad = await api_env.client.post("/api/screen/hold", json={"minutes": "abc"})
+    assert bad.status_code == 422
+
+
+async def test_a_member_and_a_cookie_cannot_touch_the_hold(api_env) -> None:
+    api_env.current.update(subject="2", role="member")
+    assert (await api_env.client.post("/api/screen/hold", json={"minutes": 15})).status_code == 403
+    assert (await api_env.client.delete("/api/screen/hold")).status_code == 403
+    assert (await api_env.client.get("/api/screen/hold")).status_code == 403
+    api_env.current.update(role="owner", mode="cookie")
+    assert (await api_env.client.post("/api/screen/hold", json={"minutes": 15})).status_code == 401
+
+
+async def test_hold_does_not_survive_a_restart(api_env) -> None:
+    """内存态 fail closed：新实例 = 重启 = 无授权（与 _CONTROL_HOLDER 单例语义一致）。"""
+    from soapbot.screen.control import ControlHolder
+
+    await api_env.client.post("/api/screen/hold", json={"minutes": 15})
+    assert (await api_env.client.get("/api/screen/hold")).json()["hold"] is not None
+    assert ControlHolder().active() is None  # 新实例（=重启后）没有持有
+
+
+def test_control_capability_has_its_own_tighter_quota() -> None:
+    """审计 P2：CONTROL 是唯一在物理机上「写」的能力，配额 30/min 偏宽 → 独立 10/min 桶。"""
+    from soapbot.plugins.manifest import Capability
+    from soapbot.plugins.sandbox import CapabilityGrant, CapabilityGuard
+
+    guard = CapabilityGuard(
+        CapabilityGrant(plugin="p", declared=frozenset({Capability.CONTROL}),
+                        approved=frozenset({Capability.CONTROL}))
+    )
+    # 10 次以内全部放行
+    for _ in range(10):
+        guard.check(Capability.CONTROL)
+    with pytest.raises(Exception, match="quota"):
+        guard.check(Capability.CONTROL)
+    # 独立桶：敏感类（如 SCREEN）不受 CONTROL 用量挤占
+    guard2 = CapabilityGuard(
+        CapabilityGrant(plugin="p", declared=frozenset({Capability.CONTROL, Capability.SCREEN}),
+                        approved=frozenset({Capability.CONTROL, Capability.SCREEN}))
+    )
+    for _ in range(10):
+        guard2.check(Capability.CONTROL)
+    guard2.check(Capability.SCREEN)  # 不因 CONTROL 满额被拒

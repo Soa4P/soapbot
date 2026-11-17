@@ -150,7 +150,7 @@ class CapabilityGuard(_SealedObject):
     self-escalation (reproduced during the isolation review).
     """
 
-    __slots__ = ("_quota", "_sensitive_quota", "audit", "grant", "plugin")
+    __slots__ = ("_control_quota", "_quota", "_sensitive_quota", "audit", "grant", "plugin")
 
     def __init__(
         self,
@@ -159,15 +159,22 @@ class CapabilityGuard(_SealedObject):
         audit: AuditLog | None = None,
         quota_per_minute: int = 120,
         sensitive_quota_per_minute: int = 30,
+        control_quota_per_minute: int = 10,
     ) -> None:
         self.grant = grant
         self.audit = audit or get_audit_log()
         self.plugin = grant.plugin
         # Separate budgets: a plugin's ordinary work must not be starved by, and
-        # must not be able to subsidise, its sensitive operations.
+        # must not be able to subsidise, its sensitive operations. CONTROL gets a
+        # third, tighter bucket: it is the one capability whose actions are
+        # *writes on a physical machine* (input injection) — 30/min was a
+        # read-face number, and the operator's hold is the real limit anyway.
         self._quota = SlidingWindowLimiter(limit=quota_per_minute, window_seconds=60)
         self._sensitive_quota = SlidingWindowLimiter(
             limit=sensitive_quota_per_minute, window_seconds=60
+        )
+        self._control_quota = SlidingWindowLimiter(
+            limit=control_quota_per_minute, window_seconds=60
         )
         self._seal()
 
@@ -185,9 +192,13 @@ class CapabilityGuard(_SealedObject):
             raise CapabilityDeniedError(self.plugin, capability, reason)
 
         limiter = (
-            self._sensitive_quota
-            if capability in SENSITIVE_CAPABILITIES or capability in RATE_LIMITED_CAPABILITIES
-            else self._quota
+            self._control_quota
+            if capability is Capability.CONTROL
+            else (
+                self._sensitive_quota
+                if capability in SENSITIVE_CAPABILITIES or capability in RATE_LIMITED_CAPABILITIES
+                else self._quota
+            )
         )
         result = limiter.check(self.plugin)
         if result.limited:
