@@ -6,8 +6,10 @@ name: ai-review
 #
 #   1. checkout is pinned to the *base* commit — the workflow and the script it runs are
 #      the reviewed ones, not whatever the PR added;
-#   2. the PR is only ever read as text through `gh pr diff`. No `pip install`, no
-#      `npm install`, no running anything from the PR.
+#   2. the PR is only ever *read as text*: its diff via `gh pr diff`, and its file tree
+#      via `git archive` extracted into a temp dir. Extraction is data movement — no
+#      `pip install`, no `npm install`, nothing from the PR is ever executed, imported
+#      or put on a path where an interpreter would pick it up.
 #
 # This job never approves and never merges. It posts a comment and a label; the merge
 # decision stays with the deterministic checks and the maintainer.
@@ -29,10 +31,11 @@ jobs:
     # Drafts are skipped: the author is still working, and a comment per push teaches
     # people to ignore the comments.
     if: github.event.pull_request.draft == false
-    # 25 rather than 15: fetching a large diff, one slow model round-trip and the comment
-    # call all sit inside this budget, while a hung job still stops long before GitHub's
-    # six-hour default.
-    timeout-minutes: 25
+    # 35 rather than 25: full-file review makes one small call per file group (≤10)
+    # plus one synthesis call, each with a 60s timeout and one sanctioned retry — the
+    # worst legitimate run is roughly twice the old single-call budget, while a hung
+    # job still stops long before GitHub's six-hour default.
+    timeout-minutes: 35
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,6 +57,20 @@ jobs:
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only > "$RUNNER_TEMP/pr-files.txt"
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json commits --jq '.commits[].messageHeadline' > "$RUNNER_TEMP/pr-commits.txt"
 
+      - name: Materialise the PR tree as text
+        # Full-file review needs the PR-side content of each changed file. Fetch the
+        # PR head and extract the tree with `git archive | tar -x` — a byte-for-byte
+        # export into a temp directory. Nothing here executes PR code: the reviewer
+        # script opens the extracted files read-only, from the pinned-base checkout.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --depth=1 origin "refs/pull/$PR/head"
+          mkdir -p "$RUNNER_TEMP/pr-tree"
+          git archive FETCH_HEAD | tar -x -C "$RUNNER_TEMP/pr-tree"
+          du -sh "$RUNNER_TEMP/pr-tree"
+
       - name: Ask the model
         id: review
         env:
@@ -62,6 +79,7 @@ jobs:
           PR_DIFF_PATH: ${{ runner.temp }}/pr.diff
           PR_CHANGED_FILES_PATH: ${{ runner.temp }}/pr-files.txt
           PR_COMMITS_PATH: ${{ runner.temp }}/pr-commits.txt
+          PR_FILES_ROOT: ${{ runner.temp }}/pr-tree
           AI_REVIEW_COMMENT_PATH: ${{ runner.temp }}/comment.md
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
