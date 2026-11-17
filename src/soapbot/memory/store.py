@@ -718,10 +718,22 @@ class MemoryStore:
             payload.setdefault(item.id, item)
             channels.setdefault(item.id, set()).add("keyword")
 
-        # Importance nudges ties apart without letting it dominate rank order.
+        # Importance nudges ties apart without letting it dominate rank order, and a
+        # freshness factor fades stale memories toward the bottom — 淡忘 ≠ 删除
+        # (fish-memory/SeekMemory 设计输入)：半衰期按重要度分档，重要记忆衰减慢。
+        # created_at is already carried by both channels; rows with no timestamp
+        # (import-time fixtures) keep their score unchanged rather than getting a
+        # fake "ancient" age.
+        now = time.time()
         for mid, base in scores.items():
             item = payload[mid]
-            scores[mid] = base * (0.8 + 0.4 * max(0.0, min(1.0, item.importance)))
+            importance = max(0.0, min(1.0, item.importance))
+            freshness = 1.0
+            if item.created_at > 0:
+                half_life_days = 30.0 + 150.0 * importance
+                age_days = max(0.0, (now - item.created_at) / 86400)
+                freshness = 0.5 ** (age_days / max(1.0, half_life_days))
+            scores[mid] = base * (0.8 + 0.4 * importance) * freshness
 
         ordered = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:limit]
         for mid, score in ordered:
