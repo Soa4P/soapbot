@@ -674,6 +674,32 @@ class PluginContext:
         )
         return result
 
+    async def control_act(
+        self,
+        action: str,
+        *,
+        x: int = 0,
+        y: int = 0,
+        text: str = "",
+        key: str = "",
+        delta: int = 0,
+    ) -> dict[str, Any]:
+        """Run one input action on the dedicated machine (phase 2).
+
+        Requires the ``control`` capability, but the capability alone grants
+        nothing: the host re-runs the full gate chain on every call (kill switch
+        fresh-read → flag + hostname → the operator's time-boxed hold, which the
+        plugin can neither see nor extend). The reply is metadata only — typed
+        text comes back as its length, never its content, and never enters any
+        log or audit record.
+        """
+        return await self._surface_router().dispatch(
+            "control.act",
+            {"action": str(action), "x": int(x), "y": int(y),
+             "text": str(text), "key": str(key), "delta": int(delta)},
+            self._require_caller("control_act"),
+        )
+
     async def task_update(
         self,
         task_id: str,

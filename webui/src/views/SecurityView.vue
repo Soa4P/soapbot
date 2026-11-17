@@ -59,6 +59,44 @@ const screenKilled = computed(() => screenOps.data.value?.killed ?? false)
 const screenKill = computed(() => screenOps.data.value?.kill ?? null)
 const screenOpsRows = computed(() => screenOps.data.value?.ops ?? [])
 
+// --- control hold (phase 2: keyboard/mouse injection) -------------------------
+// Same poll feeds it: /ops carries the hold so one request covers the whole card.
+// Engaging is owner + token on the server, like the kill switch; the window is
+// in-memory, so a restart drops it regardless of what the panel shows.
+const screenHold = computed(() => screenOps.data.value?.hold ?? null)
+const holdMinutes = ref(15)
+const holdBusy = ref(false)
+
+async function engageHold(): Promise<void> {
+  holdBusy.value = true
+  screenNote.value = ''
+  screenError.value = ''
+  try {
+    await api.screenHoldEngage(Math.max(1, Math.min(Number(holdMinutes.value) || 15, 60)))
+    screenNote.value = t('security.screen.holdNote')
+    await screenOps.reload()
+  } catch (err) {
+    screenError.value = err instanceof Error ? err.message : t('security.screen.error')
+  } finally {
+    holdBusy.value = false
+  }
+}
+
+async function revokeHold(): Promise<void> {
+  holdBusy.value = true
+  screenNote.value = ''
+  screenError.value = ''
+  try {
+    await api.screenHoldRevoke()
+    screenNote.value = t('security.screen.holdRevokedNote')
+    await screenOps.reload()
+  } catch (err) {
+    screenError.value = err instanceof Error ? err.message : t('security.screen.error')
+  } finally {
+    holdBusy.value = false
+  }
+}
+
 onUnmounted(() => clearInterval(screenOpsTimer))
 
 async function engageScreenKill(): Promise<void> {
@@ -487,6 +525,26 @@ async function revokeEveryToken(): Promise<void> {
     </div>
     <div class="panel__body stack">
       <p class="hint">{{ t('security.screen.hint') }}</p>
+      <p class="hint">{{ t('security.screen.holdHint') }}</p>
+      <div class="hold-row" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+        <template v-if="screenHold">
+          <span class="tag ok">
+            {{ t('security.screen.holdActive', { minutes: screenHold.minutes, by: screenHold.by }) }}
+          </span>
+          <button class="btn ghost" type="button" :disabled="holdBusy" @click="revokeHold">
+            {{ t('security.screen.holdRevokeBtn') }}
+          </button>
+        </template>
+        <template v-else>
+          <label class="hold-minutes" style="display: inline-flex; gap: 6px; align-items: center">
+            {{ t('security.screen.holdMinutes') }}
+            <input v-model.number="holdMinutes" type="number" min="1" max="60" style="width: 70px" />
+          </label>
+          <button class="btn ghost" type="button" :disabled="holdBusy" @click="engageHold">
+            {{ t('security.screen.holdBtn') }}
+          </button>
+        </template>
+      </div>
       <p v-if="screenKilled && screenKill" class="hint" role="alert" style="color: var(--danger)">
         {{ t('security.screen.killedDetail', { reason: screenKill.reason, when: datetime(screenKill.ts) }) }}
       </p>
