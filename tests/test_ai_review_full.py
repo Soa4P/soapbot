@@ -450,3 +450,44 @@ def test_private_and_metadata_addresses_are_refused() -> None:
     for host in ("127.0.0.1", "169.254.169.254", "10.0.0.5", "192.168.1.1"):
         with pytest.raises(module.ReviewError):
             module._assert_routable_hostname(host)
+
+
+# ------------------------------------------------------- deleted 判定（v1.0 审计修复）
+def test_real_diff_header_does_not_falsify_deletion() -> None:
+    """A real `gh pr diff` section always carries "\\n--- a/…" — counting "-"
+    lines classified EVERY tree-missing live file as deleted (fully_read=True),
+    which defeated the not-fully-read downgrade. The structural marker
+    (`+++ /dev/null`) is the only honest signal."""
+    module = _module()
+    diff = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "index abc..def 100644\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    entries = module.collect_file_entries(
+        ["src/app.py"], tree_root=None, diff=diff, security_critical=()
+    )
+    assert entries[0].deleted is False
+    assert entries[0].fully_read is False  # 树缺失 = 未完整读取 = 强制降级
+
+
+def test_true_deletion_is_recognized_structurally(tmp_path) -> None:
+    module = _module()
+    diff = (
+        "diff --git a/gone.py b/gone.py\n"
+        "index abc..000\n"
+        "--- a/gone.py\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-body\n"
+    )
+    # tree_root 是真实存在的目录：文件不在其中（= 树里确实没有这个文件），
+    # 才会走到 is_file() 的删除判定分支。
+    entries = module.collect_file_entries(
+        ["gone.py"], tree_root=tmp_path, diff=diff, security_critical=()
+    )
+    assert entries[0].deleted is True and entries[0].fully_read is True
