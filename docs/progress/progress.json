@@ -3860,6 +3860,39 @@
         }
       ],
       "goal": "A15-t7 落地：审批记录「批了什么」之外，补上「真的做完了吗」的面板可见性（ops-handoff 吸收 2）"
+    },
+    {
+      "id": "a23",
+      "index": "A23",
+      "name": "键鼠控制面第二阶段（授权持有窗内的注入动作）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a23-t1",
+          "name": "screen/control.py：ControlGate（急停现读→双门→授权持有）+ ControlHolder + act 五类动作（ctypes SendInput 零依赖）",
+          "status": "done",
+          "note": "持有只存内存（默认 15 分钟、上限 60、重启即失效）；注入藏 _dispatch/_send 缝后"
+        },
+        {
+          "id": "a23-t2",
+          "name": "Capability.CONTROL 入敏感类（30/分钟滑窗）+ control.act surface（wire 白名单 + shim + ctx.control_act）",
+          "status": "done",
+          "note": "插件可申请但受同一门禁链；拒绝 SCREEN_OPS 记插件名"
+        },
+        {
+          "id": "a23-t3",
+          "name": "四端 /act grant|revoke|click|type|key|scroll + POST/DELETE /api/screen/hold + 面板安全页授权窗卡片",
+          "status": "done",
+          "note": "GET /ops 汇入 hold 状态；i18n 双语齐"
+        },
+        {
+          "id": "a23-t4",
+          "name": "测试 +35（test_screen_control.py）与文档四处（configuration/设计 §1.8/CHANGELOG/能力描述）",
+          "status": "done",
+          "note": "键入正文零进任何记录逐条钉住；非 Windows CI 的双接缝修法（act 级整体替换 + 假 user32）"
+        }
+      ],
+      "goal": "设计 §1.1 三前置逐条落地：Coopanion「一次 30 分钟」档位的单档落法；UIA/窗口绑定/浏览器通道登记为第三增量"
     }
   ],
   "archive": [

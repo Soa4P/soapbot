@@ -10,6 +10,24 @@
 
 ## [Unreleased]
 
+### 键鼠控制面第二阶段：授权持有窗内的点击/键入/按键/滚轮（设计 §1.8）
+
+原来错在哪：能力面只有「看」（A17 抓屏）没有「碰」——设计文档 §1.1 的三前置
+（专用机双门 / 急停优先 / 运行时授权）早已写定，但注入动作本身缺席，控制面停在
+「真的玩游戏」的承诺之外。
+
+现在：`screen/control.py` 五类基础动作（click / double_click / type_text / key /
+scroll）走 Windows ctypes SendInput（标准库零新依赖），完整门禁链逐项落地——
+急停文件现读高于一切（kill.py 同一把闸，损坏仍算已停）→ `CONTROL_ENABLED` +
+专用机主机名双门（与抓屏同构）→ 授权持有只存内存：owner 经面板或
+`/act grant [分钟]` 签发（默认 15 分钟、上限 60），进程重启即失效，插件与模型
+都无法延长窗口。`Capability.CONTROL` 入敏感类（30 次/分钟滑窗），surface
+`control.act` 进 wire 白名单——插件可申请但受同一门禁链，拒绝记插件名。四端
+`/act grant|revoke|click|type|key|scroll`（MANAGE_CONFIG）与面板安全页授权窗卡片。
+审计纪律不变：SCREEN_OPS 与 audit 只记动作类型/坐标/文本**长度**，键入正文零进
+任何记录（测试逐条钉住），拒绝也入日志（短 token only）。UIA 控件树、窗口绑定、
+浏览器通道登记为第三增量。测试 +35（test_screen_control.py）。
+
 ### 记忆召回新鲜度衰减：淡忘 ≠ 删除（fish-memory/SeekMemory 设计输入落地）
 
 原来错在哪：召回打分只有相似度 + 重要度微调——一条三个月前的低价值记忆和一条
