@@ -244,8 +244,18 @@ class Capability(StrEnum):
     The host therefore keeps the pixels — a plugin gets a reference and metadata,
     and the frame travels into the model context through the host-owned inbox.
     Doubly gated beyond the capability itself: the operator must enable the flag
-    AND declare this exact hostname as the bot's dedicated machine. No input
+    AND declare this exact hostname as the dedicated machine. No input
     injection exists in this phase; the plugin cannot touch the machine.
+    """
+
+    CONTROL = "control"
+    """Request keyboard/mouse injection on the dedicated machine (phase 2).
+
+    Never sufficient by itself: the ``control.act`` surface runs through the same
+    gate chain as the chat-side /act — kill switch (fresh read) → flag + hostname
+    → the operator's time-boxed hold, which the plugin cannot extend. A plugin
+    holding CONTROL can ask the host to inject; the host still refuses unless the
+    operator is actively holding the window.
     """
 
 
@@ -261,6 +271,7 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
         Capability.MEDIA_OBSERVE,
         Capability.BROWSE,
         Capability.SCREEN,
+        Capability.CONTROL,
         Capability.QZONE_READ,
         Capability.QZONE_WRITE,
         Capability.STORAGE,

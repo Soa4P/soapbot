@@ -176,3 +176,34 @@ UIA 覆盖不到的自绘界面回退；窗口绑定（只操作声明过的窗�
    （变化量筛帧/拼图/只留最新/不落盘）与其对照确认一致。
 3. **Coopanion 的「用户输入即暂停」与三前置②互补**：物理断连是操作者的最后一
    道；输入即暂停是「用户在场即让权」的软件面——两者都归操作者，不归机器人。
+
+### 1.8 控制面第二阶段落地（2026-11-18）
+
+三前置逐条状态（对照 §1.1/§1.5）：
+
+1. **专用机器双门** ✅ —— `CONTROL_ENABLED`（默认关）+ `SCREEN_DEDICATED_MACHINE`
+   主机名比对，与抓屏共用同一双门；声明为空一律拒绝。
+2. **急停优先于一切** ✅ —— `screen/kill.py` 的同一把闸，`ControlGate.check()` 每次
+   **现读**急停文件（fail closed：损坏仍算已停）；`/panic` 或面板拉闸后下一个动作
+   立即被拒，聊天侧无恢复路径（不变）。
+3. **授权持有** ✅ —— 授权窗（hold）只存内存：owner 经面板 `POST /api/screen/hold`
+   或四端 `/act grant [分钟]`（MANAGE_CONFIG）签发，默认 15 分钟、上限 60
+   （Coopanion「一次 30 分钟」档位的单档落法）；进程重启即失效，插件与模型都无法
+   延长窗口。Coopanion 其余档位由 /act 自身的确认流覆盖。
+
+形态与边界：
+
+* `screen/control.py`：`ControlGate`（check 顺序：急停 → flag+主机名 → hold，
+  任一不过抛短 token）+ `ControlHolder`（内存授权）+ `act()`（click /
+  double_click / type_text / key / scroll 五类基础动作，Windows ctypes
+  SendInput 标准库零新依赖；非 Windows `ControlUnavailableError`）。**不含**
+  UIA 控件树、窗口枚举绑定、浏览器通道——登记为第三增量。
+* 能力面：`Capability.CONTROL` 入 `SENSITIVE_CAPABILITIES`（30 次/分钟滑窗）；
+  surface `control.act` 进 wire 白名单 + dispatcher，插件可申请但受同一门禁链，
+  拒绝时 SCREEN_OPS 记插件名。
+* 四端命令：`/act grant [分钟]` 签发、`/act revoke` 收回、`/act click <x> <y>` /
+  `/act type <文本>` / `/act key <键名>` / `/act scroll <±格>`——无授权窗一律
+  短 token 拒绝。
+* 审计纪律：SCREEN_OPS 与 audit 只记动作类型、目标坐标与文本**长度**——键入文本
+  零出现（测试逐条钉住），拒绝也入日志（token only）。
+* 面板：安全页授权窗按钮（同急停卡片模式），`GET /api/screen/ops` 动作行自然汇入。
