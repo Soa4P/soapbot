@@ -386,3 +386,62 @@ async def test_knowledge_list_and_delete(db) -> None:
 async def test_knowledge_search_empty_query(db) -> None:
     kb = KnowledgeBase(db, embedder=None)
     assert await kb.search("  ") == []
+
+# ---------------------------------------------------------------- freshness decay
+async def test_stale_memory_ranks_below_fresh_one_with_equal_similarity(
+    store: MemoryStore, db
+) -> None:
+    """淡忘 ≠ 删除：同相似度下，旧记忆沉底、新记忆浮起（fish-memory/SeekMemory
+    设计输入——半衰期按重要度分档，importance 相同则半衰期相同）。"""
+    import time as _time
+
+    from soapbot.memory.db import MemoryRow
+
+    old_id = await store.add_memory(content="用户部署在雨云", layer=MemoryLayer.SEMANTIC)
+    new_id = await store.add_memory(content="用户部署在雨云呀", layer=MemoryLayer.SEMANTIC)
+    async with db.write() as session:
+        await session.execute(
+            MemoryRow.__table__.update()
+            .where(MemoryRow.id == old_id)
+            .values(created_at=_time.time() - 180 * 86400)
+        )
+    result = await store.recall("部署在雨云", limit=5)
+    ids = [it.id for it in result.items]
+    assert new_id in ids and old_id in ids
+    assert ids.index(new_id) < ids.index(old_id)
+
+
+async def test_important_memories_fade_slower(store: MemoryStore, db) -> None:
+    """同年龄同相似度：重要度高的衰减慢——分数留在排位前面。"""
+    import time as _time
+
+    from soapbot.memory.db import MemoryRow
+
+    low_id = await store.add_memory(
+        content="部署低重要度备注", layer=MemoryLayer.SEMANTIC, importance=0.1
+    )
+    high_id = await store.add_memory(
+        content="部署高重要度备注", layer=MemoryLayer.SEMANTIC, importance=0.9
+    )
+    async with db.write() as session:
+        await session.execute(
+            MemoryRow.__table__.update().values(created_at=_time.time() - 120 * 86400)
+        )
+    result = await store.recall("部署", limit=5)
+    scores = {it.id: it.score for it in result.items}
+    assert scores[high_id] > scores[low_id]
+
+
+async def test_rows_without_timestamp_are_not_punished(store: MemoryStore, db) -> None:
+    """created_at=0 的夹具行：不炸、也不被当作「一万年前的古老记忆」惩罚——
+    时间戳缺位 = 无法判断 = 分数保持。"""
+    from soapbot.memory.db import MemoryRow
+
+    mid = await store.add_memory(content="小明喜欢猫", layer=MemoryLayer.SEMANTIC)
+    async with db.write() as session:
+        await session.execute(
+            MemoryRow.__table__.update().where(MemoryRow.id == mid).values(created_at=0)
+        )
+    result = await store.recall("小明喜欢猫", limit=5)
+    assert any(it.id == mid and it.score > 0 for it in result.items)
+
