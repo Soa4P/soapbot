@@ -50,6 +50,33 @@ def workflow_problems(workflow: dict) -> list[str]:
     elif (checkout.get("with") or {}).get("ref") != BASE_REF:
         out.append("checkout 没有钉在 pull_request.base.sha")
 
+    # The full-file review reads the PR tree extracted by this step; without it the
+    # script silently falls back to diff-only and the review loses its depth.
+    materialise = next(
+        (
+            step
+            for step in steps
+            if "git archive" in str(step.get("run", ""))
+            and "pr-tree" in str(step.get("run", ""))
+        ),
+        None,
+    )
+    ask = next(
+        (step for step in steps if str(step.get("name", "")) == "Ask the model"), None
+    )
+    if ask is None:
+        out.append("缺少 Ask the model 步骤")
+    else:
+        ask_env = ask.get("env") or {}
+        if "PR_FILES_ROOT" not in ask_env:
+            out.append("Ask the model 没有接收 PR_FILES_ROOT（全文件审查拿不到 PR 树）")
+        if materialise is None:
+            out.append("缺少抽 PR 树的 Materialise 步骤（git archive → pr-tree）")
+        elif names.index(str(materialise.get("name", ""))) > names.index("Ask the model"):
+            out.append("Materialise 步骤排在 Ask the model 之后，PR 树永远来不及准备")
+        elif "git fetch" not in str(materialise.get("run", "")):
+            out.append("Materialise 步骤没有 git fetch PR head")
+
     if ENFORCE not in names:
         out.append("缺少 Enforce review mode 步骤")
     else:

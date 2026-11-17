@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -22,6 +23,9 @@ def _module():
     spec = importlib.util.spec_from_file_location("ai_review", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    # dataclasses._is_type() resolves string annotations against sys.modules[module
+    # name]; without this, running this file alone crashes on the FileEntry dataclass.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
