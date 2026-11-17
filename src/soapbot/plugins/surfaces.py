@@ -447,6 +447,64 @@ class SurfaceRouter:
             "note": "帧已交给宿主，将在本轮模型上下文中出现；插件拿不到位图。",
         }
 
+    async def _control_act(self, args: dict[str, Any], caller) -> Any:
+        """Run one input action on a plugin's behalf — phase 2.
+
+        The capability never bypasses the gate chain: the same ControlGate runs
+        here as in the chat-side /act (kill switch fresh-read → flag + hostname →
+        the operator's time-boxed hold). Refusals land in SCREEN_OPS with the
+        plugin's name, so the operator sees who asked and why it was refused.
+        Typed text never enters any log — only its length.
+        """
+        self._guard.check(Capability.CONTROL, detail="control act")
+        from soapbot.config import settings
+        from soapbot.screen.control import (
+            _CONTROL_HOLDER,
+            ControlGate,
+            ControlRefusedError,
+            act,
+        )
+
+        session_key = str(getattr(caller, "session_key", "") or "")
+        try:
+            result = act(
+                ControlGate.from_settings(settings),
+                _CONTROL_HOLDER,
+                str(args.get("action") or ""),
+                x=int(args.get("x") or 0),
+                y=int(args.get("y") or 0),
+                text=str(args.get("text") or ""),
+                key=str(args.get("key") or ""),
+                delta=int(args.get("delta") or 0),
+            )
+        except ControlRefusedError as exc:
+            from soapbot.screen.opslog import SCREEN_OPS
+
+            SCREEN_OPS.record(
+                action="control.plugin", outcome="deny", reason=exc.reason,
+                session=session_key, plugin=self._plugin,
+            )
+            if self._audit is not None:
+                self._audit.record(
+                    kind="plugin",
+                    action="surface:control.act",
+                    outcome="deny",
+                    detail=f"plugin={self._plugin} reason={exc.reason}",
+                    plugin=self._plugin,
+                )
+            raise PermissionError(exc.reason) from exc
+        if self._audit is not None:
+            self._audit.record(
+                kind="plugin",
+                action="surface:control.act",
+                outcome="allow",
+                # Metadata only: action name + returned counts, never typed text.
+                detail=f"plugin={self._plugin} action={result.get('action', '')} "
+                       f"detail={ {k: v for k, v in result.items() if k != 'note'} }",
+                plugin=self._plugin,
+            )
+        return {**result, "note": "动作已执行；返回值为元数据（键入文本只记长度）。"}
+
     async def _browse_propose(self, args: dict[str, Any], caller) -> Any:
         """Read a page, pre-check the caps, and create one pending spend request."""
         self._guard.check(Capability.BROWSE, detail="browse propose")
@@ -662,6 +720,7 @@ _SURFACE_TABLE = {
     "media.observe": SurfaceRouter._media_observe,
     "tasks.update": SurfaceRouter._task_update,
     "screen.capture": SurfaceRouter._screen_capture,
+    "control.act": SurfaceRouter._control_act,
     "browse.read": SurfaceRouter._browse_read,
     "browse.propose": SurfaceRouter._browse_propose,
     "qzone.read": SurfaceRouter._qzone_read,

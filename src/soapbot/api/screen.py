@@ -29,6 +29,44 @@ class KillRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=200)
 
 
+class GrantRequest(BaseModel):
+    minutes: int = Field(default=15, ge=1, le=60)
+
+
+@router.get("/hold")
+async def hold_state(auth_dep: dict[str, Any] = auth) -> dict[str, Any]:
+    """The current authorization hold, or null. Owner + token only."""
+    from soapbot.screen.control import _CONTROL_HOLDER
+
+    return {"hold": _CONTROL_HOLDER.active()}
+
+
+@router.post("/hold")
+async def engage_hold(payload: GrantRequest, auth_dep: dict[str, Any] = auth) -> dict[str, Any]:
+    """Engage the control hold (Coopanion 的「一次 30 分钟」档位): every /act
+    action runs until the hold expires. The kill switch still outranks it."""
+    from soapbot.screen.control import _CONTROL_HOLDER
+    from soapbot.screen.opslog import SCREEN_OPS
+
+    by = str((auth_dep or {}).get("subject") or "owner")
+    hold = _CONTROL_HOLDER.engage(
+        minutes=payload.minutes, by=by, max_minutes=60
+    )
+    SCREEN_OPS.record(action="control.hold", outcome="allow", by=by,
+                      reason=f"{payload.minutes}min")
+    return {"ok": True, "hold": hold}
+
+
+@router.delete("/hold")
+async def disengage_hold(auth_dep: dict[str, Any] = auth) -> dict[str, Any]:
+    from soapbot.screen.control import _CONTROL_HOLDER
+    from soapbot.screen.opslog import SCREEN_OPS
+
+    _CONTROL_HOLDER.disengage()
+    SCREEN_OPS.record(action="control.hold-off", outcome="allow")
+    return {"ok": True}
+
+
 @router.get("/ops")
 async def ops(limit: int = 100, auth_dep: dict[str, Any] = auth) -> dict[str, Any]:
     """The operator's live view: switch state plus the operation ring.
@@ -36,12 +74,14 @@ async def ops(limit: int = 100, auth_dep: dict[str, Any] = auth) -> dict[str, An
     Metadata only by construction — the ring never receives frame content (pinned
     by tests, same zero-leak rule as the audit).
     """
+    from soapbot.screen.control import _CONTROL_HOLDER
     from soapbot.screen.kill import is_killed
     from soapbot.screen.opslog import SCREEN_OPS
 
     return {
         "killed": is_killed(settings) is not None,
         "kill": is_killed(settings),
+        "hold": _CONTROL_HOLDER.active(),
         "ops": SCREEN_OPS.recent(limit),
     }
 

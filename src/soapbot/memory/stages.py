@@ -493,6 +493,10 @@ class CommandStage(Stage):
         # 急停：只许拉闸、不许合闸——MANAGE_CONFIG 起步。复活没有命令（见
         # screen/kill.py），被劫持的聊天永远救不活它；这个不对称是设计的一部分。
         "panic": Permission.MANAGE_CONFIG,
+        # 键鼠控制面第二阶段：/act-grant 签发授权持有（MANAGE_CONFIG），/act 动作
+        # 在持有窗内执行——每个动作仍过完整门禁链（急停现读 + flag + 专用机 +
+        # grant 有效），SCREEN_OPS 记录动作类型与坐标，永不记键入正文。
+        "act": Permission.MANAGE_CONFIG,
         # Group moderation. These make the bot do something *to a person* in front
         # of the whole group, under the owner's name, so they need their own
         # permission rather than riding on USE_COMMAND.
@@ -935,7 +939,65 @@ class CommandStage(Stage):
         )
         return "急停已拉下：看屏幕（及将来的键鼠控制面）全部停止。恢复请到面板。"
 
-    # ------------------------------------------------------------- moderation
+    async def _cmd_act(self, ctx: PipelineContext, args: list[str]) -> str:
+        """键鼠控制面第二阶段：/act-grant 签发限时持有，/act 动作在持有窗内执行。
+
+        授权持有只存内存（进程重启即失效 fail closed）；急停文件现读高于一切。
+        每个动作进 SCREEN_OPS（动作类型/坐标/长度，永不记键入正文）。
+        """
+        from soapbot.config import settings
+        from soapbot.screen.control import (
+            _CONTROL_HOLDER,
+            ControlGate,
+            ControlRefusedError,
+            act,
+        )
+        from soapbot.screen.opslog import SCREEN_OPS
+
+        if args and args[0] == "grant":
+            # /act grant [分钟]：签发限时持有（MANAGE_CONFIG 已由门禁保证）。
+            minutes = settings.control_hold_minutes
+            if len(args) > 1 and args[1].isdigit():
+                minutes = max(1, min(int(args[1]), settings.control_hold_max_minutes))
+            by = str(ctx.extras.get("principal") or "operator")
+            _CONTROL_HOLDER.engage(
+                minutes=minutes, by=by, max_minutes=settings.control_hold_max_minutes
+            )
+            SCREEN_OPS.record(action="control.grant", outcome="allow", by=by,
+                              session=ctx.event.session_key)
+            return f"授权持有已签发（{minutes} 分钟）。期间 /act 动作会真实执行，/panic 随时可断。"
+        if args and args[0] == "revoke":
+            _CONTROL_HOLDER.disengage()
+            SCREEN_OPS.record(action="control.revoke", outcome="allow",
+                              session=ctx.event.session_key)
+            return "授权持有已撤销。"
+        if not args:
+            return "用法：/act grant [分钟] | /act revoke | /act click <x> <y> | /act type <文本> | /act key <键名>"
+
+        # 动作路径：grant 检查 → 门禁链 → SendInput。
+        gate = ControlGate.from_settings(settings)
+        try:
+            result = act(gate, _CONTROL_HOLDER, args[0],
+                         x=int(args[1]) if len(args) > 1 and args[1].lstrip("-").isdigit() else 0,
+                         y=int(args[2]) if len(args) > 2 and args[2].lstrip("-").isdigit() else 0,
+                         text=" ".join(args[1:]) if args[0] == "type" else "",
+                         key=args[1] if args[0] == "key" and len(args) > 1 else "",
+                         delta=int(args[1]) if args[0] == "scroll" and len(args) > 1 and args[1].lstrip("-").isdigit() else 0)
+        except ControlRefusedError as exc:
+            SCREEN_OPS.record(action="control.act", outcome="deny", reason=exc.reason,
+                              session=ctx.event.session_key)
+            return f"动作被拒绝（{exc.reason}）。"
+        except ValueError as exc:
+            return f"参数不合法：{exc}"
+
+        by = str(ctx.extras.get("principal") or "operator")
+        SCREEN_OPS.record(
+            action=f"control.{result['action']}", outcome="allow", by=by,
+            session=ctx.event.session_key,
+            x=result.get("x", 0), y=result.get("y", 0),
+            chars=result.get("chars", 0),
+        )
+        return ""  # 不短路模型：动作的可见效果是屏幕本身，模型可 /look 确认
     async def _cmd_mute(self, ctx: PipelineContext, args: list[str]) -> str:
         target, error = self._moderation_target(ctx, args)
         if error:

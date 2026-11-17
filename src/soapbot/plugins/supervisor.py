@@ -152,6 +152,7 @@ ALLOWED_SURFACES = frozenset(
         "send_media.request",
         "media.observe",
         "screen.capture",
+        "control.act",
         "tasks.update",
         "browse.read",
         "browse.propose",
@@ -488,6 +489,26 @@ class _RemoteCtx:
         and the dedicated-machine declaration on every call.
         """
         return _call("screen.capture", {"frames": int(frames)})
+
+    async def control_act(self, action: str, **kwargs):
+        """Ask the host to run one keyboard/mouse action (phase 2).
+
+        The capability is necessary but never sufficient: the parent runs the full
+        gate chain on every call — kill switch (fresh read), flag + hostname, and
+        the operator's time-boxed hold the plugin can neither see nor extend. The
+        reply is metadata only (typed text returns as a count, never content).
+        """
+        return _call(
+            "control.act",
+            {
+                "action": str(action),
+                "x": int(kwargs.get("x") or 0),
+                "y": int(kwargs.get("y") or 0),
+                "text": str(kwargs.get("text") or ""),
+                "key": str(kwargs.get("key") or ""),
+                "delta": int(kwargs.get("delta") or 0),
+            },
+        )
 
     #: Raw escape hatch, present so the wire can be exercised end to end (including
     #: by a hostile plugin). It grants nothing: every request still lands in the

@@ -253,6 +253,21 @@ class Settings(BaseSettings):
     """LIGHT-slot model calls the idle Dream pass may spend per calendar day
     (SeekMemory's Dream budget template). In-memory, resets on restart."""
 
+    control_enabled: bool = False
+    """键鼠控制面第二阶段（Coopanion 授权档位落地）：允许在专用机上注入输入。
+
+    与 screen 双门同构，外加第三道——授权持有：/act-grant（MANAGE_CONFIG）签发
+    的限时持有（默认 15 分钟、上限 60）是注入的唯一运行时凭据；进程重启即失效
+    （fail closed）。急停文件现读高于一切。每个动作进 SCREEN_OPS（动作类型/坐标/
+    文本长度，永不记键入正文）。UIA 控件树与窗口绑定登记为第三增量，本批不含。
+    """
+
+    control_hold_minutes: int = 15
+    """授权持有默认时长（分钟），/act-grant 未指定分钟时使用。"""
+
+    control_hold_max_minutes: int = 60
+    """授权持有时长上限（分钟），/act-grant 传更大值会被钳制。"""
+
     bili_cookie: SecretStr = SecretStr("")
     """Bilibili login cookie (the ``SESSDATA=...`` pair) for the plugins' ``bilibili``
     capability.
