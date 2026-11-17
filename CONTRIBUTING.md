@@ -276,20 +276,21 @@ await None 抛错被 pipeline 当作 observer 错误吞掉，于是所有耗时�
 
 ## 依赖更新
 
-四个 ecosystem（pip、`webui/` 的 npm、`desktop/src-tauri` 的 cargo、github-actions）每周
-检查一次，配置在 `.github/dependabot.yml`，每条规则的理由写在文件注释里。
+依赖升级是**人工动作**。全部运行时依赖钉死精确版本（见 README 与
+docs/configuration.md），`make check-deps` 保证 `requirements.txt` 与 `pyproject.toml`
+一致。仓库不再使用 Dependabot（2026-11-18 移除 `.github/dependabot.yml`）：它每周
+最多产生 20 条分支/PR，换来的只是「点合并就完事」的诱惑；CVE 检测并不依赖它——CI
+每次 push 的 `pip-audit` 是 blocking 门禁，钉住的依赖集出现已知漏洞时照样会红。
 
-读一个 Dependabot PR 的顺序：
+手动升级的顺序：
 
-1. **看 group**。`python-minor-and-patch` 与 `panel-minor-and-patch` 把 minor/patch 打成
-   一个 PR，一次 CI 覆盖全部；`cargo` 与 `github-actions` 各自独立。
-2. **major 不会自动来**。`ignore: version-update:semver-major`：major 需要人先读
-   changelog，所以它应该是 issue，不是 bot PR。`github-actions` 例外，它的 major 通常
-   只是运行时升级、输入不变。
-3. **合并看 CI**。必需的六个检查全绿：`backend` 两个平台、`frontend`、`desktop`、
-   `package`、`review`。`types` 红了也要修，但它是咨询性的，不拦合并。
-   2026-11-08 的 `#18`（16 个包）在 Windows 上红过一次，根因是 `.env` 旁路锁的字节
-   竞态，与依赖无关；修完之后同一组包在两个平台都通过。
+1. **定目标再动**。`pip-audit`（CI blocking）报出的 CVE、或你明确需要的功能。没有
+   目标就不升级——钉死版本的默认状态就是「不动」，这与审批哲学一致：动作要有理由。
+2. **小步**。一次 PR 只动一个 ecosystem 的一个包（或一组直接相关的包），push 后看
+   六个必需检查（`backend` 两个平台、`frontend`、`desktop`、`package`、`review`）。
+   `types` 是咨询性检查，红了也要修但不拦合并。
+3. **major 先读 changelog**。major 升级开 issue 记录 API 变化面与迁移步骤，确认后再
+   动手——这一步原本是 dependabot 配置里的 `ignore semver-major`，现在由人执行。
 4. **合并后本地跑一次全量**。CI 跑的是同一套，但本地能立刻看到新增的 warning。
 
 想确认「升级后是否兼容」而不动主环境：
