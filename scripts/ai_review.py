@@ -402,7 +402,11 @@ def collect_file_entries(
             ))
             continue
         if not resolved.is_file():
-            deleted = hunks_by_path.get(path, "").count("\n-") > 0
+            # True deletions are marked structurally (`+++ /dev/null`). Counting
+            # "-" lines would match the "\n--- a/…" header EVERY real diff section
+            # carries — classifying every tree-missing live file as deleted
+            # (fully_read=True) and defeating the not-fully-read downgrade.
+            deleted = "\n+++ /dev/null" in hunks_by_path.get(path, "")
             entries.append(FileEntry(
                 path=path, mode="diff_only",
                 reason="" if deleted else "PR 侧文件缺失（树未提供或读取失败）",
