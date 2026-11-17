@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-17T11:00:00+08:00",
+  "updated_at": "2026-11-17T12:00:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3600,7 +3600,8 @@
         {
           "id": "a15-t7",
           "name": "done_at 假完成识别（面板侧）",
-          "status": "todo"
+          "status": "done",
+          "note": "PR #82：长任务登记（plugins/tasks.py 原子 JSON）+ tasks.update surface + GET /api/plugins/tasks 聚合 + PluginsView 长任务列；done_at 粘性、按 (plugin, task_id) 隔离"
         },
         {
           "id": "a15-t8",
@@ -3805,6 +3806,60 @@
         }
       ],
       "goal": "把 compaction.py 的双门机器接进调度器、并按 qq-dsh-bridge 的实测收益落在闲置边界——A15-t4 增量折叠的「压缩时机」收口"
+    },
+    {
+      "id": "a21",
+      "index": "A21",
+      "name": "Dream 记忆提炼（闲置边界「先写记忆、再压缩」）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a21-t1",
+          "name": "IdleFoldRunner Dream 提炼步：候选轮次 → LIGHT 槽模型提炼 → L2（vet 守卫）",
+          "status": "done",
+          "note": "提炼失败不阻断折叠；水印协同只提炼新候选"
+        },
+        {
+          "id": "a21-t2",
+          "name": "DREAM_ENABLED 默认关 + DREAM_MAX_CALLS_PER_DAY=12 当日预算（SeekMemory 模板）",
+          "status": "done",
+          "note": "builder 双门：enable_memory_extraction + DREAM_ENABLED 同时开才带模型 extractor"
+        },
+        {
+          "id": "a21-t3",
+          "name": "测试 +6（test_dream_extraction.py）与文档三处同步",
+          "status": "done",
+          "note": "vet 隔离+审计、预算上限、水印协同均有专项用例"
+        }
+      ],
+      "goal": "A15-t6 落地：折叠前先蒸馏——qq-dsh-bridge「先写记忆、再压缩」+ SeekMemory Dream 预算模板的 soapbot 落法"
+    },
+    {
+      "id": "a22",
+      "index": "A22",
+      "name": "长任务登记与「未确认完成」（面板侧）",
+      "status": "done",
+      "tasks": [
+        {
+          "id": "a22-t1",
+          "name": "PluginTaskStore（data/plugin-tasks.json 原子 JSON，损坏降级）",
+          "status": "done",
+          "note": "(plugin, task_id) 隔离；done_at 粘性——done=False 不能抹掉已记录的完成"
+        },
+        {
+          "id": "a22-t2",
+          "name": "tasks.update surface（wire 白名单 + shim + ctx.task_update）+ 审计零 note 正文",
+          "status": "done",
+          "note": "插件名来自宿主绑定调用方，插件不能碰别家的行"
+        },
+        {
+          "id": "a22-t3",
+          "name": "GET /api/plugins/tasks 聚合 + PluginsView 长任务列（已完成/未确认完成/进行中）",
+          "status": "done",
+          "note": "超时判定 = expected_within_hours 到期无 done_at"
+        }
+      ],
+      "goal": "A15-t7 落地：审批记录「批了什么」之外，补上「真的做完了吗」的面板可见性（ops-handoff 吸收 2）"
     }
   ],
   "archive": [
