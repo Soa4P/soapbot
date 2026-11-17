@@ -500,6 +500,13 @@ export default {
   'memory.rows': 'Memory rows',
   'memory.layer': 'Layer',
   'memory.scope': 'Scope',
+  'memory.starmap.empty': 'No memory rows to show yet. Chat a little, then come back.',
+  'memory.starmap.aria': 'Memory star map: time on X, importance on Y',
+  'memory.starmap.high': 'Important',
+  'memory.starmap.low': 'Normal',
+  'memory.starmap.filtered': 'Filtered to scope “{scope}”',
+  'memory.starmap.clear': 'Clear filter',
+  'memory.starmap.legendNote': 'X = time, Y = importance; click a star to filter the list below.',
   'memory.scopeFilter': 'Filter by scope (blank for all)',
   'memory.noRows': 'No memory rows yet. They appear once the bot extracts something.',
   'memory.deleteMemoryConfirm':
