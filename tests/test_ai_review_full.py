@@ -104,7 +104,7 @@ def _diff_for(*paths: str) -> str:
 
 def test_collect_reads_full_content_and_marks_deletions(tmp_path) -> None:
     module = _module()
-    tree, files = _tree(tmp_path)
+    tree, _files = _tree(tmp_path)
     diff = (
         module.split_diff_by_file(_diff_for("src/soapbot/screen/control.py"))
         and _diff_for("docs/guide.md")
