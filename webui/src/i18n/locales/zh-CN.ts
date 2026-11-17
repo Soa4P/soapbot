@@ -348,7 +348,15 @@ export default {
   'security.screen.killBtn': '紧急停止',
   'security.screen.reviveBtn': '恢复',
   'security.screen.hint':
-    '急停立刻切断看屏幕（以及将来的键鼠控制面）的所有操作；恢复需要 owner 令牌——聊天侧没有恢复命令。下方是操作日志（只有元数据，没有画面）。',
+    '急停立刻切断看屏幕与键鼠控制面的所有操作；恢复需要 owner 令牌——聊天侧没有恢复命令。下方是操作日志（只有元数据，没有画面、没有键入文本）。',
+  'security.screen.holdHint':
+    '键鼠注入只在这个授权窗内可用：签发后 owner 用 /act 执行点击/键入等动作；窗口只存内存，重启即失效，急停随时高于它。',
+  'security.screen.holdMinutes': '授权窗（分钟）',
+  'security.screen.holdBtn': '签发授权窗',
+  'security.screen.holdActive': '授权窗有效（{minutes} 分钟，{by} 签发）',
+  'security.screen.holdRevokeBtn': '收回授权窗',
+  'security.screen.holdNote': '授权窗已签发，窗内 /act 与插件 control.act 会真实执行。',
+  'security.screen.holdRevokedNote': '授权窗已收回，注入动作立即被拒绝。',
   'security.screen.killedDetail': '已急停（原因：{reason}，时间：{when}）。',
   'security.screen.killedNote': '急停已拉下，下一次抓屏请求立即被拒绝。',
   'security.screen.revivedNote': '已恢复，看屏幕重新可用（仍受双门约束）。',

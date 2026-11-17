@@ -334,7 +334,15 @@ export default {
   'security.screen.killBtn': 'Emergency stop',
   'security.screen.reviveBtn': 'Revive',
   'security.screen.hint':
-    'The kill switch cuts every screen (and future control-plane) operation immediately; reviving needs an owner token — there is no revive command on the chat side. Below is the operation log (metadata only, never the frames).',
+    'The kill switch cuts every screen and control-plane operation immediately; reviving needs an owner token — there is no revive command on the chat side. Below is the operation log (metadata only, never the frames or typed text).',
+  'security.screen.holdHint':
+    'Input injection only runs inside this authorization hold: after engaging, the owner drives /act (click/type/…); the hold lives in memory only, a restart drops it, and the kill switch always outranks it.',
+  'security.screen.holdMinutes': 'Hold (minutes)',
+  'security.screen.holdBtn': 'Engage hold',
+  'security.screen.holdActive': 'Hold active ({minutes} min, engaged by {by})',
+  'security.screen.holdRevokeBtn': 'Revoke hold',
+  'security.screen.holdNote': 'Hold engaged; /act and plugin control.act calls now really execute.',
+  'security.screen.holdRevokedNote': 'Hold revoked; injection is refused immediately.',
   'security.screen.killedDetail': 'Stopped (reason: {reason}, at: {when}).',
   'security.screen.killedNote': 'Switch engaged; the next capture request is refused immediately.',
   'security.screen.revivedNote': 'Revived; screen capture works again (still behind the double gate).',

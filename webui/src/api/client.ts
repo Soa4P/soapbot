@@ -393,6 +393,7 @@ export const api = {
     request<{
       killed: boolean
       kill: { reason: string; by: string; ts: number } | null
+      hold: { until: number; by: string; minutes: number } | null
       ops: Array<{
         ts: number
         action: string
@@ -405,6 +406,15 @@ export const api = {
         by: string
       }>
     }>(`/api/screen/ops?limit=${limit}`),
+  /** Engage the control hold (phase 2 keyboard/mouse injection): actions run
+   * inside the time-boxed window; the kill switch still outranks it. */
+  screenHoldEngage: (minutes: number) =>
+    request<{ ok: boolean; hold: { until: number; by: string; minutes: number } }>(
+      '/api/screen/hold',
+      { method: 'POST', body: JSON.stringify({ minutes }) },
+    ),
+  screenHoldRevoke: () =>
+    request<{ ok: boolean }>('/api/screen/hold', { method: 'DELETE' }),
   screenKill: (reason: string) =>
     request<{ ok: boolean; killed: boolean }>('/api/screen/kill', {
       method: 'POST',

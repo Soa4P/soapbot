@@ -123,8 +123,6 @@ OneBot 11 网关（阶段二）用四个变量：
 | `ONEBOT_GATEWAY_PATH` | `/onebot/v11/ws` | 文档与客户端约定的路径（鉴权在握手后按 token 判断，不按路径） |
 | `ONEBOT_GATEWAY_TOKEN` | 空 | 客户端必须携带的 Bearer token；**为空时网关拒绝启动** |
 
-聊天存档有三个端开关，决定 `/api/chat/*` 是否存在：
-
 聊天存档有三个端开关，决定 `/api/chat/*` 是否存在；第四个决定这些端能不能**对话**：
 
 | 变量 | 默认 | 说明 |
@@ -138,6 +136,9 @@ OneBot 11 网关（阶段二）用四个变量：
 | `SCREEN_DEDICATED_MACHINE` | 空 | 专用工作机的主机名（`hostname` 命令输出）。**空 = 没有任何机器被声明**，看屏幕永远拒绝——这是物理隔离声明，只写给你专门给 bot 用的那台机器 |
 | `SCREEN_FRAMES_MAX` | `6` | 单次抓帧上限（1–6），多帧自动拼成一张网格图 |
 | `SCREEN_CAPTURE_INTERVAL_MS` | `500` | 同一次抓帧内相邻两帧的间隔，让模型看到变化而不是 N 张相同的图 |
+| `CONTROL_ENABLED` | `false` | **碰屏幕**（键鼠注入，控制面第二阶段）：机器人可以在专用工作机上执行点击/键入/按键/滚轮。复用与抓屏相同的双门（`SCREEN_ENABLED` + `SCREEN_DEDICATED_MACHINE`），另需本开关单独打开 |
+| `CONTROL_HOLD_MINUTES` | `15` | 授权窗默认时长（分钟）：owner 签发后注入动作只在该窗口内可用，窗口外一律拒绝 |
+| `CONTROL_HOLD_MAX_MINUTES` | `60` | 授权窗上限（分钟）：签发时超出的请求被钳制；窗口只存内存，进程重启即失效 |
 | `BILI_COOKIE` | 空 | B 站登录 Cookie（`SESSDATA=...`），供插件的 `bilibili` 能力使用；宿主持有并在请求时注入，不进日志/审计。**这是凭据**，泄露等于交出 B 站账号，只在本机或容器挂载文件里配置 |
 
 三个端开关全关时 `/api/chat/*` 返回 **404 而不是 403**：这个部署里就像没有这些路由。
@@ -155,7 +156,9 @@ OneBot 11 网关（阶段二）用四个变量：
 `SCREEN_DEDICATED_MACHINE` 必须同时成立（flag 开 + 当前主机名与声明一致），缺一即拒绝
 且拒绝原因是一个短 token。帧只进模型上下文，不落盘、不进审计、插件拿不到位图；四端
 可用 `/look [帧数]` 触发。抓屏依赖可选安装：`pip install 'soapbot[screen]'`。第二阶段
-（键鼠注入，真的「玩」游戏）有独立的三前置条件，尚未开工——见
+（键鼠注入）已落地：`CONTROL_ENABLED` 打开后，owner 经面板或 `/act-grant [分钟]` 签发
+授权窗（默认 15 分钟、上限 60、只存内存、重启即失效），窗内四端 `/act click 120 300`
+这类动作才会执行——急停仍然高于一切，门禁链逐项见
 [autonomous-capabilities-design.md](./autonomous-capabilities-design.md)。
 
 急停开关不靠配置：四端发 `/panic [原因]` 或面板安全页一键拉闸，都会写
