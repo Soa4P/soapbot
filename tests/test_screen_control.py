@@ -471,3 +471,47 @@ async def test_control_surface_runs_inside_the_hold_and_returns_metadata_only(
         e.get("action") == "surface:control.act" and e.get("outcome") == "allow"
         for e in audit_entries
     )
+
+
+# ------------------------------------------------------------------ /act command stage
+async def test_act_command_success_record_fits_the_opslog_contract(tmp_path, monkeypatch) -> None:
+    """The v1.0 audit caught the stage-level record passing x=/y=/chars= kwargs
+    that OpsLog.record does not accept — every successful /act crashed with a
+    TypeError AFTER the injection had run. This pins the aligned contract."""
+    from soapbot.core.message import IncomingMessage, MessageScene, MessageSegment, Sender
+    from soapbot.core.pipeline import PipelineContext
+    from soapbot.memory.stages import CommandStage
+
+    settings = SimpleNamespace(
+        data_dir=tmp_path, screen_enabled=True, screen_dedicated_machine="BOT-WORKER",
+        control_enabled=True, control_hold_minutes=15, control_hold_max_minutes=60,
+    )
+    monkeypatch.setattr("soapbot.config.settings", settings)
+    monkeypatch.setattr(control, "_hostname", lambda: "BOT-WORKER")
+    monkeypatch.setattr(control, "_dispatch",
+                        lambda action, **kw: {"chars": len(kw.get("text", ""))})
+    _CONTROL_HOLDER.engage(minutes=5, by="owner", max_minutes=60)
+    stage = CommandStage(store=None, kb=None)
+    event = IncomingMessage(
+        adapter="onebot11", message_id="m-act", scene=MessageScene.PRIVATE,
+        sender=Sender(user_id="10000", nickname="owner"),
+        segments=[MessageSegment.text("/act type secret-text")],
+    )
+    ctx = PipelineContext(event=event, adapter=SimpleNamespace())
+    ctx.extras["principal"] = "owner"
+
+    reply = await stage._cmd_act(ctx, ["type", "secret-text"])
+
+    assert reply == ""  # 不短路模型：动作的可见效果在屏幕上
+    entry = SCREEN_OPS.recent()[0]
+    assert entry["action"] == "control.type_text" and entry["outcome"] == "allow"
+    assert "chars=11" in entry["reason"]  # 长度并入 reason 元数据
+    assert "secret-text" not in str(entry)  # 键入正文零泄漏
+
+
+def test_act_command_permission_is_manage_config() -> None:
+    """/act 是写面命令：必须挂在 MANAGE_CONFIG（ADMIN+）而不是普通交互权限。"""
+    from soapbot.memory.stages import CommandStage
+    from soapbot.security.principal import Permission
+
+    assert CommandStage.COMMAND_PERMISSIONS.get("act") == Permission.MANAGE_CONFIG

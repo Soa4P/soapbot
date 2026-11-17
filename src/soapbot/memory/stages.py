@@ -976,8 +976,10 @@ class CommandStage(Stage):
 
         # 动作路径：grant 检查 → 门禁链 → SendInput。
         gate = ControlGate.from_settings(settings)
+        # 聊天别名 → act() 动作名：/act type 是文档承诺的命令，act() 只认 type_text。
+        action_name = {"type": "type_text"}.get(args[0], args[0])
         try:
-            result = act(gate, _CONTROL_HOLDER, args[0],
+            result = act(gate, _CONTROL_HOLDER, action_name,
                          x=int(args[1]) if len(args) > 1 and args[1].lstrip("-").isdigit() else 0,
                          y=int(args[2]) if len(args) > 2 and args[2].lstrip("-").isdigit() else 0,
                          text=" ".join(args[1:]) if args[0] == "type" else "",
@@ -991,11 +993,13 @@ class CommandStage(Stage):
             return f"参数不合法：{exc}"
 
         by = str(ctx.extras.get("principal") or "operator")
+        # OpsLog.record 只收 action/outcome/session/plugin/frames/bytes/reason/by——
+        # 坐标与键入长度并入 reason 元数据串（键入正文永不落任何记录）。
         SCREEN_OPS.record(
             action=f"control.{result['action']}", outcome="allow", by=by,
             session=ctx.event.session_key,
-            x=result.get("x", 0), y=result.get("y", 0),
-            chars=result.get("chars", 0),
+            reason=(f"x={result.get('x', 0)} y={result.get('y', 0)} "
+                    f"chars={result.get('chars', 0)}"),
         )
         return ""  # 不短路模型：动作的可见效果是屏幕本身，模型可 /look 确认
     async def _cmd_mute(self, ctx: PipelineContext, args: list[str]) -> str:
