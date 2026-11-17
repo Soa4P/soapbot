@@ -19,7 +19,7 @@
 | 08 文档体系口径一致性审核 | 说明书与机器对不上 | test_readme_claims / test_doc_test_counts / gate_parity | ✅ 已落地 |
 | 09 长会话的自动交接与接力 | 上下文满了怎么交接 | memory 分层 + 压缩；**插件会话无交接机制** | 🚧 见吸收 1 |
 | 10 任务卡假完成与被打断会话识别 | 「真完成」怎么判 | 审批总线记录 approve/deny；**假完成识别没有** | 🚧 见吸收 2 |
-| 11 上游依赖的受控升级 | 分级 + 顺序升级 | dependabot + CONTRIBUTING「依赖更新」节 + pip-audit | ✅ 已落地 |
+| 11 上游依赖的受控升级 | 分级 + 顺序升级 | 人工升级（钉版本 + CI 的 pip-audit blocking 门禁）+ CONTRIBUTING「依赖更新」节；dependabot 已移除（2026-11-18，PR 噪音大于其提案价值） | ✅ 已落地 |
 | 12 三线分工与接线授权 | 哪些能自己接 | send/qzone/bilibili 面的 ledger + 审批 | ✅ 已落地 |
 | 13 需求粒度与验收两轨制 | 需求/验收粒度 | PR 模板 + verification-matrix | ✅ 已落地 |
 | 14 判定与通知的四条纪律 | 判活与喊人 | 审批三通道通知（QQ/Webhook/手机） | ✅ 已落地 |
