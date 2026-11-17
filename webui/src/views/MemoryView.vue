@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import MemoryStarMap from '@/components/MemoryStarMap.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import GroupScopeCard from '@/components/GroupScopeCard.vue'
 import { t } from '@/i18n'
@@ -576,6 +577,7 @@ function confidencePct(value: number): string {
         {{ memoryLoading ? t('common.loading') : t('common.refresh') }}
       </button>
     </div>
+    <MemoryStarMap :rows="memoryRows" @select="((scope: string) => { memoryFilter = scope; loadMemories() })" />
     <div class="panel__body flush">
       <div v-if="memoryError" class="panel__body">
         <div class="error-banner">{{ memoryError }}</div>
