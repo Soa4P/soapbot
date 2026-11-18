@@ -160,8 +160,8 @@ soapbot 的 bilibili 写面在待拍板清单（qzone 模式三重确认）。bi
   evidence/tone 归纳「长出来的人格」，与人设叠加——人格生态设计输入（人格卡的
   演化维度）；无 License → 不搬码。
 * **Cyrene**（7★，Apache-2.0）：Java 多租户 Agent 框架；「工具调用沿用用户身份/
-  租户范围/业务权限，宿主系统继续执行自己的授权」与 soapbot principal 体系同构
-  ——形态不同不改编，登记为身份传递设计的同类确认。
+  租户范围/业务权限，宿主系统继续执行自己的授权」与 soapbot 的身份主体与角色层
+  同构——形态不同不改编，登记为身份传递设计的同类确认。
 * **dsh-admin-mode**（21★，MIT）：**不改编，明确拒绝**——danger-full-access +
   approval:never + 无沙箱与 soapbot 权限哲学（fail closed、审批总线、急停、永不
   静默提权）正面冲突。仅借鉴其交互细节：危险档位的连续两次严重警告确认、操作
