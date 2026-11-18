@@ -26,6 +26,7 @@ help:
 	@echo "make a11y       可访问性静态检查（含在 check 内）"
 	@echo "make gaps       测试断层扫描：孤儿模块与过期数字（含在 check 内）"
 	@echo "make doclinks   文档相对链接检查（含在 check 内）"
+	@echo "make orphan-docs 反向门禁：从未被引用的孤儿文档（含在 check 内）"
 	@echo "make check      CI backend 全部本地可跑门禁 + test（差集只有两项，见下）"
 	@echo "make check-deps 依赖清单一致性（requirements.txt vs pyproject.toml）"
 	@echo "make console-encoding  脚本打印中文前必须 reconfigure(utf-8)"
@@ -89,6 +90,13 @@ a11y:
 doclinks:
 	$(BIN)/python scripts/check_doc_links.py
 
+# The reverse of doclinks: a document nobody links is a document nobody finds.
+# Two real docs sat unlinked for months (QQ quickstart, persona growth) while
+# every gate stayed green — "the link works" and "anyone can find it" are
+# different properties.
+orphan-docs:
+	$(BIN)/python scripts/check_orphan_docs.py
+
 # Both child programs are standalone -I scripts; a static audit is what keeps the
 # protocol's negative invariants (no pickle, one frame budget, correlated frames,
 # parent-side authorization, stdout drain, process cap) from quietly regressing.
@@ -140,7 +148,7 @@ progress:
 # Contrast rides along with `check` because it is the one accessibility rule that can
 # be verified mechanically. Auditing focus order or ARIA still needs a human; a
 # palette regression does not, and a palette regression is what actually happens.
-check: lint version check-deps console-encoding deploy-check contrast a11y gaps doclinks ipc-audit boundary-audit desktop-check mypy-baseline test
+check: lint version check-deps console-encoding deploy-check contrast a11y gaps doclinks orphan-docs ipc-audit boundary-audit desktop-check mypy-baseline test
 
 # `npm ci` when a lockfile exists so CI and a fresh clone resolve identically.
 webui:
