@@ -147,6 +147,12 @@ jobs:
         # invisible until somebody clicks it.
         run: python scripts/check_doc_links.py
 
+      - name: Orphan docs
+        # The reverse of Doc links: a document nobody references is a document
+        # nobody finds — two real docs sat unlinked for months while every gate
+        # stayed green.
+        run: python scripts/check_orphan_docs.py
+
       - name: Test gaps
         # Two static rules: modules no test names, and a "N passed" in prose that
         # disagrees with the board. Deliberately not coverage — see the script header.
