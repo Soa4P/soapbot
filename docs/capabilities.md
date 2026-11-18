@@ -50,7 +50,7 @@
 | 插件进程隔离 | ✅ | 默认开启 |
 | 插件批准持久化 + 启动自动加载 | ✅ | |
 | 群管命令 | ✅ | |
-| 额度审批 | ✅（默认开） | 日/周/月周期与单笔上限（整数分）；状态机、原子预留、禁止自批、批准时重算额度。`POST /api/budget/{id}/approve\|deny` 与 QQ `/budget` 共用账本，都要求 `APPROVE_PAYMENT` + 真实凭据；面板第 10 页可批准/驳回。两条路径都往 `APPROVAL_BUS` 发同一份事件。**仍不**持有支付凭据、调用支付 API 或自动扣款 |
+| 额度审批 | ✅（默认开） | 日/周/月周期与单笔上限（整数分）；状态机、原子预留、禁止自批、批准时重算额度。`POST /api/budget/{id}/approve\|deny` 与 QQ `/budget` 共用账本，都要求 `APPROVE_PAYMENT` + 真实凭据；面板第 10 页可批准/驳回。两条路径都往 `APPROVAL_BUS` 发同一份事件。**仍不**持有支付凭据、调用支付 API 或自动扣款。设计记录：[wave5-budget.md](wave5-budget.md) |
 | B 站元数据与观后感 | ✅（默认关） | L2 公开元数据；L3 登录态由插件的 `bilibili` 能力承担（Cookie 宿主持有，需配 `SOAPBOT_BILI_COOKIE`） |
 | 插件发图片（表情包/照片） | ✅（需逐项批准 `send_media`） | 与 send 同一套会话白名单 + 4 MiB 上限；审计只记大小 |
 | 人格卡自主字段与温度 | ✅ | 人格卡 front matter 可选 `autonomy`（会话白名单 / 每日上限）、`warmth`（起点 / 增速 / 衰减 / 阈值）、`voice_self_select`；非法值回退保守默认，面板保存与版本回滚都不丢。宿主 `WarmthTracker` 只在回复成功归档后计数，`session.view` 只读暴露 `warmth` 标量。**挑音色的管线环节未实现** |
