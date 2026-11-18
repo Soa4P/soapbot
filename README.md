@@ -140,7 +140,8 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 - 接入优先走 QQ 官方机器人（`kind: qq_official`），不触碰个人号协议；个人号经第三方
   协议端接入有被平台风控的风险，本项目只实现协议客户端。协议端生态正在退场
   （NapCat 2026-11-10 停止功能维护、SnowLuma 已不可见），新部署请按
-  [docs/qq-official-setup.md](docs/qq-official-setup.md) 配置。
+  [docs/qq-official-setup.md](docs/qq-official-setup.md) 配置。从零到收到第一条回复的
+  15 分钟快速通道见 [docs/deploy-qq-quickstart.md](docs/deploy-qq-quickstart.md)。
   官方机器人审核、B 站数据合规、支付边界见 [SECURITY.md](SECURITY.md) 与
   [docs/provenance.md](docs/provenance.md)。
 - `browse` 能力面只读取操作者点名域名的公开页面：遵守 robots.txt 与站点服务条款，
