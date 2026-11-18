@@ -27,6 +27,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -143,26 +144,37 @@ class ControlHold:
 
 
 class ControlHolder:
-    """One process-wide hold, engaged by the operator, dropped on restart."""
+    """One process-wide hold, engaged by the operator, dropped on restart.
+
+    Thread-safe: the panel API, the /act command stage and plugin surfaces all
+    touch the same process-wide holder from different threads. Without the lock,
+    a revoke landing between ``hold.active()`` and the injection lets one action
+    slip past an operator's 收回 — the exact TOCTOU the audit flagged. The lock
+    does not lengthen the window; it only makes the transitions atomic.
+    """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._hold: dict[str, Any] | None = None
 
     def engage(self, *, minutes: int, by: str, max_minutes: int) -> dict[str, Any]:
         minutes = max(1, min(int(minutes), max(1, int(max_minutes))))
         now = time.time()
-        self._hold = {"until": now + minutes * 60, "by": by, "minutes": minutes}
-        return dict(self._hold)
+        with self._lock:
+            self._hold = {"until": now + minutes * 60, "by": by, "minutes": minutes}
+            return dict(self._hold)
 
     def disengage(self) -> None:
-        self._hold = None
+        with self._lock:
+            self._hold = None
 
     def active(self, now: float | None = None) -> dict[str, Any] | None:
         now = time.time() if now is None else now
-        hold = self._hold
-        if hold is None or hold["until"] <= now:
-            return None
-        return hold
+        with self._lock:
+            hold = self._hold
+            if hold is None or hold["until"] <= now:
+                return None
+            return hold
 
 
 _CONTROL_HOLDER = ControlHolder()
