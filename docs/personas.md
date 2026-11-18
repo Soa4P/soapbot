@@ -2,6 +2,10 @@
 
 人格卡决定"它在谁面前是什么样子"。一个机器人可以有多张卡，按群、按人切换。
 
+> **人格自动成长**：人格卡不再完全由人写——开启自动成长后模型可以改写人格卡并
+> 立即生效，配套的边界（能改什么/不能改什么、版本可回滚）见
+> [persona-growth.md](persona-growth.md)。
+
 ## 三步做出第一张
 
 1. 复制模板：把 [`config/personas/_template.yaml`](../config/personas/_template.yaml) 复制到 `data/config/personas/`，重命名成你认得出的名字（文件名不影响绑定）。
