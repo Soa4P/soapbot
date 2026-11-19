@@ -254,7 +254,8 @@ async function deletePlugin(plugin: any): Promise<void> {
     </div>
 
     <div v-if="tab === 'community'" class="panel__body">
-      <CommunityPlugins />
+      <!-- 安装成功 → 直接送去 installed 页批准：三步流的第一跳在组件里接住 -->
+      <CommunityPlugins @installed="tab = 'installed'" />
     </div>
 
     <div v-else class="panel__body flush">

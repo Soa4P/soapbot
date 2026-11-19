@@ -22,6 +22,9 @@ QQ 不是唯一入口，也不再是默认入口：网页与手机上的对话�
 | Linux | `scripts/install.sh` | Python 3.12+ |
 | Linux（容器加固版） | `deploy/docker-compose.yml` | Docker；**这条只有 Linux 能用** |
 
+最低系统配置（CPU/内存/磁盘/各端构建要求）见
+[docs/deployment-requirements.md](docs/deployment-requirements.md)。
+
 两条 Windows 路径注册的是**同一个**计划任务 `SoapbotBot`（SYSTEM、开机启动），默认目录
 都是 `C:\soapbot`，可以互相覆盖升级；先用哪条只看这台机器上有没有 Python。
 
