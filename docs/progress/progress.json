@@ -3560,7 +3560,7 @@
       "id": "a15",
       "index": "A15",
       "name": "统一排期：未完成目标与待拍板项",
-      "status": "doing",
+      "status": "done",
       "tasks": [
         {
           "id": "a15-t1",
@@ -3589,7 +3589,8 @@
         {
           "id": "a15-t5",
           "name": "xingxi 星图前端",
-          "status": "todo"
+          "status": "done",
+          "note": "PR #83（e729c19）——MemoryStarMap 原生 SVG 零依赖组件嵌入 MemoryView 记忆条目面板（x=时间 y=重要度 色=层，点击按归属过滤列表），数据来自既有 /api/memory/items 零新增端点；与 xingxi 原版差别=内嵌散点图而非独立站点、无 elkjs/d3"
         },
         {
           "id": "a15-t6",
@@ -3605,9 +3606,9 @@
         },
         {
           "id": "a15-t8",
-          "name": "待拍板项：bilibili 写面 / qzone 启用 / screen 控制面",
+          "name": "待拍板项：bilibili 写面 / qzone 启用",
           "status": "todo",
-          "note": "三项均为「边界必须显式」的写面/控制面能力，等操作者逐项拍板后才动工；设计前置见 qq-autonomy-design.md §6 与 autonomous-capabilities-design.md"
+          "note": "screen 控制面第二阶段已于 2026-11-18 落地（A23，PR #85，三前置齐，见阶段 a23）；控制面第三增量（UIA 控件树/窗口绑定/浏览器通道）登记为后续增量、不属拍板项；剩余 bilibili 写面（发动态/评论，qzone 模式）与 qzone 能力启用两项，等操作者逐项拍板后才动工；设计前置见 qq-autonomy-design.md §6 与 autonomous-capabilities-design.md"
         }
       ],
       "goal": "把散在各批次的未完成目标收进一张清单：已收口的写明证据，未动工的标 todo，需要操作者决策的单独列出"
