@@ -180,3 +180,6 @@ soapbot 的 bilibili 写面在待拍板清单（qzone 模式三重确认）。bi
    AGPL/无 License 仓只登记思想。
 
 （本报告为评估记录；后续改编按 ADAPTATION.md 批次流程另行提交。）
+
+> **相关批次**：第十一批 AstrBot Cloud 市场全景评估（1329 插件聚类 + 分级借鉴
+> 清单）见 [reference-batch11-astrbot-market.md](reference-batch11-astrbot-market.md)。
