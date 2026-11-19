@@ -302,6 +302,7 @@ export default {
   'plugins.installBtn': 'Install {version}',
   'plugins.installing': 'Downloading & verifying…',
   'plugins.installDone': 'Installed {name} {version} (not approved). Tick capabilities on the plugins page, then load.',
+  'plugins.goApprove': 'Go approve capabilities →',
   'plugins.installFailed': 'One-click install failed.',
   'plugins.updateAvailable': 'Update available',
   'plugins.tasks.col': 'Long tasks',

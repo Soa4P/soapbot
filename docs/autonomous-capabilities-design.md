@@ -207,3 +207,8 @@ UIA 覆盖不到的自绘界面回退；窗口绑定（只操作声明过的窗�
 * 审计纪律：SCREEN_OPS 与 audit 只记动作类型、目标坐标与文本**长度**——键入文本
   零出现（测试逐条钉住），拒绝也入日志（token only）。
 * 面板：安全页授权窗按钮（同急停卡片模式），`GET /api/screen/ops` 动作行自然汇入。
+* **签发权收紧（2026-11-19 跨端信任级审计）**：`/act grant` 签发从 MANAGE_CONFIG
+  收紧到新权限 `CONTROL_GRANT`（**OWNER** 专属）——弱端（QQ/网页/App）admin 账号
+  被攻破或被诱导时不能自助签发授权窗、间接驱动强执行端；拉闸（revoke/panic）保持
+  ADMIN（拉闸永远比给油便宜）。路径矩阵与判定全文见
+  [cross-end-trust-audit.md](cross-end-trust-audit.md)。

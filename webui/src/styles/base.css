@@ -87,6 +87,16 @@
   --rail: 208px;
   --radius: 8px;
   --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px rgba(15, 23, 42, 0.18);
+
+  /* Spacing scale: the values the panel was already using (page 22, panel body
+     14, grid 12, stack 10) promoted to tokens so new views stop inventing
+     one-off paddings. Same numbers — the change is the vocabulary, not the look. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 22px;
+  --space-6: 32px;
 }
 
 * {
@@ -337,9 +347,9 @@ h2 {
 }
 
 .page {
-  padding: 22px;
+  padding: var(--space-5);
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
   align-content: start;
 }
 
@@ -369,7 +379,7 @@ h2 {
 }
 
 .panel__body {
-  padding: 14px;
+  padding: var(--space-3) var(--space-4);
 }
 
 .panel__body.flush {
@@ -380,7 +390,7 @@ h2 {
 
 .grid {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .grid.cols-2 {
@@ -669,7 +679,18 @@ table.data td.key {
   transition:
     border-color 120ms ease,
     color 120ms ease,
-    background 120ms ease;
+    background 120ms ease,
+    transform 80ms ease;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-soft);
 }
 
 /* Segmented control (plugin tabs). A row of buttons rather than a real tab widget: the
@@ -726,12 +747,6 @@ table.data td.key {
 
 .segmented__item--on .segmented__count {
   color: var(--brand);
-}
-
-.btn:hover:not(:disabled) {
-  border-color: var(--brand);
-  color: var(--brand);
-  background: var(--brand-soft);
 }
 
 .btn:disabled {
@@ -811,7 +826,7 @@ textarea.field {
 
 .stack {
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .hint {
