@@ -1023,6 +1023,80 @@ class PluginLoader:
                     f"{'tool' if is_tool else 'command'} name: {exc}"
                 ) from exc
 
+        for entry in worker.crons:
+            # Isolated plugins register crons in their ready frame; the host owns
+            # the scheduler and re-validates the expression (croniter) exactly like
+            # the in-process ctx.cron does. An invalid expression fails the load —
+            # parity with the in-process path, where ctx.cron raises during setup.
+            # The tick handler calls back into the worker through the same invoke
+            # pipe commands use, so the callback surfaces keep their capability
+            # checks; the anonymous caller binds no session, matching _run_job.
+            expr = str(entry.get("expr") or "")
+            job_name = str(entry.get("name") or "")
+            handler = str(entry.get("handler") or "")
+            try:
+                from croniter import croniter
+
+                if not expr or not croniter.is_valid(expr):
+                    raise ValueError(f"invalid cron expression {expr!r}")
+                if not handler:
+                    raise ValueError("cron entry without a handler name")
+            except (ValueError, ImportError) as exc:
+                await self.supervisor.stop(name)
+                self.supervisor.unregister(name)
+                self.audit.record(
+                    kind="plugin",
+                    action="load",
+                    outcome="block",
+                    detail=f"cron registration failed: {type(exc).__name__}",
+                    plugin=name,
+                )
+                raise PluginLoadError(
+                    f"plugin {name} declared an unusable cron entry: {exc}"
+                ) from exc
+            async def _cron_tick(caller, *, _worker=worker, _handler=handler):
+                return await _worker.invoke(_handler, caller=caller)
+
+            _cron_tick.__name__ = job_name or f"{name}_cron"
+            context._cron_jobs.append(
+                {
+                    "expr": expr,
+                    "handler": _cron_tick,
+                    "name": job_name or f"{name}_cron",
+                    "plugin": name,
+                }
+            )
+
+        for entry in worker.hooks:
+            # Isolated message hooks follow the same shape as cron: the host-side
+            # context gets an invoke-wrapping hook, so PluginMessageHookStage fires
+            # it exactly like an in-process hook — with the caller bound and the
+            # MESSAGE capability checked here (fail closed: a plugin that did not
+            # declare `message` gets no hook, matching ctx.on_message's own guard).
+            hook_name = str(entry.get("name") or "")
+            if not hook_name:
+                continue
+            declared = {c.value for c in manifest.capabilities}
+            if "message" not in declared:
+                self.audit.record(
+                    kind="plugin",
+                    action="load",
+                    outcome="block",
+                    detail=f"message hook registered without the message capability: "
+                    f"{hook_name}",
+                    plugin=name,
+                )
+                continue
+            async def _message_hook(ctx_event, *, _worker=worker, _hook=hook_name):
+                caller = ctx_event.extras.get("caller")
+                return await _worker.invoke(
+                    _hook, caller=caller,
+                    args=[{"text": ctx_event.text, "session_key": ctx_event.session_key}],
+                )
+
+            _message_hook.__name__ = hook_name
+            context._message_hooks.append(_message_hook)
+
         loaded = LoadedPlugin(
             manifest=manifest,
             path=directory,

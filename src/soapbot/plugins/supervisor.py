@@ -376,6 +376,27 @@ class _RemoteCtx:
         self.storage = _RemoteStorage()
         self._commands = {}
         self._api = {}
+        # Cron registrations cross to the host in the ready frame: the host owns the
+        # scheduler and re-validates the expression with croniter (the fresh -I
+        # interpreter must not import third-party packages, so the child cannot).
+        self._crons = []
+        self._hooks = []
+
+    def cron(self, expr, *, name=""):
+        """Register a periodic job. The expression is validated host-side.
+
+        The handler stays in the worker: the host schedules the tick and calls it
+        back through the same invoke pipe commands use, so the callback surfaces
+        (memory/kb/send) carry the same capability checks as interactive calls.
+        """
+        def deco(fn):
+            self._crons.append(
+                {"expr": str(expr), "name": str(name) or fn.__name__,
+                 "handler": fn.__name__}
+            )
+            return fn
+
+        return deco
 
     def command(self, name, *, description="", usage="", min_role=None):
         def deco(fn):
@@ -414,10 +435,20 @@ class _RemoteCtx:
 
         return deco
 
-    def message_hook(self, fn):
+    def on_message(self, fn):
+        """Register a message hook. The registration crosses to the host in the
+        ready frame (name only); the host dispatch feeds inbound messages back
+        through the invoke pipe with the caller bound, exactly like cron ticks.
+        The worker-side hook never sees the raw message flow."""
+        self._hooks.append({"name": fn.__name__})
         return fn
 
+    # 兼容旧写法：早期批次插件用 message_hook 注册（进程内同样是透传别名）。
+    message_hook = on_message
+
     async def send(self, session_key, text):
+        # session_key is *requested*, not trusted: the host re-checks it against the
+        # ledger it owns. A plugin asking for another group gets PermissionError.
         # session_key is *requested*, not trusted: the host re-checks it against the
         # ledger it owns. A plugin asking for another group gets PermissionError.
         return _call("send.message", {"session_key": session_key, "text": text})
@@ -768,11 +799,18 @@ async def _serve():
         # unreported exit leaves the host waiting on a child that is already gone.
         # ``except Exception`` would miss ``SystemExit``/``KeyboardInterrupt`` and
         # produce exactly that deadlock. See ``plugins/isolation.py`` for the same note.
+        #
+        # The protocol reply carries the type only (plugin-authored text never crosses
+        # the wire), but the *stack* goes to this process's stderr, which the parent
+        # drains into a redacted tail — a boot-time AttributeError with no location is
+        # unactionable, and this is the only channel it can reach.
+        traceback.print_exc(file=sys.stderr)
         _send({"type": "ready", "ok": False, "error": type(exc).__name__})
         return
 
     _send({"type": "ready", "ok": True,
-           "commands": sorted(ctx._commands), "api": ctx._api})
+           "commands": sorted(ctx._commands), "api": ctx._api,
+           "crons": ctx._crons, "hooks": ctx._hooks})
 
     loop = asyncio.get_running_loop()
     while True:
@@ -1034,6 +1072,8 @@ class PluginWorker:
         self.last_error = ""
         self.commands = []
         self.api = {}
+        self.crons = []
+        self.hooks = []
         self.started_at = 0.0
         self.invocations = 0
         self._stderr_tail.clear()
@@ -1139,9 +1179,21 @@ class PluginWorker:
         if not isinstance(ready, dict) or ready.get("type") != "ready":
             raise WorkerCrashedError("plugin worker sent an unexpected boot reply")
         if not ready.get("ok"):
-            raise WorkerCrashedError(f"plugin setup failed: {ready.get('error', 'error')}")
+            # Same treatment as the runtime crash path: the child printed its stack to
+            # stderr (type-only on the protocol), so wait for the drain to settle and
+            # embed the redacted tail — a boot-time AttributeError without a location
+            # is unactionable, and this is the only channel it can reach.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._await_stderr_settled(), timeout=1.0)
+            tail = self.crash_tail()
+            detail = ready.get("error", "error")
+            if tail:
+                detail += f"; stderr tail: {' | '.join(tail)}"
+            raise WorkerCrashedError(f"plugin setup failed: {detail}")
         self.commands = list(ready.get("commands") or [])
         self.api = dict(ready.get("api") or {})
+        self.crons = list(ready.get("crons") or [])
+        self.hooks = list(ready.get("hooks") or [])
         self.started_at = time.time()
         logger.info(
             "plugin worker up plugin=%s pid=%s commands=%d",
