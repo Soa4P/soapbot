@@ -515,3 +515,58 @@ def test_act_command_permission_is_manage_config() -> None:
     from soapbot.security.principal import Permission
 
     assert CommandStage.COMMAND_PERMISSIONS.get("act") == Permission.MANAGE_CONFIG
+
+
+# ---------------------------------------------- grant 签发权 OWNER（跨端升级阻断线）
+def _principal(role: str):
+    from soapbot.security.principal import Principal, Role
+
+    return Principal(user_id="9", display_name=role, role=Role(role), authenticated=True)
+
+
+async def test_grant_requires_owner_and_revoke_stays_admin(tmp_path, monkeypatch) -> None:
+    """跨端信任级审计（2026-11-19）：弱端 admin 被攻破/被诱导时不能自助签发授权窗——
+    物理后果的最终决定权在 owner。拉闸（revoke）保持 ADMIN：拉闸永远比给油便宜。"""
+    from soapbot.core.message import IncomingMessage, MessageScene, MessageSegment, Sender
+    from soapbot.core.pipeline import PipelineContext
+    from soapbot.memory.stages import CommandStage
+
+    settings = SimpleNamespace(
+        data_dir=tmp_path, screen_enabled=True, screen_dedicated_machine="BOT-WORKER",
+        control_enabled=True, control_hold_minutes=15, control_hold_max_minutes=60,
+    )
+    monkeypatch.setattr("soapbot.config.settings", settings)
+    stage = CommandStage(store=None, kb=None)
+    event = IncomingMessage(
+        adapter="onebot11", message_id="m-grant", scene=MessageScene.PRIVATE,
+        sender=Sender(user_id="9", nickname="admin"),
+        segments=[MessageSegment.text("/act grant")],
+    )
+
+    ctx = PipelineContext(event=event, adapter=SimpleNamespace())
+    ctx.extras["principal"] = _principal("admin")
+    refused = await stage._cmd_act(ctx, ["grant"])
+    assert "owner" in refused
+    assert _CONTROL_HOLDER.active() is None  # admin 自签被拒，窗没有建立
+    ops = SCREEN_OPS.recent()
+    assert ops[0]["action"] == "control.grant" and ops[0]["outcome"] == "deny"
+
+    ctx2 = PipelineContext(event=event, adapter=SimpleNamespace())
+    ctx2.extras["principal"] = _principal("owner")
+    ok = await stage._cmd_act(ctx2, ["grant"])
+    assert "已签发" in ok
+    assert _CONTROL_HOLDER.active() is not None
+
+    # revoke 保持 ADMIN 可用（拉闸永远比给油便宜）
+    ctx3 = PipelineContext(event=event, adapter=SimpleNamespace())
+    ctx3.extras["principal"] = _principal("admin")
+    revoked = await stage._cmd_act(ctx3, ["revoke"])
+    assert "已撤销" in revoked
+    assert _CONTROL_HOLDER.active() is None
+
+
+def test_control_grant_permission_is_owner_only() -> None:
+    from soapbot.memory.stages import CommandStage  # noqa: F401
+    from soapbot.security.principal import PERMISSION_MIN_ROLE, Permission, Role
+
+    assert PERMISSION_MIN_ROLE.get(Permission.CONTROL_GRANT) == Role.OWNER

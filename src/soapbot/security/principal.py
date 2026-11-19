@@ -143,6 +143,19 @@ class Permission(StrEnum):
     already approves payments.
     """
 
+    CONTROL_GRANT = "control_grant"
+    """Issue or renew the keyboard/mouse control hold on the dedicated machine.
+
+    Owner-only, same reasoning as ``MANAGE_MCP`` taken one step further: this is
+    the one permission whose outcome is *physical* — real input into a real
+    machine. The trust rule is that the strong execution end must not be
+    reachable because a weak end (QQ / web / app) was compromised or talked into
+    something: an admin account lives on the weak ends, so an admin who can
+    self-issue a hold is exactly the cross-end escalation path the design
+    forbids. Pulling the brake (/panic, /act revoke) stays at MANAGE_CONFIG —
+    stopping is always cheaper than starting.
+    """
+
     VIEW_AUDIT = "view_audit"
 
 
@@ -160,6 +173,7 @@ PERMISSION_MIN_ROLE: dict[Permission, Role] = {
     Permission.MODERATE_GROUP: Role.ADMIN,
     Permission.APPROVE_PAYMENT: Role.OWNER,
     Permission.MANAGE_MCP: Role.OWNER,
+    Permission.CONTROL_GRANT: Role.OWNER,
     Permission.VIEW_AUDIT: Role.ADMIN,
 }
 

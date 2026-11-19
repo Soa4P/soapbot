@@ -29,6 +29,10 @@ const installing = ref('')
 const installNote = ref('')
 const installError = ref('')
 
+/** 安装成功后把用户送到批准页：三步流（安装→批准→加载）的第一跳由组件自己接住，
+ *  而不是让用户在文案里找下一步。 */
+const emit = defineEmits<{ installed: [name: string] }>()
+
 const entries = computed(() => catalogue.data.value?.entries ?? [])
 const blocked = computed<Record<string, string>>(() => catalogue.data.value?.blocked ?? {})
 const available = computed(() => catalogue.data.value?.available ?? false)
@@ -68,6 +72,7 @@ async function install(name: string, version: string): Promise<void> {
       name: String(result.name ?? name),
       version: String(result.version ?? version),
     })
+    emit('installed', String(result.name ?? name))
     await catalogue.reload()
   } catch (err) {
     installError.value = err instanceof Error ? err.message : t('plugins.installFailed')
@@ -164,7 +169,12 @@ async function install(name: string, version: string): Promise<void> {
       </article>
     </div>
 
-    <p v-if="installNote" class="hint" role="status" style="margin: 0">{{ installNote }}</p>
+    <p v-if="installNote" class="hint" role="status" style="margin: 0">
+      {{ installNote }}
+      <button class="btn" type="button" style="margin-left: 8px" @click="emit('installed', '')">
+        {{ t('plugins.goApprove') }}
+      </button>
+    </p>
     <p v-if="installError" class="error-banner" role="alert">{{ installError }}</p>
 
     <p v-if="catalogue.data.value?.source" class="hint" style="margin: 0">

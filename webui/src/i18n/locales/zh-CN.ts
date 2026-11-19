@@ -316,6 +316,7 @@ export default {
   'plugins.installBtn': '安装 {version}',
   'plugins.installing': '下载校验中…',
   'plugins.installDone': '已安装 {name} {version}（未批准）。去插件页勾选能力后加载。',
+  'plugins.goApprove': '去批准能力 →',
   'plugins.installFailed': '一键安装失败。',
   'plugins.updateAvailable': '有新版本',
   'plugins.tasks.col': '长任务',

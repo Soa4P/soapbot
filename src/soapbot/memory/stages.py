@@ -955,7 +955,16 @@ class CommandStage(Stage):
         from soapbot.screen.opslog import SCREEN_OPS
 
         if args and args[0] == "grant":
-            # /act grant [分钟]：签发限时持有（MANAGE_CONFIG 已由门禁保证）。
+            # /act grant [分钟]：签发限时持有。入口权限是 MANAGE_CONFIG（ADMIN+），
+            # 但签发本身要求 CONTROL_GRANT（OWNER）——键鼠注入的后果是物理的，
+            # 弱端（QQ/网页/App）的 admin 账号被攻破或被诱导时，不能自助获得
+            # 「给强执行端上油」的能力（跨端权限升级的阻断线，审计 2026-11-19）。
+            # 收回（revoke）保持 ADMIN：拉闸永远比给油便宜。
+            principal = ctx.extras.get("principal")
+            if not (principal and principal.can(Permission.CONTROL_GRANT)):
+                SCREEN_OPS.record(action="control.grant", outcome="deny", reason="control_grant_owner_only",
+                                  session=ctx.event.session_key)
+                return "签发授权窗需要 owner（物理后果的最终决定权在 owner，不在弱端）。"
             minutes = settings.control_hold_minutes
             if len(args) > 1 and args[1].isdigit():
                 minutes = max(1, min(int(args[1]), settings.control_hold_max_minutes))
