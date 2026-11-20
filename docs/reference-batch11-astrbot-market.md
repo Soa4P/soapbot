@@ -126,3 +126,6 @@ send_media 面可承载；音乐源的服务条款与 VIP 绕过类实现需逐�
    既有基础设施就绪度排序）。
 3. **正面排除**：SSH 执行器/逆向类/自动发布类/自迭代类——四类判例与既有边界
    一一对应，后续遇到同类机制可直接引用本批结论。
+
+> **全量市场后续评估（3481 插件，SPA 真数据源 api.soulter.top 发现）**：
+> [reference-batch12-astrbot-cloud-full.md](reference-batch12-astrbot-cloud-full.md)
