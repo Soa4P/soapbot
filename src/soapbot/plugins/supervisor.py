@@ -361,6 +361,29 @@ class _RemoteStorage:
         return _call("storage.delete", {"key": key})
 
 
+class _Caller:
+    """Caller view rebuilt from the invoke payload.
+
+    In-process plugins receive a :class:`~soapbot.plugins.context.CallerContext`;
+    the payload crossing the pipe is scalars only, so the child rebuilds an
+    attribute-access object from it — otherwise every ``caller.session_key`` in a
+    plugin crashes with AttributeError and no session-scoped command can work.
+    Fields mirror CallerContext exactly; the host still re-checks scope on every
+    callback, so this is identity visibility, not privilege.
+    """
+
+    __slots__ = ("user_id", "display_name", "role", "session_key",
+                 "scene", "group_id", "is_privileged")
+
+    def __init__(self, payload: dict):
+        for field in self.__slots__:
+            default = False if field == "is_privileged" else ""
+            setattr(self, field, payload.get(field, default))
+
+    def to_dict(self) -> dict:
+        return {field: getattr(self, field) for field in self.__slots__}
+
+
 class _RemoteCtx:
     """The façade a plugin sees inside the worker.
 
@@ -381,6 +404,13 @@ class _RemoteCtx:
         # interpreter must not import third-party packages, so the child cannot).
         self._crons = []
         self._hooks = []
+        # The ready frame carries metadata only (names), but the *handlers* must stay
+        # resolvable inside the child: the host calls cron ticks and message hooks
+        # back through the same invoke pipe as commands, by name. Without these maps
+        # every hook/cron invoke died with "no such handler" (#96 shipped the host
+        # half of this contract; this is the child half).
+        self._cron_fns = {}
+        self._hook_fns = {}
 
     def cron(self, expr, *, name=""):
         """Register a periodic job. The expression is validated host-side.
@@ -390,10 +420,12 @@ class _RemoteCtx:
         (memory/kb/send) carry the same capability checks as interactive calls.
         """
         def deco(fn):
+            job_name = str(name) or fn.__name__
             self._crons.append(
-                {"expr": str(expr), "name": str(name) or fn.__name__,
+                {"expr": str(expr), "name": job_name,
                  "handler": fn.__name__}
             )
+            self._cron_fns[job_name] = fn
             return fn
 
         return deco
@@ -441,20 +473,24 @@ class _RemoteCtx:
         through the invoke pipe with the caller bound, exactly like cron ticks.
         The worker-side hook never sees the raw message flow."""
         self._hooks.append({"name": fn.__name__})
+        self._hook_fns[fn.__name__] = fn
         return fn
 
     # 兼容旧写法：早期批次插件用 message_hook 注册（进程内同样是透传别名）。
     message_hook = on_message
 
-    async def send(self, session_key, text):
-        # session_key is *requested*, not trusted: the host re-checks it against the
-        # ledger it owns. A plugin asking for another group gets PermissionError.
-        # session_key is *requested*, not trusted: the host re-checks it against the
-        # ledger it owns. A plugin asking for another group gets PermissionError.
+    async def send(self, text, *, session_key):
+        # Signature mirrors the in-process ``PluginContext.send(text, *, session_key)``
+        # exactly — the facade exists so one plugin body runs in both modes, and a
+        # keyword-only session_key is the published contract. session_key is
+        # *requested*, not trusted: the host re-checks it against the ledger it
+        # owns. A plugin asking for another group gets PermissionError.
         return _call("send.message", {"session_key": session_key, "text": text})
 
-    async def send_media(self, session_key, image_b64, caption=""):
-        # Same ledger discipline as send; the parent audits sizes, never pixels.
+    async def send_media(self, *, session_key, image_b64, caption=""):
+        # Keyword-only like the in-process ``PluginContext.send_media`` — one
+        # plugin body, both modes. Same ledger discipline as send; the parent
+        # audits sizes, never pixels.
         return _call(
             "send_media.request",
             {
@@ -844,29 +880,51 @@ async def _serve():
         # refuse any callback whose rid is not the request it currently has in flight.
         _current_rid[0] = rid
         name = frame.get("handler")
+        # Handlers live in three places: commands/tools in ``_commands``, cron
+        # ticks in ``_cron_fns``, message hooks in ``_hook_fns``. The ready frame
+        # carries crons/hooks as name-only metadata, but the host calls all three
+        # back through this same pipe by name — resolving commands only made every
+        # hook and cron tick die with "no such handler".
         fn = ctx._commands.get(name)
+        is_hook = False
+        if fn is None:
+            fn = ctx._hook_fns.get(name)
+            is_hook = fn is not None
+        if fn is None:
+            fn = ctx._cron_fns.get(name)
         if fn is None:
             _send({"type": "result", "id": frame.get("id"), "ok": False,
                    "error": "no such handler"})
             continue
-        caller = frame.get("caller") or {}
+        caller = _Caller(frame.get("caller") or {})
         args = frame.get("args") or []
-        # Tools and commands share the invoke frame but not the argument shape: a
-        # command receives a list of words, a tool receives one JSON object. The
-        # host wraps tool arguments in a one-element list to reuse the frame, so
-        # unwrap it here. Without this, a tool handler written as
+        # The three handler kinds share the invoke frame but not the argument shape:
+        # a command receives a list of words, a tool receives one JSON object, and a
+        # message hook receives the message *text* (matching the in-process contract,
+        # where dispatch fires hooks as ``hook(caller, text)``). The host wraps tool
+        # and hook arguments in a one-element list to reuse the frame, so unwrap here.
+        # Without the tool unwrap, a tool handler written as
         # ``def handler(caller, args: dict)`` would receive ``[dict]`` and every
         # ``args["x"]`` lookup would raise TypeError — the tool would appear in the
-        # model's list and fail on first use, in isolated mode only.
+        # model's list and fail on first use, in isolated mode only. Without the hook
+        # unwrap, the hook's second parameter was ``[dict]`` instead of the text str.
         if ctx._api.get(name, {}).get("kind") == "tool":
             args = args[0] if args and isinstance(args[0], dict) else {}
+        elif is_hook:
+            first = args[0] if args else ""
+            if isinstance(first, dict):
+                first = first.get("text", "")
+            args = [str(first)]
+        # Commands/tools receive ``args`` as-is (words list / one object); a hook's
+        # second parameter is the message text itself, not a one-element list of it.
+        second_arg = args[0] if is_hook and args else args
         try:
             try:
                 params = list(inspect.signature(fn).parameters.values())
             except (TypeError, ValueError):
                 params = []
             if len(params) >= 2:
-                out = fn(caller, args)
+                out = fn(caller, second_arg)
             elif len(params) == 1:
                 out = fn(caller)
             else:
@@ -975,6 +1033,12 @@ def _caller_payload(caller: Any) -> dict[str, Any]:
         "user_id": getattr(caller, "user_id", ""),
         "display_name": getattr(caller, "display_name", ""),
         "role": str(getattr(caller, "role", "")),
+        # Session binding: the worker needs it to scope plugin storage and to
+        # address ctx.send* — the host still re-checks the scope of every callback
+        # against the *active request's* caller, so this is identity visibility,
+        # not a privilege grant. Without it, no session-scoped command can work
+        # in the isolated worker.
+        "session_key": str(getattr(caller, "session_key", "") or ""),
         "scene": getattr(caller, "scene", ""),
         "group_id": getattr(caller, "group_id", ""),
         "is_privileged": bool(getattr(caller, "is_privileged", False)),
