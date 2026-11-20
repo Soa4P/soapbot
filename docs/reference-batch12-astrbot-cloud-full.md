@@ -119,5 +119,10 @@ per-session 限流——机制确认，无需借鉴。
    （后两者分别登记人格生态与待拍板附带项）。
 3. **下一批改编候选（市场热度 × 机制价值 × 边界兼容）**：表情包能力面（sticker-
    album 进化）> 群分析总结（复用存档+召回+send）> 万能解析器（send_media 上游）。
+
+> **后续批次**：逐插件全量目录见
+> [reference-batch12b-plugin-catalogue.md](reference-batch12b-plugin-catalogue.md)；
+> LangBot 全家桶等 30 目标对表见
+> [reference-batch13-langbot-ecosystem.md](reference-batch13-langbot-ecosystem.md)。
 4. **全量复查路径**：`api.soulter.top/astrbot/plugins`（3.2MB JSON，3473 条）——
   后续任何插件评估可直接引用本批数据底座。
