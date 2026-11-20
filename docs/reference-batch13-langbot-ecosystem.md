@@ -48,8 +48,8 @@ langbot-plugin-sdk（2026-11 归档并入主仓 sdk/）的形态（原样）：
   插件 UI 即宿主 UI），与宿主完整性边界冲突；除非出现强需求，不排期。
 - Box Runtime 代码沙箱：**不跟进**——插件无任意代码执行面是 soapbot 有意边界
   （同 admin-mode 判例）；登记为"形态参照"，说明业界用 nsjail/Docker 做到什么程度。
-- KnowledgeEngine 可插拔 RAG 组件抽象：**观察**——soapbot kb 面已有；插件自定义
-  检索器是合理的扩展位，登记 kb 面设计输入。
+- KnowledgeEngine 可插拔 RAG 组件抽象：**观察**——知识库面已有；插件自定义
+  检索器是合理的扩展位，登记知识库面设计输入。
 
 ### 2.3 lbctl CLI（Go）
 
@@ -79,8 +79,8 @@ scope 哈希钉死 + fails open"与 soapbot 召回面/注入屏幕的设计直�
 Tauri 2.10 + **打包 CPython 3.12 后端运行时 + WebUI（127.0.0.1:6185）**；stable/
 nightly 双通道，nightly 自动跟随上游构建；AppImage 应用内更新；数据迁移工具。
 判定：**与 soapbot 桌面壳几乎同构**（Tauri + sidecar 打包后端 + 面板托管；连端口
-选择都一致）。**借鉴候选**：发布双通道与应用内更新——soapbot dist-test 目前手动
-分发 + SHA256SUMS，更新通道是分发成熟度差距；登记 dist 分发设计输入（低优先）。
+选择都一致）。**借鉴候选**：发布双通道与应用内更新——soapbot 的测试产物分发目前
+是手动流程 + SHA256SUMS，更新通道是分发成熟度差距；登记 dist 分发设计输入（低优先）。
 
 ### 3.2 builtin_commands_extension——核心指令瘦身参照
 
