@@ -425,7 +425,11 @@ class _RemoteCtx:
                 {"expr": str(expr), "name": job_name,
                  "handler": fn.__name__}
             )
+            # Two keys on purpose: the host tick wrapper invokes ``entry["handler"]``
+            # (the function name), while a job may declare a display ``name`` that
+            # differs from it. Both must resolve to the same handler.
             self._cron_fns[job_name] = fn
+            self._cron_fns[fn.__name__] = fn
             return fn
 
         return deco
