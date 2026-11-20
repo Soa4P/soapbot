@@ -52,8 +52,11 @@ class {cls}(Plugin):
         @ctx.command("smoke", description="x")
         def smoke(caller, args):
             return "ok"
+        # 回调面在 setup 期不可用（隔离模式没有活跃请求，await 会 RuntimeError）；
+        # 这里只创建协程不 await——验证 facade 的形状（send 关键词签名与进程内一致），
+        # 真取值走命令期的双模式助手（见 test_isolated_invoke_contract.py）。
         ctx.storage.set("k", "v")
-        ctx.send("s", "m")
+        ctx.send("m", session_key="s")
         ctx.memory.recall("q")
 """
 
