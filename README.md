@@ -99,6 +99,24 @@ Windows 也可以双击 `start-panel.bat`：建 venv、装依赖、健康检查�
 [使用指南](docs/guide.md)。第一次使用、Windows 重启令牌、Linux SSH、模型和插件的复制式步骤见
 [公开用户指南](docs/public-user-guide.md)。
 
+## 插件：一个个装，不用全量拉
+
+插件市场在**面板第 11 页**：目录来自社区索引（每包独立 GitHub Release，下载时
+按发布时记录的 SHA-256 校验），要哪个装哪个——选中 → 安装 → 审批屏逐项看能力
+（**安装不等于授权**，能力一项项批）→ 加载即用。不想走面板也可以到
+[发布页](https://github.com/Soa4P/soapbot-plugins/releases) 按 `包名-版本.zip`
+单独下载，丢进 `data/plugins/` 后在面板里审批加载。
+
+自己的插件想进市场：往 [soapbot-plugins](https://github.com/Soa4P/soapbot-plugins)
+的 `main` 分支发 PR，`packages/<名字>/` 放 `plugin.yaml` + `main.py` + `README.md`
+（能力声明要克制——审批屏展示的是清单声明）。CI 会跑真宿主装载冒烟与索引一致性
+门禁，合并后由维护者按版本语义发 Release 进索引。
+
+**最低配置**：本体 2 vCPU / 2 GB 内存 / 1 GB 磁盘 / Python 3.12+（模型推理在外部
+端点，本机只做编排）；桌面壳构建需 Node 22 + Rust，手机端构建需 Flutter SDK 约
+10 GB。逐项依据与实测数据见
+[最低系统配置与部署要求](docs/deployment-requirements.md)。
+
 ## 第 13 页：多人看存档，第 15 页管账号
 
 面板的令牌只有一个身份：拿到它的人能看到一切。要让**别人**只看自己该看的群，用第 13 页
