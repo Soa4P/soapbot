@@ -151,6 +151,25 @@ async def test_message_hook_receives_text_str_like_in_process(host_env) -> None:
         await host_env.supervisor.stop_all()
 
 
+async def test_host_side_hook_wrapper_matches_dispatch_contract(host_env) -> None:
+    """宿主侧 invoke 包装器按 dispatch 的 hook(caller, text) 形状被调用。
+
+    包装器曾写成读 ``ctx_event.extras``——dispatch 以 (caller, text) 调它时
+    TypeError，每条消息都炸（被 stage 的 except 吞成 warning）。"""
+    manifest = next(m for m in host_env.discover().found)
+    host_env.approve_from_manifest(manifest)
+    loaded = await host_env.load(manifest.name, force=True)
+    try:
+        hooks = loaded.context._message_hooks
+        assert hooks, "isolated plugin must register a host-side hook wrapper"
+        out = await hooks[0](_caller(), "hello from stage")
+        assert out["text_type"] == "str"
+        assert out["text"] == "hello from stage"
+        assert out["session"] == "qq:group:42"
+    finally:
+        await host_env.supervisor.stop_all()
+
+
 async def test_cron_handler_resolves_and_runs(host_env) -> None:
     """cron handler（经 ctx.cron 注册、ready 帧只报名字）能被 invoke 解析并执行。
 
