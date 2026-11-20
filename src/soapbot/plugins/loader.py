@@ -1087,11 +1087,15 @@ class PluginLoader:
                     plugin=name,
                 )
                 continue
-            async def _message_hook(ctx_event, *, _worker=worker, _hook=hook_name):
-                caller = ctx_event.extras.get("caller")
+            async def _message_hook(caller, text, *, _worker=worker, _hook=hook_name):
+                # The dispatch stage fires hooks as ``hook(caller, text)`` — the same
+                # contract in-process plugins see. The wrapper used to read
+                # ``ctx_event.extras`` from the *caller* argument, which crashed every
+                # isolated hook with TypeError on every message (caught and warned, so
+                # the bug was invisible beyond log lines).
                 return await _worker.invoke(
                     _hook, caller=caller,
-                    args=[{"text": ctx_event.text, "session_key": ctx_event.session_key}],
+                    args=[{"text": str(text), "session_key": getattr(caller, "session_key", "")}],
                 )
 
             _message_hook.__name__ = hook_name
