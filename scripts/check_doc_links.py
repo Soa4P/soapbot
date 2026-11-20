@@ -18,11 +18,17 @@ ROOT = Path(__file__).resolve().parent.parent
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 SKIP_PREFIXES = ("http://", "https://", "mailto:", "#")
 
+#: 数据快照不是手写文档：逐插件目录的表格单元格是 3483 条**第三方描述**原文，
+#: 里面的 markdown 形状文本会被当成链接目标去解析（长文件名 Errno 36）。
+#: 与 JSON 同等对待——数据文件不进链接门禁。
+DATA_SNAPSHOTS = {"reference-batch12b-plugin-catalogue.md"}
+
 
 def documents() -> list[Path]:
     found = [ROOT / "README.md", ROOT / "SECURITY.md"]
     found.extend(sorted((ROOT / "docs").glob("*.md")))
-    return [path for path in found if path.is_file()]
+    return [path for path in found
+            if path.is_file() and path.name not in DATA_SNAPSHOTS]
 
 
 def main() -> int:
