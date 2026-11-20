@@ -24,6 +24,7 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -268,6 +269,28 @@ class InstallFromIndexRequest(BaseModel):
     version: str = Field(..., min_length=1, max_length=32)
 
 
+#: GitHub 发布包下载必然 302（github.com/releases/download →
+#: objects.githubusercontent.com）。禁重定向纪律的实质是「不盲跳到未知主机」，
+#: 不是「永远不跟跳」——所以这里是**验证后单跳**：Location 必须 https 且主机
+#: 命中 GitHub 资产白名单，否则拒绝。盲跟任意 Location 才是 SSRF 面。
+_DOWNLOAD_REDIRECT_HOSTS = frozenset({
+    "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+})
+
+
+def _redirect_target_allowed(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "") in _DOWNLOAD_REDIRECT_HOSTS
+        and not parsed.username
+        and not parsed.password
+    )
+
+
 async def _download_release(url: str) -> bytes:
     """Fetch one release archive. One short-lived client per call (same pattern as
     ``IndexClient._fetch``): a rare 50MiB download gains nothing from connection
@@ -276,15 +299,25 @@ async def _download_release(url: str) -> bytes:
 
     Non-200 raises, so the caller's single ``except`` covers both transport and
     status failures — "下载失败" is one error shape for the operator, not two.
+    Redirects: one validated hop only — the start URL comes from the host-written
+    index, but a compromised index could point anywhere, so the hop target is
+    checked against the GitHub asset-host allowlist before following.
     """
     import httpx
 
     from soapbot.net.client import build_timeout
 
+    url = str(url)
     async with httpx.AsyncClient(
         timeout=build_timeout(15.0), follow_redirects=False, trust_env=False
     ) as http:
         response = await http.get(url, headers={"user-agent": "soapbot-plugin-install"})
+        if response.status_code in (301, 302, 307, 308):
+            location = response.headers.get("location", "")
+            if not location or not _redirect_target_allowed(location):
+                raise RuntimeError("release download redirect to a non-allowlisted host")
+            response = await http.get(
+                location, headers={"user-agent": "soapbot-plugin-install"})
     if response.status_code != 200:
         raise RuntimeError(f"release download returned {response.status_code}")
     return response.content
