@@ -58,9 +58,12 @@ class {cls}(Plugin):
         async def on_msg(caller, text):
             return {{"text_type": type(text).__name__, "text": text,
                      "session": caller.session_key}}
-        @ctx.cron("* * * * *", name="{cmd}-tick")
+        @ctx.cron("30 9 * * *", name="{cmd}-tick")
         async def tick(caller):
             return {{"tick": True, "session": caller.session_key}}
+        @ctx.cron("30 9 * * *", name="{cmd}-display")
+        async def differently_named(caller):
+            return {{"alt": True}}
         @ctx.command("{cmd}-nostorage", description="s", usage="/x")
         async def nostorage(caller, args):
             value = ctx.storage.get("k")
@@ -149,17 +152,25 @@ async def test_message_hook_receives_text_str_like_in_process(host_env) -> None:
 
 
 async def test_cron_handler_resolves_and_runs(host_env) -> None:
-    """cron handler（经 ctx.cron 注册、ready 帧只报名字）能被 invoke 解析并执行。"""
+    """cron handler（经 ctx.cron 注册、ready 帧只报名字）能被 invoke 解析并执行。
+
+    宿主 tick wrapper 回调的是 ``entry["handler"]``（函数名），而 job 可以声明
+    与函数名不同的 display ``name``——两个键都必须解析到同一个 handler。"""
     manifest = next(m for m in host_env.discover().found)
     host_env.approve_from_manifest(manifest)
     loaded = await host_env.load(manifest.name, force=True)
     try:
         out = await loaded.worker.invoke(
-            f"{CMD}-tick", caller=_caller(session_key=""), args=[],
+            "tick", caller=_caller(session_key=""), args=[],
         )
         assert out["tick"] is True
         # cron 调用者没有会话范围（宿主钉死）——空 session_key 原样可见，不是崩溃
         assert out["session"] == ""
+        # display name 与函数名不同：display 名同样可解析（同一 handler）
+        alt = await loaded.worker.invoke(
+            f"{CMD}-display", caller=_caller(session_key=""), args=[],
+        )
+        assert alt == {"alt": True}
     finally:
         await host_env.supervisor.stop_all()
 
