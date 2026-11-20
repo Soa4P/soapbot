@@ -40,9 +40,11 @@ cloud.astrbot.app（SPA，数据接口未公开；集合仓历史是可复查的
 ### 2.1 群分析总结插件（432★，多平台）——记忆面 + 聊天存档的组合能力
 
 机制：拉取群历史消息 → LLM 按时间线摘要 → 主动推送日报/周报。soapbot 有全部底层
-件（聊天存档 L0、记忆召回、send 面、长任务登记），缺的是「**按会话聚合摘要并定期
-推送**」的组合编排。设计输入：摘要产物的沉淀位置（进记忆 vs 只推送）与推送频率的
-审批语义（推送=主动消息，属待拍板的写面边界）。**改编候选（下批）**。
+件（聊天存档 L0、记忆召回、send 面与长任务登记的组合编排缺位）。设计输入：摘要产物
+的沉淀位置（进记忆 vs 只推送）与推送频率的审批语义（推送=主动消息，属待拍板的写面
+边界）。**已落地（2026-11-21，soapbot-plugins#17）**：group-digest 0.1.0——确定性
+残量形态（活跃统计 + 现算概览，不摘要不推送），改编中发现并修复宿主隔离 invoke 契约
+四个缺口（soapbot#99）。
 
 ### 2.2 万能解析器（174★）——媒体链接解析聚合
 
@@ -126,6 +128,23 @@ send_media 面可承载；音乐源的服务条款与 VIP 绕过类实现需逐�
    既有基础设施就绪度排序）。
 3. **正面排除**：SSH 执行器/逆向类/自动发布类/自迭代类——四类判例与既有边界
    一一对应，后续遇到同类机制可直接引用本批结论。
+
+**落地进度（2026-11-21 更新）**：
+- ✅ **2.4 表情包能力面** → sticker-album 1.0.0（分包/AI 选图工具/SHA-256 去重，
+  soapbot-plugins#16）。
+- ✅ **2.1 群分析总结** → group-digest 0.1.0（soapbot-plugins#17）——**确定性残量
+  形态**：消息钩子攒活跃计数（只存计数不存文本，14 天滚动），`/digest-now` 现算
+  概览，不主动推送。上游的 LLM 时间线摘要（插件无模型面）与定时推送（cron 无会话
+  范围 + 推送审批语义待拍板）两项保持为宿主边界设计输入。改编过程发现并修复了
+  soapbot 隔离 worker invoke 契约的四个缺口（caller 重建与 session_key、钩子/cron
+  handler 解析、钩子参数形状、send 签名对齐——soapbot#99，部署默认隔离模式此前
+  所有会话域插件首用即炸；常驻真 worker invoke 契约测试 7 项）。
+- ⏳ **2.2 万能解析器**：send_media 上游增强，待拍板（解析目标平台 ToS/反爬纪律
+  先行核对）。
+- 📋 **宿主侧遗留**：9 个旧插件包（auto-chat/bili-scroll/fishtalk-lite/meme-wiki/
+  novel-desk/qzone-composer/self-nudge/skill-tree/weather-alert）仍是裸同步
+  storage 调用，在隔离模式（部署默认）首用即坏——需逐包 sget/sset 改造后重发；
+  smoke_validate 目前只验装载，建议增功能 invoke 冒烟（钩子/命令真驱动）。
 
 > **全量市场后续评估（3481 插件，SPA 真数据源 api.soulter.top 发现）**：
 > [reference-batch12-astrbot-cloud-full.md](reference-batch12-astrbot-cloud-full.md)
