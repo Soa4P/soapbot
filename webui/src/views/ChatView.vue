@@ -2,7 +2,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { ApiError, chatApi, type ChatAccount, type ChatMessage, type ChatSessionRow } from '@/api/client'
+import { ApiError, api, chatApi, type ChatAccount, type ChatMessage, type ChatSessionRow } from '@/api/client'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import NoteComposer from '@/components/chat/NoteComposer.vue'
 import { t } from '@/i18n'
@@ -343,10 +343,19 @@ async function saveNote(text: string): Promise<void> {
 
 async function logout(): Promise<void> {
   closeStream()
+  // S-FE-01: this used to be a bare fetch without X-CSRF-Token — the server 403'd
+  // it, the cookie survived, and the session stayed live while the UI showed the
+  // login page. Route through the API client (CSRF header included) and check the
+  // result before navigating away.
   try {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    await api.logout()
   } catch {
     // fallback: local sign-out is best effort; the cookie may already be gone.
+  }
+  // Clear per-session drafts: they are plaintext and were keyed by session, not
+  // account, so the next user of this browser profile would see them pre-filled.
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('soapbot.draft.')) localStorage.removeItem(key)
   }
   await router.replace('/chat/login')
 }

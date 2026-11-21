@@ -307,9 +307,14 @@ class AIEngine:
     def _system_prompt(self, persona: Persona | None, req: AIRequest) -> str:
         notes: list[str] = []
         if req.group_name:
-            notes.append(f"当前群：{req.group_name}")
+            # 群名与昵称来自 OneBot payload 的成员自改字段——与消息正文同级地不可信
+            # （S-AIM-02）：标签在包裹外、值在包裹内 + 截断，否则任何群成员改一张
+            # 名片就有一条写入 system 段且免筛查的注入通道。
+            notes.append(
+                "当前群：" + wrap_untrusted(req.group_name[:64].replace("\n", " "), kind="group"))
         if req.sender_name:
-            notes.append(f"对话者昵称：{req.sender_name}")
+            notes.append(
+                "对话者昵称：" + wrap_untrusted(req.sender_name[:64].replace("\n", " "), kind="user"))
         # The card goes first, before recall. It is the map: a few lines saying what this
         # conversation is about, so the fragments below have somewhere to land. Placed
         # after recall it would read as an afterthought and the model would weight the
