@@ -1,0 +1,46 @@
+# soapbot
+
+> 多端 AI 陪伴机器人框架：QQ（官方 + OneBot）× 网页 × App × 桌面四端同一条管线，
+> 插件隔离 worker、逐面授权、审批总线、跨端信任级边界。Python 3.12+ / SQLite / Apache-2.0。
+
+本文件供 Agent 与检索器快速定位文档。全部文档在 `docs/`（53 篇），
+仓库：https://github.com/Soa4P/soapbot ；插件市场：https://github.com/Soa4P/soapbot-plugins
+
+## 上手（按顺序）
+
+- [README](README.md)：四条安装路径（脚本/Docker/源码/Windows）与三步配置
+- [公开用户指南](docs/public-user-guide.md)：第一次使用、Windows 重启令牌、模型与插件复制式步骤
+- [部署文档](docs/deploy-quickstart.md)：三条路径细节、常见失败、验证与卸载
+- [最低系统配置与部署要求](docs/deployment-requirements.md)：2 vCPU / 2 GB / Python 3.12 的逐项依据
+- [使用指南](docs/guide.md)：面板 15 页、群范围、语音、远程访问与登录
+
+## 模型与接入
+
+- [模型接入指南](docs/model-providers.md)：十家厂商预填、无预填厂商的手工加法、401/404/超时读法
+- [NapCat 接线](docs/qq-napcat-setup.md)：协议端接线（正向/反向 WS）、QR 登录、常见故障
+- [QQ 官方机器人](docs/qq-official-setup.md)：开放平台主路径
+
+## 插件体系
+
+- [插件市场（README 节）](README.md)：第 11 页市场单包安装（SHA-256 校验 + 逐项审批）与第三方提交流程
+- [插件仓库](https://github.com/Soa4P/soapbot-plugins)：13+ 包源码，`packages/<名>/`（plugin.yaml + main.py + README）
+- [插件安全模型](docs/plugin-security.md)：隔离 worker、能力逐面授权、安装≠审批
+- [双模式存储助手](https://github.com/Soa4P/soapbot-plugins/blob/main/packages/sticker-album/README.md)：进程内 sync / 隔离 async 同一份插件代码的编写范式
+
+## 运行与运维
+
+- [部署分层](docs/deploy-layer.md)：Docker 加固细节与 §8 验证清单
+- [远程部署](../scripts/deploy_remote.py)：`python scripts/deploy_remote.py --host <ip> --key <pem>` 逐步驱动
+- [聊天存档](docs/chat-archive.md)：四端同一份连续对话、账号与邀请、发送状态
+
+## 设计与边界
+
+- [跨端信任级审计](docs/cross-end-trust-audit.md)：弱端（网页/App/QQ）→ 强端（桌面）升级路径的阻断矩阵
+- [自治能力设计](docs/autonomous-capabilities-design.md)：控制面三前置、授权档位表
+- [安全边界](SECURITY.md)：报告渠道与范围
+
+## 参考评估（外部机制吸收史）
+
+- [batch9](docs/reference-batch9-evaluation.md) / [batch11](docs/reference-batch11-astrbot-market.md) /
+  [batch12](docs/reference-batch12-astrbot-cloud-full.md) / [batch12b 全量目录](docs/reference-batch12b-plugin-catalogue.md) /
+  [batch13](docs/reference-batch13-langbot-ecosystem.md)：AstrBot 市场 3483 条逐条目录、LangBot 对表、借鉴与排除判例
