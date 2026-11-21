@@ -796,9 +796,14 @@ def create_app() -> FastAPI:
         database = current_database()
         if database is not None:
             try:
+                # ``Database.session`` is an async *generator* (no ``__aenter__``),
+                # so ``async with database.session()`` raised TypeError in every
+                # production readiness check — invisible to CI because the test
+                # environment has no initialised database, so this branch never
+                # ran there. ``engine.connect()`` is the context manager to use.
                 from sqlalchemy import text
 
-                async with database.session() as session:
+                async with database.engine.connect() as session:
                     await session.execute(text("SELECT 1"))
             except Exception as exc:  # a probe reports, it never raises
                 # Type only: /readyz is unauthenticated and the message can carry a
