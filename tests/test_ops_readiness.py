@@ -105,6 +105,28 @@ def test_readyz_fails_when_the_database_cannot_be_queried(
     assert "disk I/O error" not in response.text
 
 
+async def test_readyz_with_a_real_initialised_database(tmp_path, monkeypatch) -> None:
+    """The regression the fake could not catch: a REAL Database's ``session`` is a
+    bare async generator (no ``__aenter__``), so the production readiness probe
+    raised TypeError and /readyz returned 503 on every healthy deployment. The
+    ``_BrokenDatabase`` fake above carries ``@asynccontextmanager``, so it passed
+    the very branch this test exercises — the fake had a protocol the real thing
+    lacks."""
+    from soapbot.memory.db import get_database
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    db = await get_database(
+        url=f"sqlite+aiosqlite:///{(tmp_path / 'probe.db').as_posix()}")
+    try:
+        app = create_app()
+        with TestClient(app) as c:
+            response = c.get("/readyz")
+            assert response.status_code == 200
+            assert response.json()["problems"] == []
+    finally:
+        await db.engine.dispose()
+
+
 def test_readyz_does_not_require_a_database_before_one_exists(
     client: TestClient, monkeypatch
 ) -> None:
