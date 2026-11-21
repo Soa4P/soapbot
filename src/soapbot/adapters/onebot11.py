@@ -174,8 +174,20 @@ class OneBot11Adapter(Adapter):
         self._tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
         self._self_info = {"user_id": account_id, "nickname": ""}
-        self._transport_authenticated = bool(access_token) or mode != "reverse"
-        """Reverse mode without a token is an unauthenticated transport."""
+        # S-MSG-03: a token is what authenticates a transport — direction does not.
+        # A forward connection without a token used to be marked authenticated, so a
+        # MITM (or a hijacked protocol end) could forge user_id/owner actions. Loopback
+        # stays trusted without a token: the pipe never leaves the machine.
+        self._transport_authenticated = bool(access_token) or self._ws_host_loopback()
+        """Trusted only with a token or when the pipe cannot leave the machine."""
+
+    def _ws_host_loopback(self) -> bool:
+        from urllib.parse import urlparse
+
+        try:
+            return (urlparse(self._url).hostname or "") in ("127.0.0.1", "localhost", "::1")
+        except ValueError:
+            return False
 
     # ------------------------------------------------------------------ lifecycle
     def _spawn_supervisor(self) -> None:

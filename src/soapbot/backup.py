@@ -92,6 +92,12 @@ def create_backup(data_dir: Path, out_dir: Path | None = None, *,
         raise BackupError(f"data directory does not exist: {data_dir}")
     out_dir = Path(out_dir) if out_dir else data_dir / BACKUP_DIR_NAME
     out_dir.mkdir(parents=True, exist_ok=True)
+    # The archive carries secret.key — it is a credential, not a data file.
+    # 0700 on the directory keeps other local users out of the listing.
+    import contextlib
+
+    with contextlib.suppress(OSError):  # Windows/limited FS: modes are POSIX-only
+        out_dir.chmod(0o700)
 
     stamp = _now_stamp()
     staging = out_dir / f".staging-{stamp}"
@@ -125,8 +131,11 @@ def create_backup(data_dir: Path, out_dir: Path | None = None, *,
         shutil.rmtree(staging, ignore_errors=True)
 
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix(archive.suffix + ".sha256").write_text(
-        f"{digest}  {archive.name}\n", encoding="utf-8")
+    sidecar = archive.with_suffix(archive.suffix + ".sha256")
+    sidecar.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+    # 世界可读的归档 = 主密钥公开（S-DEP-06 的同款缺口）。两侧都收紧到 0600。
+    archive.chmod(0o600)
+    sidecar.chmod(0o600)
     rotate_backups(out_dir, keep)
     return archive
 

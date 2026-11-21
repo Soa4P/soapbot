@@ -35,9 +35,16 @@ router = APIRouter(
 async def audit_events(
     limit: int = Query(100, ge=1, le=1000),
     kind: str = Query("", description="authz / injection / memory / command / rate_limit"),
-    _: dict = Depends(require_api_auth),
+    _: dict = Depends(require_role(Role.ADMIN, require_credential=True)),
 ) -> dict:
-    """Recent security events, newest last."""
+    """Recent security events, newest last.
+
+    ADMIN + credential only (S-AIM-01): events carry cross-group
+    ``user_id``/``group_id`` and budget amounts with purposes — a MEMBER token
+    (and the strict-mode loopback reader, whose role is member) must not
+    enumerate them. ``Permission.VIEW_AUDIT`` was declared for exactly this and
+    never wired; the role gate now enforces what the permission table says.
+    """
     audit = get_audit_log()
     return {
         "events": audit.recent(limit=limit, kind=kind),
@@ -49,9 +56,9 @@ async def audit_events(
 @router.get("/denials")
 async def denials(
     limit: int = Query(100, ge=1, le=1000),
-    _: dict = Depends(require_api_auth),
+    _: dict = Depends(require_role(Role.ADMIN, require_credential=True)),
 ) -> dict:
-    """Denials only — the view an operator actually triages."""
+    """Denials only — the view an operator actually triages. Same ADMIN gate."""
     audit = get_audit_log()
     events = [e for e in audit.recent(limit=1000) if e["outcome"] == "deny"]
     return {"events": events[-limit:], "count": len(events)}
