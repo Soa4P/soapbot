@@ -30,6 +30,7 @@
 ## 运行与运维
 
 - [部署分层](docs/deploy-layer.md)：Docker 加固细节与 §8 验证清单
+- [备份与恢复](docs/backup.md)：`soapbot backup create/list/restore`（SQLite 在线备份 + 摘要校验 + 恢复前快照）
 - [远程部署](../scripts/deploy_remote.py)：`python scripts/deploy_remote.py --host <ip> --key <pem>` 逐步驱动
 - [聊天存档](docs/chat-archive.md)：四端同一份连续对话、账号与邀请、发送状态
 

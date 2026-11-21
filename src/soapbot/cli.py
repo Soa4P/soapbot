@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from soapbot import __version__
 
@@ -120,6 +121,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop at this schema version (default: what this build supports)",
     )
 
+    p_backup = sub.add_parser(
+        "backup",
+        help="create / list / restore data-directory backups (stop the service for restore)",
+    )
+    backup_sub = p_backup.add_subparsers(dest="backup_cmd", required=True)
+    b_create = backup_sub.add_parser("create", help="archive the data directory now")
+    b_create.add_argument("--out", default=None, help="output directory (default <data>/backups)")
+    b_create.add_argument("--keep", type=int, default=7, help="how many archives to keep")
+    backup_sub.add_parser("list", help="list existing archives with digests")
+    b_restore = backup_sub.add_parser("restore", help="restore an archive (pre-restore snapshot is taken)")
+    b_restore.add_argument("archive", help="path to a soapbot-backup-*.tar.gz")
+    b_restore.add_argument("--dry-run", action="store_true", help="verify and plan, touch nothing")
+    b_restore.add_argument("--keep", type=int, default=7, help="how many pre-restore snapshots to keep")
+
     return parser
 
 
@@ -147,6 +162,9 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_migrate(args)
 
+    if args.cmd == "backup":
+        return _run_backup(args)
+
     if args.cmd == "start":
         import uvicorn
 
@@ -168,6 +186,66 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     parser.print_help()
+    return 1
+
+
+def _run_backup(args: argparse.Namespace) -> int:
+    """The `soapbot backup` subcommands. Operator-facing output, exit 1 on refusal."""
+    # 同 _run_doctor/_run_migrate：Windows 控制台默认 cp936，中文输出会炸。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+    from soapbot.backup import (
+        BackupError,
+        create_backup,
+        list_backups,
+        restore_backup,
+        verify_backup,
+    )
+    from soapbot.config import settings
+
+    if args.backup_cmd == "create":
+        try:
+            archive = create_backup(settings.data_dir, args.out, keep=args.keep)
+            digest = verify_backup(archive)
+        except BackupError as exc:
+            print(f"备份失败：{exc}")
+            return 1
+        print(f"已创建 {archive}")
+        print(f"sha256 {digest}")
+        return 0
+
+    if args.backup_cmd == "list":
+        out = Path(args.out) if getattr(args, "out", None) else settings.data_dir / "backups"
+        entries = list_backups(out)
+        if not entries:
+            print(f"{out} 下没有备份。")
+            return 0
+        for entry in entries:
+            name = str(entry["name"])
+            size = int(entry["size"])
+            digest = str(entry["sha256"])
+            print(f"{name}  {size} bytes  sha256:{digest[:16]}…")
+        return 0
+
+    if args.backup_cmd == "restore":
+        try:
+            report = restore_backup(
+                Path(args.archive), settings.data_dir,
+                dry_run=args.dry_run, keep=args.keep)
+        except BackupError as exc:
+            print(f"恢复被拒绝：{exc}")
+            return 1
+        if report.get("dry_run"):
+            print(f"[dry-run] 校验通过：{report['members']} 个文件将恢复到 {report['target']}")
+            print(f"[dry-run] 恢复前会先快照当前状态：{report['would_snapshot']}")
+            return 0
+        print(f"已恢复 {report['members']} 个文件 <- {report['archive']}")
+        print(f"恢复前的状态已快照：{report['pre_restore_snapshot']}")
+        print("提醒：如果刚才服务在运行，重启服务以加载恢复出的数据库。")
+        return 0
+
+    print("未知 backup 子命令")
     return 1
 
 
