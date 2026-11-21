@@ -301,6 +301,11 @@ Windows 看 `C:\soapbot\panel.log`，Linux 看 `journalctl -u soapbot -n 50`。
 
 重跑同一条安装命令。脚本不会覆盖 `data/`，所以数据库、配置、插件都在。
 
+## 备份与恢复
+
+升级或改动前先备份：`soapbot backup create`（SQLite 在线备份、摘要校验、轮换 7 份），
+恢复与安全语义见 [备份与恢复](backup.md)。Docker 部署在容器内执行同名命令。
+
 ## 卸载
 
 ```powershell
