@@ -9,6 +9,7 @@ it (the restore returned the *backed-up* state, not the accidental current one).
 from __future__ import annotations
 
 import sqlite3
+import sys
 import tarfile
 from pathlib import Path
 
@@ -162,3 +163,17 @@ def test_list_backups_newest_first_with_digest(data_dir: Path) -> None:
     entries = list_backups(data_dir / BACKUP_DIR_NAME)
     assert [e["name"] for e in entries] == [second.name, first.name]
     assert all(isinstance(e["sha256"], str) and len(e["sha256"]) == 64 for e in entries)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits")
+def test_archive_and_sidecar_are_owner_only(data_dir: Path) -> None:
+    """归档含 secret.key——世界可读的备份 = 主密钥公开（S-DEP-06 同款缺口）。"""
+    import stat as stat_module
+
+    archive = create_backup(data_dir)
+    assert archive.parent.stat().st_mode & 0o777 == 0o700
+    assert archive.stat().st_mode & 0o777 == 0o600
+    sidecar = archive.with_suffix(archive.suffix + ".sha256")
+    assert sidecar.stat().st_mode & 0o777 == 0o600
+    # 目录位不再包含任何 world/group 写或读位
+    assert not stat_module.S_IRWXO & archive.parent.stat().st_mode
