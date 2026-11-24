@@ -139,6 +139,38 @@ def _remove_worker_scripts() -> None:
     _WORKER_SCRIPTS.clear()
 
 
+def plugin_identity() -> tuple[int | None, int | None]:
+    """``(uid, gid)`` the plugin worker should run as, or ``(None, None)``.
+
+    Why this is the honest answer to "same-uid self-approval" (S-PLUG-04)
+    ---------------------------------------------------------------------
+    Every pipe-level guarantee in this module assumes the child is *only* able to ask.
+    It can still act directly: a worker running as the host's own user can rewrite
+    ``plugin-approvals.json``, read ``jwt.key``, or edit the memory database. An HMAC
+    over the approval file would be signed with a key the same uid can read — a
+    boundary that only looks like one. Dropping the worker to a different uid is the
+    only userspace mechanism that actually separates the two.
+
+    Windows has no equivalent in this API (job objects do not change identity), so the
+    setting is reported once and ignored rather than silently pretended.
+
+    Returned as a typed pair rather than a ``dict`` for the ``**`` splat: mypy reads a
+    splatted ``dict[str, int]`` as potentially overriding *every* keyword of
+    ``create_subprocess_exec`` and reports a dozen bogus errors.
+    """
+    uid = settings.plugin_run_uid
+    gid = settings.plugin_run_gid
+    if uid is None and gid is None:
+        return (None, None)
+    if sys.platform == "win32":
+        logger.warning(
+            "PLUGIN_RUN_UID/PLUGIN_RUN_GID are POSIX-only; ignoring on Windows — "
+            "plugin workers keep the host's identity"
+        )
+        return (None, None)
+    return (uid, gid)
+
+
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     """Kill the child *and* anything it spawned.
 
@@ -575,6 +607,7 @@ class IsolatedRunner:
             )
 
         try:
+            run_uid, run_gid = plugin_identity()
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",  # isolated mode: ignore PYTHON* env and user site-packages
@@ -599,6 +632,11 @@ class IsolatedRunner:
                 # the direct child and the orphans keep holding CPU and memory.
                 start_new_session=(sys.platform != "win32"),
                 creationflags=(_CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
+                # Privilege separation when the operator configured it: the worker gets
+                # its own uid, so it cannot rewrite the host's approval records with the
+                # host's permissions (S-PLUG-04). Both None when unset.
+                user=run_uid,
+                group=run_gid,
             )
         except OSError as exc:  # pragma: no cover - depends on environment
             raise IsolationError(f"could not start plugin process: {exc}") from exc

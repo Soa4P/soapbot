@@ -209,6 +209,17 @@ async def install_from_index(body: InstallFromIndexRequest, request: Request) ->
     snapshot = await manager.index.snapshot()
     if not snapshot.available:
         raise HTTPException(status_code=503, detail="插件索引不可用，无法一键安装")
+    # S-SUP-01: the digest check below anchors the download to what the *index*
+    # declared; the signature is what anchors the index to the maintainer. Without it,
+    # whoever can serve a modified catalogue simply declares their own digest and every
+    # downstream check agrees with them.
+    if settings.plugin_index_require_signature and not snapshot.signed:
+        reason = snapshot.signature_error or "索引没有有效签名"
+        logger.warning("plugin install refused: index unsigned (%s)", reason)
+        raise HTTPException(
+            status_code=409,
+            detail=f"索引未通过签名校验，拒绝一键安装：{reason}（可手工上传 zip，仍需本人审批）",
+        )
     meta = snapshot.version_meta(body.name, body.version)
     if meta is None:
         raise HTTPException(
