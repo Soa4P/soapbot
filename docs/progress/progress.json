@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-17T12:00:00+08:00",
+  "updated_at": "2026-11-24T22:13:55+08:00",
   "current": null,
   "phases": [
     {
@@ -3894,6 +3894,39 @@
         }
       ],
       "goal": "设计 §1.1 三前置逐条落地：Coopanion「一次 30 分钟」档位的单档落法；UIA/窗口绑定/浏览器通道登记为第三增量"
+    },
+    {
+      "id": "a24",
+      "index": "A24",
+      "name": "外部安全审计 124 项分诊与修复（P0/P1 两批）",
+      "status": "doing",
+      "tasks": [
+        {
+          "id": "a24-t1",
+          "name": "124 项按部署形态分诊（loopback 面板 / forward 带 token / 官方插件 / screen 等全关）",
+          "status": "done",
+          "note": "High 12 条里 3 条真实可达（S-AIM-01/02、S-FE-01），其余受部署前提隔离；审计未覆盖我们已修的 readyz 探针与隔离 invoke 契约"
+        },
+        {
+          "id": "a24-t2",
+          "name": "P0 批（#107）：backup 0600/目录 700、昵称群名包裹+截断、审计 API 收口 ADMIN+凭据、存档登出修复+清草稿、forward 无 token 标记未认证",
+          "status": "done",
+          "note": "全量 2489 passed；服务器实证归档 0600；dist 重建"
+        },
+        {
+          "id": "a24-t3",
+          "name": "P1 批：预算命名会话对象级授权（S-AIM-03）、流式 provider 错误只回状态（S-MSG-05）、register 限流+先验邀请（S-AUTH-03）、13 条敏感插件命令 min_role=ADMIN（S-SUP-06/02）",
+          "status": "done",
+          "note": "插件侧从宿主命令表断言 admin（func_smoke ADMIN_ONLY）；版本按 VERSIONING 升（权限收紧=不兼容）"
+        },
+        {
+          "id": "a24-t4",
+          "name": "长线：市场索引签名（S-SUP-01）、插件同 uid 自批（S-PLUG-04）、两套备份实现收敛（S-DEP-12）",
+          "status": "todo",
+          "note": "架构级，需单独设计批次"
+        }
+      ],
+      "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"
     }
   ],
   "archive": [

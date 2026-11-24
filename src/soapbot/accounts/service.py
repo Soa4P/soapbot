@@ -14,6 +14,7 @@ does not hand out working invitations.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import re
@@ -230,7 +231,6 @@ async def redeem_invite(
     db: Database, *, code: str, username: str, password: str
 ) -> Account:
     name = _check_username(username)
-    salt, digest = hash_password(password)
     now = time.time()
     async with db.write() as session:
         invite = (
@@ -244,6 +244,11 @@ async def redeem_invite(
             raise AccountError("邀请码已过期")
         if invite.used >= invite.max_uses:
             raise AccountError("邀请码已用完")
+        # Hash only after the invite proved real and usable (S-AUTH-03): scrypt is
+        # ~16 MiB and tens of ms of CPU, and this endpoint is unauthenticated — hashing
+        # first let a stream of junk invite codes burn the event loop before any check
+        # ran. Off the loop so a burst queues instead of freezing every request.
+        salt, digest = await asyncio.to_thread(hash_password, password)
         existing = (
             await session.execute(select(AccountRow).where(AccountRow.username == name))
         ).scalar_one_or_none()

@@ -80,6 +80,23 @@ async def test_registering_with_an_unknown_invite_is_a_400(env) -> None:
     assert response.json()["detail"] == "邀请码无效"
 
 
+async def test_register_is_rate_limited_per_client(env) -> None:
+    """S-AUTH-03: unauthenticated junk-invite traffic is bounded.
+
+    The hash moved behind the invite check and off the event loop, and this budget
+    stops the loop from being offered at all after the first handful.
+    """
+    body = {
+        "invite": "still-not-a-real-code",
+        "username": "dave",
+        "password": "correct horse battery",
+    }
+    statuses = [(await env.client.post("/api/accounts/register", json=body)).status_code
+                for _ in range(6)]
+    assert statuses[:5] == [400] * 5
+    assert statuses[5] == 429, statuses
+
+
 async def test_a_member_cannot_list_accounts(env) -> None:
     env.current.update({"subject": str(env.member.id), "role": env.member.role})
     response = await env.client.get("/api/accounts")
