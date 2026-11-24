@@ -120,6 +120,49 @@ def test_configured_token_bypasses_the_files(tmp_path: Path) -> None:
     assert not (tmp_path / BOOTSTRAP_FILE).exists()
 
 
+def test_a_redeemed_env_token_stays_dead_across_restarts(tmp_path: Path) -> None:
+    """S-AUTH-02: "redeemed" used to live only in process memory for env tokens.
+
+    An operator who set ``SOAPBOT_INIT_TOKEN`` and redeemed it believed the
+    credential was spent. It was: until the next restart, which rebuilt the token from
+    the environment with ``enabled=True`` and reopened login — and ``revoke-all``,
+    which reaches into this object, could not durably cut it off either.
+    """
+    from soapbot.security.tokens import BOOTSTRAP_REDEEMED_ENV
+
+    first = bootstrap_for_data_dir(tmp_path, configured="env-configured-credential")
+    assert first.redeem("env-configured-credential") is True
+    assert not first.available
+
+    # The marker records a fingerprint, never the credential itself.
+    marker = tmp_path / BOOTSTRAP_REDEEMED_ENV
+    assert marker.exists(), "no durable record that the env token was spent"
+    recorded = marker.read_text(encoding="utf-8").strip()
+    assert recorded and recorded != "env-configured-credential"
+    assert "env-configured-credential" not in marker.read_text(encoding="utf-8")
+
+    for _ in range(3):  # restarts
+        again = bootstrap_for_data_dir(tmp_path, configured="env-configured-credential")
+        assert again.available is False, "a restart re-armed a spent env token"
+        assert again.redeem("env-configured-credential") is False
+
+
+def test_changing_the_env_token_deliberately_re_arms_login(tmp_path: Path) -> None:
+    """Rotating the configured value is the documented way back in."""
+    first = bootstrap_for_data_dir(tmp_path, configured="first-value")
+    assert first.redeem("first-value") is True
+
+    rotated = bootstrap_for_data_dir(tmp_path, configured="second-value")
+    assert rotated.available is True, "a new configured value must open login again"
+    assert rotated.reveal() == "second-value"
+    assert rotated.redeem("first-value") is False
+
+    # ...and redeeming the new one closes it again for that value.
+    assert rotated.redeem("second-value") is True
+    third = bootstrap_for_data_dir(tmp_path, configured="second-value")
+    assert third.available is False
+
+
 def test_an_empty_file_is_replaced_not_treated_as_a_credential(tmp_path: Path) -> None:
     (tmp_path / BOOTSTRAP_FILE).write_text("   \n", encoding="utf-8")
 

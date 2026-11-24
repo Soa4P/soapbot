@@ -24,7 +24,7 @@ import yaml
 from soapbot.core import config_write
 from soapbot.core.config_files import ConfigError, load_providers
 
-LITERAL_KEY = "sk-live-9f2c8a71b4e6d035"
+LITERAL_KEY = "sk-live-EXAMPLE-9f2c8a71b4e6d035"
 ENV_KEY = "env:DEEPSEEK_API_KEY"
 
 

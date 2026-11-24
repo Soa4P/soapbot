@@ -163,3 +163,92 @@ def test_runtime_media_sender_builds_image_segment() -> None:
 class _LedgerProbe:
     def permits(self, plugin, session_key):
         return True
+
+
+# ------------------------------------------------- isolated send scrubbing (S-PLUG-01)
+
+
+async def test_isolated_send_scrubs_like_the_in_process_path() -> None:
+    """Both send paths must apply the same scrub — the weaker one decides.
+
+    ``PluginContext.send`` (in-process) always ran ``scrub_plugin_output``; the
+    isolated router forwarded the worker's text verbatim. A plugin in isolated mode —
+    the *default* for third-party plugins — could therefore ship bidi overrides,
+    markup, or an echoed API key straight into a group.
+
+    This also pins the import: the ceiling lived only in ``context``, so a router that
+    guessed the wrong module raised ``ImportError`` on the first send, and nothing in
+    the suite exercised it.
+    """
+    from soapbot.plugins.sandbox import MAX_REPLY_CHARS
+    from soapbot.plugins.surfaces import SurfaceRouter
+
+    guard, _ = _guard(Capability.SEND)
+    sent: list[str] = []
+
+    async def _sender(session_key: str, text: str) -> None:
+        sent.append(text)
+
+    router = SurfaceRouter(
+        guard=guard, plugin="p", audit=None, ledger=_LedgerProbe(), sender=_sender
+    )
+    # A bidi override (RLO) that reverses how the line renders, an echoed key, and
+    # enough length to exceed the cap.
+    hostile = "\u202eevil" + " api_key=ABCDEF123456" + "x" * (MAX_REPLY_CHARS + 50)
+    await router.dispatch(
+        "send.message", {"session_key": "a:group:1", "text": hostile}, None
+    )
+    assert sent, "the scrubbed message was dropped entirely"
+    out = sent[0]
+    assert "\u202e" not in out, "a bidi override reached the group"
+    assert "ABCDEF123456" not in out, "an echoed credential reached the group"
+    assert len(out) <= MAX_REPLY_CHARS + 1, "the reply cap did not apply"
+
+
+async def test_isolated_send_drops_a_message_that_scrubs_to_nothing() -> None:
+    """Invisible-only text would still render as a bot line in the group.
+
+    After scrubbing there is nothing left to say, so the send is a no-op rather than
+    an empty message.
+    """
+    from soapbot.plugins.surfaces import SurfaceRouter
+
+    guard, _ = _guard(Capability.SEND)
+    sent: list[str] = []
+
+    async def _sender(session_key: str, text: str) -> None:
+        sent.append(text)
+
+    router = SurfaceRouter(
+        guard=guard, plugin="p", audit=None, ledger=_LedgerProbe(), sender=_sender
+    )
+    assert await router.dispatch(
+        "send.message", {"session_key": "a:group:1", "text": "\u200b\u200b\u200b"}, None
+    )
+    assert sent == [], "an invisible-only message was still forwarded"
+
+
+async def test_isolated_media_caption_is_scrubbed_too() -> None:
+    """The caption is free text and reaches the same group as the image."""
+    from soapbot.plugins.surfaces import SurfaceRouter
+
+    guard, _ = _guard(Capability.SEND_MEDIA)
+    delivered: list[tuple[str, str, str]] = []
+
+    async def _media(session_key, b64, caption):
+        delivered.append((session_key, b64, caption))
+
+    router = SurfaceRouter(
+        guard=guard, plugin="p", audit=None, ledger=_LedgerProbe(), sender_media=_media
+    )
+    await router.dispatch(
+        "send_media.request",
+        {
+            "session_key": "a:private:1",
+            "image_b64": TINY_PNG,
+            "caption": "token=SEKRIT-9988776",
+        },
+        None,
+    )
+    assert delivered
+    assert "SEKRIT-9988776" not in delivered[0][2]

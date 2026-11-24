@@ -50,9 +50,11 @@ from soapbot.plugins.memory_api import (
     build_session_view,
 )
 from soapbot.plugins.sandbox import (
+    MAX_REPLY_CHARS,
     CapabilityDeniedError,
     CapabilityGuard,
     StorageUnavailable,
+    scrub_plugin_output,
 )
 
 if TYPE_CHECKING:
@@ -208,7 +210,13 @@ class SurfaceRouter:
             raise PermissionError("session not authorised for this plugin")
         if self._sender is None:
             raise RuntimeError("host has no sender installed")
-        await self._sender(target, text)
+        # S-PLUG-01: the isolated path used to forward raw text while the in-process
+        # ``PluginContext.send`` scrubbed it. Two paths, one capability — the weaker
+        # one decides the guarantee. Same helper, same cap, both modes.
+        clean = scrub_plugin_output(text, max_chars=MAX_REPLY_CHARS)
+        if not clean.strip():
+            return True
+        await self._sender(target, clean)
         return True
 
     async def _send_media(self, args: dict[str, Any], caller) -> Any:
@@ -240,6 +248,9 @@ class SurfaceRouter:
             )
         if self._sender_media is None:
             raise RuntimeError("host has no media sender installed")
+        # S-PLUG-01 also covered captions: the in-process path scrubs them, so the
+        # isolated path must too.
+        caption = scrub_plugin_output(caption, max_chars=2000)
         # Audit carries sizes only; image bytes never enter a log line.
         if self._audit is not None:
             self._audit.record(
