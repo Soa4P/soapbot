@@ -70,25 +70,36 @@ if [ -z "$CID" ]; then
     exit 1
 fi
 
+# Why the archive is written into the volume and copied out through `docker exec cat`
+# -----------------------------------------------------------------------------------
+# `docker cp` cannot see a container's tmpfs mounts. The container's only writable tmpfs
+# is /tmp, so a backup written there was invisible to `docker cp` — it failed with
+# "Could not find the file /tmp/…" while `docker exec ls` listed the file in the same
+# container (measured twice). Writing under /data (the volume) and streaming the bytes
+# out with `docker exec cat` is immune to which mount type the target happens to be.
+#
 # Output is kept, not swallowed: when this fails the only useful thing an operator has
 # is the reason. --keep 0 because retention is this script's job, on the host.
-compose exec -T soapbot python -m soapbot.cli backup create \
-    --out "/tmp/soapbot-backup-$STAMP" --keep 0
-# Copy the whole directory, then pick the archive out of it: `docker cp` with a glob
-# fails with "Could not find the file …/*.zip" when the exec above wrote nothing, which
-# is the least clear possible way to report "the backup did not run" (measured).
-rm -rf "$BACKUP_DIR/.staging-$STAMP"
-docker cp "$CID:/tmp/soapbot-backup-$STAMP" "$BACKUP_DIR/.staging-$STAMP"
-set -- "$BACKUP_DIR"/.staging-$STAMP/*.zip
-if [ ! -f "$1" ]; then
+PENDING="/data/backups/pending-$STAMP"
+compose exec -T soapbot python -m soapbot.cli backup create --out "$PENDING" --keep 0
+# Resolve the one archive name without a shell glob: python prints the exact path.
+# The directory arrives as argv, never interpolated into the code (a path is data).
+ARCHIVE_IN=$(docker exec "$CID" python -c \
+    'import glob, sys; hits = sorted(glob.glob(sys.argv[1] + "/*.zip")); print(hits[0] if hits else "")' \
+    "$PENDING")
+if [ -z "$ARCHIVE_IN" ]; then
     echo "the container wrote no archive; see the output above" >&2
-    rm -rf "$BACKUP_DIR/.staging-$STAMP"
+    compose exec -T soapbot rm -rf "$PENDING" >/dev/null 2>&1 || true
     exit 1
 fi
-mv "$1" "$ARCHIVE"
-rm -rf "$BACKUP_DIR/.staging-$STAMP"
-# The in-container copy is transient: the volume must not grow with backups it never reads.
-compose exec -T soapbot rm -rf "/tmp/soapbot-backup-$STAMP" >/dev/null 2>&1 || true
+docker exec "$CID" cat "$ARCHIVE_IN" > "$ARCHIVE"
+# The in-volume copy is transient: the volume must not grow with backups it holds twice.
+compose exec -T soapbot rm -rf "$PENDING" >/dev/null 2>&1 || true
+if [ ! -s "$ARCHIVE" ]; then
+    echo "copying the archive out produced an empty file" >&2
+    rm -f "$ARCHIVE"
+    exit 1
+fi
 
 # The archive contains data/secret.key and .env: it is a credential, not just data.
 chmod 600 "$ARCHIVE"
@@ -99,7 +110,11 @@ ls -1t "$BACKUP_DIR"/soapbot-*.zip "$BACKUP_DIR"/soapbot-*.tgz 2>/dev/null \
     | tail -n +$((KEEP + 1)) | xargs -r rm -f
 
 # Prove it opens, with the same interpreter that wrote it.
-if ! docker run --rm --network none --entrypoint python \
+# `--user root` is required, not a relaxation: the archive is 0600 and owned by root on
+# the host (a credential — it carries secret.key), while the image's default user is
+# uid 10001, so an unprivileged read gets "Permission denied" and the check would report
+# a perfectly good archive as unreadable (measured).
+if ! docker run --rm --network none --user 0:0 --entrypoint python \
     -v "$BACKUP_DIR":/backup:ro "$IMAGE" \
     -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); sys.exit(1 if z.testzip() else 0)' \
     "/backup/$(basename "$ARCHIVE")"; then
