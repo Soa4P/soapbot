@@ -828,6 +828,33 @@ class Settings(BaseSettings):
     is for a local fork you sign yourself, not for production.
     """
 
+    plugin_run_uid: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    """Run plugin worker processes as this uid (POSIX only, S-PLUG-04).
+
+    Everything in ``isolation.py`` bounds what a plugin can *reach through the pipes*.
+    It cannot bound what the process can do to files: a worker runs as the same user as
+    the host, so it can rewrite ``plugin-approvals.json`` and approve itself (the audit's
+    "same-uid self-approval"), or read the data directory's JWT key.
+
+    Dropping the worker to a different uid is the only userspace mechanism that actually
+    separates them — an HMAC over the approval file would be signed with a key the same
+    uid can read, so it would look like a boundary without being one. With this set, the
+    plugin process cannot write the host's files even though it still shares the machine.
+
+    Deployment requirements, stated because a misconfigured value fails loudly:
+
+    * the host must start as root (or hold ``CAP_SETUID``) for the switch to be permitted;
+    * the plugin directory and any files a plugin must read need to be readable by the new
+      uid (installed plugins are code, so read-only is the right mode anyway);
+    * ``PLUGIN_RUN_GID`` should accompany it, or the process keeps the host's group.
+
+    Unset means "same uid", which is the documented residual risk rather than a silent
+    guarantee: this is the knob that turns that risk into a real boundary.
+    """
+
+    plugin_run_gid: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    """Group for :attr:`plugin_run_uid`. Ignored on its own (no uid to switch to)."""
+
     allow_unknown_private: bool = False
     """Allow private messages from users not on ``private_allowlist``.
 
