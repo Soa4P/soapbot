@@ -250,19 +250,19 @@ def _run_backup(args: argparse.Namespace) -> int:
         # secret.key/.env/the database. One command, so the fix is not a find/xargs the
         # operator has to get right (audit S-DEP-06 residual).
         out = Path(args.out) if getattr(args, "out", None) else settings.data_dir / "backups"
-        report = harden_archives(out)
-        if not report.get("supported", True):
-            print(f"未处理：{report.get('reason', '不支持当前平台')}")
+        hardened = harden_archives(out)
+        if not hardened.get("supported", True):
+            print(f"未处理：{hardened.get('reason', '不支持当前平台')}")
             return 0
         print(
-            f"已收紧 {report['directory']}：目录 0700，"
-            f"{report['archives']} 个归档 + {report['sidecars']} 个 .sha256 置 0600"
+            f"已收紧 {hardened['directory']}：目录 0700，"
+            f"{hardened['archives']} 个归档 + {hardened['sidecars']} 个 .sha256 置 0600"
         )
         return 0
 
     if args.backup_cmd == "restore":
         try:
-            report = restore_backup(
+            restored = restore_backup(
                 Path(args.archive),
                 settings.data_dir,
                 config_dir=settings.config_dir,
@@ -272,12 +272,12 @@ def _run_backup(args: argparse.Namespace) -> int:
         except BackupError as exc:
             print(f"恢复被拒绝：{exc}")
             return 1
-        if report.get("dry_run"):
-            print(f"[dry-run] 校验通过：{len(report['members'])} 个成员将恢复到 {settings.data_dir}")
-            print(f"[dry-run] 恢复前会先快照当前状态：{report['pre_restore_snapshot']}")
+        if restored.get("dry_run"):
+            print(f"[dry-run] 校验通过：{len(restored['members'])} 个成员将恢复到 {settings.data_dir}")
+            print(f"[dry-run] 恢复前会先快照当前状态：{restored['pre_restore_snapshot']}")
             return 0
-        print(f"已恢复 {report['files']} 个文件 <- {Path(args.archive).name}")
-        print(f"恢复前的状态已快照：{report['pre_restore_snapshot']}")
+        print(f"已恢复 {restored['files']} 个文件 <- {Path(args.archive).name}")
+        print(f"恢复前的状态已快照：{restored['pre_restore_snapshot']}")
         print("提醒：如果刚才服务在运行，重启服务以加载恢复出的数据库。")
         return 0
 
