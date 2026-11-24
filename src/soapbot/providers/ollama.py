@@ -119,9 +119,11 @@ class OllamaProvider(BaseProvider):
 
             try:
                 if resp.status_code >= 400:
-                    body = await resp.aread()
+                    # Status only (S-MSG-05): the body can echo the prompt or another
+                    # tenant's data, and last_error is member-readable.
+                    await resp.aread()
                     raise ProviderError(
-                        f"ollama stream HTTP {resp.status_code}: {body[:200]!r}",
+                        f"ollama stream HTTP {resp.status_code}",
                         status=resp.status_code,
                         retry_after=retry_after_of(resp),
                     )

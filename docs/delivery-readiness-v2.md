@@ -210,7 +210,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **手机审批页 + 可下载 debug APK** | **本轮新增（客户端 / CI）** | `mobile/test/approval_test.dart`（5 项）；CI `mobile` job 现构建 debug APK 并上传 artifact（14 天）。owner 账号可在手机上批准/驳回，member 收 403。**未做真机 / 模拟器端到端实测**；release 签名与上架仍不做 |
 | **审批通知：QQ / Webhook / 手机 feed** | **本轮新增（服务端）** | `tests/test_approval_notifications.py`（13 项）；单一订阅点 + `(request_id, kind)` 幂等 + HMAC 签名 + 密钥零泄漏。三条通道默认全关，需运维逐项配置；**未做真实通道实测**，Flutter 审批页在下一阶段 |
 | **公开网页浏览 + 消费提案** | **本轮新增（静态渲染）** | `tests/test_browse_proposal.py`（21 项）；`npm run verify` 全绿。**未做**无头浏览器 / 模拟手机 JS 渲染与真机网页实测；白名单默认空，未点名域名时能力不可用 |
-| **额度审批：面板决策 + 事件总线** | **本轮新增** | `tests/test_budget_events.py`（9 项）、`tests/test_budget_approval_api.py`（10 项）；`npm run verify` 全绿并重建 `dist`。默认开启、单 owner 需显式降级且事件标 `degraded`；QQ / Webhook / 手机三条通知通道**本阶段尚未接线**，见下一段 |
+| **额度审批：面板决策 + 事件总线** | **本轮新增** | `tests/test_budget_events.py`（9 项）、`tests/test_budget_approval_api.py`（11 项）；`npm run verify` 全绿并重建 `dist`。默认开启、单 owner 需显式降级且事件标 `degraded`；QQ / Webhook / 手机三条通知通道**本阶段尚未接线**，见下一段 |
 | **消息图片段按需能力面** | **本轮新增（宿主）** | `tests/test_plugin_media_observe.py`（16 项，含消息钩子→inbox→插件接线）；`npm run verify` 全绿并重建 `dist`。进程内与隔离形态各有路径，但**未做真实插件包（sticker-album）联调**，插件仓库不在本仓库内 |
 | **面板流式观察（09 页）** | **已完成** | 三段耗时阶梯（首 token / 首句送达 / 整条回复）、分句序列、中断与截断角标；中英双语浏览器实测 |
 | **上游连通性自检（doctor）** | **已完成** | `tests/test_posture.py`（51 项）；`doctor` 实跑输出 `[warn] provider.upstream`；`--probe` 为可选网络探测 |

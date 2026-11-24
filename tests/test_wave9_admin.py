@@ -151,25 +151,36 @@ def test_budget_view_says_disabled_rather_than_empty(tmp_path, monkeypatch) -> N
     assert body["enabled"] is False
 
 
-def test_budget_cross_scope_view_requires_config_permission(
+def test_budget_ledger_requires_operator_or_membership(
     runtime_client: TestClient,
 ) -> None:
-    """Enumerating every conversation's spending is not a MEMBER read.
+    """The ledger names requesters, purposes and decision notes (S-AIM-03).
 
-    The response names requesters, purposes and decision notes. A member may ask about
-    one session it already knows; it must not page through all of them.
+    Two ways in: an operator (MANAGE_CONFIG) reads everything; a member reads one
+    session only if it holds a membership on exactly that session. Naming a key is
+    not an authorisation — session keys are guessable.
     """
     service = runtime_client.app.state.soapbot_auth_state.token_service
-    token, _ = service.issue(subject="member", role="member")
-    headers = {"Authorization": f"Bearer {token}"}
+    member, _ = service.issue(subject="member", role="member")
+    member_headers = {"Authorization": f"Bearer {member}"}
 
-    cross = runtime_client.get("/api/budget", headers=headers)
+    cross = runtime_client.get("/api/budget", headers=member_headers)
     assert cross.status_code == 403
 
+    # No membership on this session: 404, so the response cannot confirm it exists.
     scoped = runtime_client.get(
-        "/api/budget", params={"session_key": "qq:group:1"}, headers=headers
+        "/api/budget", params={"session_key": "qq:group:1"}, headers=member_headers
     )
-    assert scoped.status_code == 200
+    assert scoped.status_code == 404
+
+    # The operator still reads a named ledger.
+    owner, _ = service.issue(subject="operator", role="owner")
+    allowed = runtime_client.get(
+        "/api/budget",
+        params={"session_key": "qq:group:1"},
+        headers={"Authorization": f"Bearer {owner}"},
+    )
+    assert allowed.status_code == 200
 
 
 def test_access_matrix_matches_the_permission_table(runtime_client: TestClient) -> None:

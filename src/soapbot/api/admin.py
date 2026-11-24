@@ -964,6 +964,34 @@ def _require_permission(auth: dict[str, Any], request: Request, permission: Perm
     return role
 
 
+async def _can_read_session(request: Request, auth: dict[str, Any], session_key: str) -> bool:
+    """Object-level check for panel reads that name one session.
+
+    True for operators (``MANAGE_CONFIG``), and for a member account that holds a
+    chat membership on exactly that session. Deliberately non-raising so callers can
+    choose their own status code (the budget view answers 404, not 403).
+    """
+    role = _role_of(auth)
+    minimum = PERMISSION_MIN_ROLE.get(Permission.MANAGE_CONFIG, Role.OWNER)
+    if role.rank >= minimum.rank:
+        return True
+    try:
+        from soapbot.accounts.service import active_account_from_claims, has_access
+        from soapbot.app import get_runtime
+
+        runtime = get_runtime()
+        memory = getattr(runtime, "memory", None) if runtime is not None else None
+        if memory is None:
+            return False
+        account = await active_account_from_claims(memory.db, auth)
+        if account is None:
+            return False
+        return await has_access(memory.db, account, session_key)
+    except Exception:
+        # A failed lookup is a refusal, never a pass: this guards a cross-scope read.
+        return False
+
+
 def _require_scene_access(
     auth: dict[str, Any], request: Request, *, action: str = "scene_read"
 ) -> Role:
@@ -1313,13 +1341,17 @@ async def budget_view(
 ) -> dict:
     """Spend requests, plus the policy in force.
 
-    Naming one ``session_key`` is a scoped read that a MEMBER may make. Leaving it empty
-    is the cross-scope audit view: it names requesters, purposes and decision notes, so
-    it needs ``MANAGE_CONFIG``. Without that split, an unauthenticated loopback reader
-    could enumerate every conversation's spending.
+    Every read needs either ``MANAGE_CONFIG`` (the operator view) or, when one
+    ``session_key`` is named, proof that the caller belongs to that session
+    (S-AIM-03: the old split let a MEMBER read *any* group's ledger by naming its
+    key — session keys are guessable, so "named" was never a scope check).
     """
     if not session_key:
         _require_permission(auth, request, Permission.MANAGE_CONFIG, "budget.list")
+    elif not await _can_read_session(request, auth, session_key):
+        # 404 rather than 403: confirming a ledger exists is itself information about
+        # conversations the caller was not invited to (same rule as /api/chat).
+        raise HTTPException(status_code=404, detail="session not found")
     runtime = _runtime()
     if runtime.budget is None:
         return {"enabled": False, "requests": [], "policy": {}}
