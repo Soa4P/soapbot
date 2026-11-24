@@ -434,8 +434,18 @@ class OneBot11Adapter(Adapter):
             self.health.online = True
             self.health.connected_at = time.time()
             self.health.last_error = ""
-            await self._refresh_self_info()
-            await self._reader_loop(ws)
+            try:
+                await self._refresh_self_info()
+                await self._reader_loop(ws)
+            finally:
+                # S-MSG-09: without this the slot kept pointing at a closed socket, so
+                # the *next* reconnect was refused with 1013 "already connected" and the
+                # adapter stayed dead until the process restarted — a plain protocol-end
+                # restart was enough to trigger it. Only clear our own socket: a newer
+                # client may already have taken the slot.
+                if self._ws is ws:
+                    self._ws = None
+                self.health.online = False
 
         self._server = await ws_serve(handler, self.host, self.port, max_size=16 * 1024 * 1024)
         logger.info("onebot11 reverse listening on %s:%s", self.host, self.port)

@@ -137,6 +137,32 @@ async def test_image_description_included_in_history(store: MemoryStore) -> None
     assert "橘猫" in history[0]["content"]
 
 
+async def test_only_dialogue_roles_are_replayed(store: MemoryStore) -> None:
+    """S-AIM-04: host annotations must not become model input.
+
+    The archive also stores ``role="note"`` — a host-side, read-only annotation shown
+    in the WebUI. ``history()`` forwarded every stored row verbatim, so a note went to
+    the chat-completions endpoint as a message. Two consequences, both measured
+    against real providers: an unknown role is a 400, which silenced *every* later
+    reply in that session, and the note body rode into the model context as if the
+    operator had said it.
+
+    The note must still exist in the archive (it is the operator's record); it just
+    stops being replay input.
+    """
+    await store.archive_message(session_key="s5", role="user", content="早")
+    await store.archive_message(session_key="s5", role="note", content="操作员备注：不要聊政治")
+    await store.archive_message(session_key="s5", role="assistant", content="早上好")
+
+    history = await store.history("s5")
+    assert [h["role"] for h in history] == ["user", "assistant"]
+    assert all("操作员备注" not in h["content"] for h in history)
+
+    # Still archived, still visible to the operator.
+    timeline = await store.timeline("s5")
+    assert any(row["role"] == "note" for row in timeline)
+
+
 async def test_timeline_returns_metadata(store: MemoryStore) -> None:
     await store.archive_message(session_key="s4", role="user", content="hi", user_name="A")
     rows = await store.timeline("s4")

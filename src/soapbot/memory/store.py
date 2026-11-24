@@ -45,6 +45,11 @@ from soapbot.memory.vectors import VectorCandidate, rank_by_cosine
 
 logger = logging.getLogger(__name__)
 
+#: Roles that may be replayed into a model request (S-AIM-04). The archive only
+#: writes ``user``/``assistant`` for dialogue plus ``note`` for host annotations;
+#: anything that is not dialogue must not become model input.
+REPLAYABLE_ROLES = ("user", "assistant")
+
 RRF_K = 60
 
 
@@ -412,9 +417,20 @@ class MemoryStore:
     async def history(
         self, session_key: str, *, limit: int = 40, before: float | None = None
     ) -> list[dict[str, Any]]:
-        """Recent turns as OpenAI-style dicts, oldest first."""
+        """Recent turns as OpenAI-style dicts, oldest first.
+
+        Only roles a chat-completions endpoint accepts are replayed (S-AIM-04).
+        Host-side rows such as ``role="note"`` (the archive's read-only annotation)
+        used to be forwarded verbatim: most providers answer 400 for an unknown
+        role, so one note silenced every later reply in that session, and the note
+        body also rode into the model context. Notes stay in the archive (visible
+        in the WebUI); they just stop being model input.
+        """
         async with self.db.session_factory()() as session:
-            stmt = select(MessageRow).where(MessageRow.session_key == session_key)
+            stmt = select(MessageRow).where(
+                MessageRow.session_key == session_key,
+                MessageRow.role.in_(REPLAYABLE_ROLES),
+            )
             if before is not None:
                 stmt = stmt.where(MessageRow.created_at < before)
             stmt = stmt.order_by(MessageRow.id.desc()).limit(limit)

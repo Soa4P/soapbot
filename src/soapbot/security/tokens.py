@@ -36,6 +36,7 @@ Design decisions worth stating
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import secrets
@@ -248,6 +249,10 @@ class TokenService:
 
 BOOTSTRAP_FILE = "init_token.txt"
 BOOTSTRAP_REDEEMED = "init_token.redeemed"
+#: Marker for a token that came from ``SOAPBOT_INIT_TOKEN`` (S-AUTH-02). Records a
+#: fingerprint of the configured value: redeeming it survives restarts, and changing
+#: the value deliberately re-arms login.
+BOOTSTRAP_REDEEMED_ENV = "init_token.redeemed.env"
 """`init_token.redeemed` is a marker, not a secret: it records that the credential was
 used, so a later process start does not treat "no token file" as a fresh install and
 mint a replacement. Without it, deleting the file after use would silently re-enable
@@ -271,6 +276,7 @@ class BootstrapToken:
         enabled: bool = True,
         path: Path | None = None,
         redeemed_marker: Path | None = None,
+        marker_contents: str = "redeemed",
     ) -> None:
         self._token = token or secrets.token_urlsafe(24)
         self._generated = (not token) if generated is None else generated
@@ -278,6 +284,9 @@ class BootstrapToken:
         self._consumed = False
         self._path = path
         self._redeemed_marker = redeemed_marker
+        #: What the redeemed marker records. A file-backed token only needs to exist;
+        #: an env-configured one stores a fingerprint so a *changed* value re-arms.
+        self._marker_contents = marker_contents
 
     @property
     def generated(self) -> bool:
@@ -328,13 +337,19 @@ class BootstrapToken:
         the token file in place rather than deleting it — otherwise the next start sees
         "no file, no marker", concludes this is a fresh install, and mints a new
         credential on its own. That would quietly undo the single-use guarantee.
+
+        An env-configured token has no file to delete but still needs the marker: the
+        value lives in ``SOAPBOT_INIT_TOKEN`` and would otherwise come back armed on
+        the next start (S-AUTH-02).
         """
-        if self._path is None:
+        if self._path is None and self._redeemed_marker is None:
             return
         if self._redeemed_marker is not None:
             try:
                 write_private_file(
-                    self._redeemed_marker, b"redeemed\n", what="bootstrap redeemed marker"
+                    self._redeemed_marker,
+                    (self._marker_contents + "\n").encode("utf-8"),
+                    what="bootstrap redeemed marker",
                 )
             except OSError as exc:  # pragma: no cover - full disk / ACL
                 logger.error(
@@ -344,6 +359,8 @@ class BootstrapToken:
                     exc,
                 )
                 return
+        if self._path is None:  # env-configured: the marker is the whole record
+            return
         try:
             self._path.unlink(missing_ok=True)
         except OSError as exc:  # pragma: no cover - Windows ACL / sharing violation
@@ -393,14 +410,31 @@ def bootstrap_for_data_dir(data_dir: Path, configured: str = "") -> BootstrapTok
     * marker present                 -> already redeemed; login stays closed
     * neither present                -> first start; generate and persist one
 
-    ``configured`` bypasses the files: an operator who set ``SOAPBOT_INIT_TOKEN``
-    explicitly owns that value and its lifecycle.
+    A ``configured`` token (``SOAPBOT_INIT_TOKEN``) uses its own marker too (S-AUTH-02):
+    the same three states apply, with the marker storing a fingerprint of the value.
+    Without it, "redeemed" lived only in process memory, so a restart silently
+    re-enabled login with a value the operator believed was spent — and ``revoke-all``
+    could not durably cut it off either. Changing the configured value writes a new
+    fingerprint and therefore re-arms login on purpose.
     """
     path = data_dir / BOOTSTRAP_FILE
     marker = data_dir / BOOTSTRAP_REDEEMED
 
     if configured:
-        return BootstrapToken(configured, generated=False)
+        env_marker = data_dir / BOOTSTRAP_REDEEMED_ENV
+        fingerprint = hashlib.sha256(configured.encode("utf-8")).hexdigest()[:16]
+        try:
+            recorded = env_marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            recorded = ""
+        if recorded == fingerprint:
+            return BootstrapToken("", generated=False, enabled=False)
+        return BootstrapToken(
+            configured,
+            generated=False,
+            redeemed_marker=env_marker,
+            marker_contents=fingerprint,
+        )
     if marker.exists():
         return BootstrapToken("", generated=False, enabled=False)
     if path.is_file():

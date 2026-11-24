@@ -859,6 +859,14 @@ class BilibiliClient:
 # ------------------------------------------------------------ output validation
 
 
+#: Hard ceiling on a plugin command's reply. The core uses the same budget, so a
+#: plugin cannot out-shout the bot or flood a group.
+#:
+#: Lives next to :func:`scrub_plugin_output` rather than in ``context.py`` because the
+#: *isolated* send path (``surfaces.py``) enforces the same ceiling; a second literal
+#: there would drift from this one.
+MAX_REPLY_CHARS = 2000
+
 _SECRET_IN_TEXT_RE = re.compile(
     r"(sk-[A-Za-z0-9_\-]{8,}"
     r"|(?i:bearer)\s+[A-Za-z0-9._\-]{8,}"

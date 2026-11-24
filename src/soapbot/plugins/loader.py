@@ -86,6 +86,13 @@ from soapbot.security.audit import AuditLog, get_audit_log
 
 logger = logging.getLogger(__name__)
 
+#: Per-plugin caps on what one ready frame may announce (S-PLUG-03). Generous for any
+#: real plugin (a large one registers tens of commands), small enough that a hostile
+#: frame cannot make every message walk thousands of hooks.
+MAX_PLUGIN_COMMANDS = 128
+MAX_PLUGIN_CRONS = 32
+MAX_PLUGIN_HOOKS = 32
+
 #: Root package under which every plugin module is imported. Fixed, so a plugin's
 #: modules can never collide with ``soapbot.*`` or the standard library.
 PLUGIN_NAMESPACE = "soapbot_plugins"
@@ -247,6 +254,9 @@ class PluginLoader:
 
         self.session_ledger = SessionLedger()
         self._loaded: dict[str, LoadedPlugin] = {}
+        #: Plugins whose unload was scheduled by :meth:`revoke` (kept so tests and the
+        #: audit detail can tell "revoked and stopped" from "revoked, still loaded").
+        self._pending_unloads: set[str] = set()
         #: Portable proof of the exact artifact + policy + execution combination that
         #: was loaded. Rebuilt on every load (and therefore every reload), never copied
         #: from the install-time scan.
@@ -440,24 +450,59 @@ class PluginLoader:
             )
 
     def revoke(self, name: str, *, actor: str = "") -> None:
-        """Withdraw approval. A loaded plugin is not unloaded by this call.
+        """Withdraw approval and make it effective immediately.
 
-        Kept separate from :meth:`unload` deliberately: an operator may want to
-        stop a plugin from coming back after a restart without interrupting the
-        service right now, and an automatic unload here would make the two
-        operations impossible to tell apart in the audit log.
+        A loaded plugin's ``CapabilityGuard`` holds a *frozen* grant taken at load
+        time, so dropping the approval record alone left the running plugin with its
+        old powers until someone reloaded it (S-PLUG-05). Revocation is the
+        stop-the-bleeding gesture — an operator who revokes ``send`` after abuse
+        expects the very next call to fail, not the next restart. We therefore unload
+        the plugin synchronously: the audit trail still distinguishes "revoked" from
+        "unloaded" by action, and the plugin stays unapproved so it will not come back
+        on restart either.
         """
         self._sync_approvals()
         self._approved.pop(name, None)
         if self.approvals is not None:
             self.approvals.revoke(name)
+        unloaded = False
+        if name in self._loaded:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                # Called from sync context (CLI/script): there is no running plugin
+                # activity to interrupt, and the next load will refuse. Log only.
+                logger.warning(
+                    "plugin %s revoked outside an event loop; it stays loaded until "
+                    "the process restarts, but its grant is already withdrawn",
+                    name,
+                )
+            else:
+                # ``unload`` is async; schedule it and remember that we did so the
+                # audit line can say the process was actually stopped.
+                self._pending_unloads.add(name)
+                loop.create_task(self._unload_after_revoke(name))
+                unloaded = True
         self.audit.record(
             kind="plugin",
             action="revoke",
             outcome="allow",
-            detail=f"approval withdrawn by {actor or 'operator'}",
+            detail=(
+                f"approval withdrawn by {actor or 'operator'}"
+                + ("; plugin unloaded" if unloaded else "")
+            ),
             plugin=name,
         )
+
+    async def _unload_after_revoke(self, name: str) -> None:
+        try:
+            await self.unload(name)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("unload after revoke failed plugin=%s err=%s", name, exc)
+        finally:
+            self._pending_unloads.discard(name)
 
     def approve_from_manifest(
         self, manifest: PluginManifest, *, actor: str = ""
@@ -990,6 +1035,32 @@ class PluginLoader:
             raise PluginLoadError(
                 f"plugin {name} failed to start: {inner or type(exc).__name__}"
             ) from exc
+
+        # S-PLUG-03: the ready frame is plugin-authored and unbounded. Without a cap a
+        # single plugin can register tens of thousands of hooks — every inbound message
+        # then walks them all with a 2 s budget each (the per-hook timeout bounds one
+        # call, not the sum), which stalls the pipeline for every session. Same shape
+        # for crons (scheduler tick) and tool metadata (model context). Caps are
+        # per-plugin and generous: real plugins register a handful.
+        for label, entries, cap in (
+            ("commands", worker.commands, MAX_PLUGIN_COMMANDS),
+            ("crons", worker.crons, MAX_PLUGIN_CRONS),
+            ("hooks", worker.hooks, MAX_PLUGIN_HOOKS),
+        ):
+            if len(entries) > cap:
+                await self.supervisor.stop(name)
+                self.supervisor.unregister(name)
+                self.audit.record(
+                    kind="plugin",
+                    action="load",
+                    outcome="block",
+                    detail=f"{label} exceed the per-plugin cap ({len(entries)} > {cap})",
+                    plugin=name,
+                )
+                raise PluginLoadError(
+                    f"plugin {name} declared {len(entries)} {label}; "
+                    f"the per-plugin cap is {cap}"
+                )
 
         for entry in worker.commands:
             # Registered through the same paths as an in-process plugin, so the
