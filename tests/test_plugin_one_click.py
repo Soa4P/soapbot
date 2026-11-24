@@ -30,6 +30,24 @@ from soapbot.app import create_app, get_plugin_manager
 INDEX_URL = "https://raw.example.com/soa/main/plugins.json"
 DOWNLOAD_URL = "https://raw.example.com/soa/main/packs/mood-diary-0.1.0.zip"
 
+#: Signing key for the fixture index. Generated per test process: the production
+#: private key is offline and must never be needed (or present) here.
+_TEST_KEY_ID = "test-index-key"
+
+
+@lru_cache(maxsize=1)
+def _test_key():
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key = Ed25519PrivateKey.generate()
+    raw = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
+    )
+    return key, base64.b64encode(raw).decode()
+
 
 @lru_cache(maxsize=1)
 def _real_zip() -> bytes:
@@ -94,7 +112,8 @@ def _versions_payload(digest: str, download: str) -> bytes:
 
 
 class _StaticIndexTransport(httpx.AsyncBaseTransport):
-    """Serves the catalogue pair exactly as the real origin would."""
+    """Serves the catalogue, the version metadata and the signature the maintainer
+    would publish — exactly as the real origin would."""
 
     def __init__(
         self,
@@ -102,12 +121,42 @@ class _StaticIndexTransport(httpx.AsyncBaseTransport):
         digest: str = GOOD_DIGEST,
         index_latest: str = "0.1.0",
         versions_status: int = 200,
+        serve_signature: bool = True,
     ) -> None:
         self.digest = digest
         self.index_latest = index_latest
         self.versions_status = versions_status
+        self.serve_signature = serve_signature
+
+    def _documents(self) -> dict[str, bytes]:
+        documents = {"plugins.json": _index_payload(self.index_latest)}
+        if self.versions_status == 200:
+            documents["plugin_versions.json"] = _versions_payload(self.digest, DOWNLOAD_URL)
+        return documents
+
+    def _signature(self) -> bytes:
+        import base64
+        import json as _json
+
+        from soapbot.plugins.index_signature import canonical_payload, document_digest
+
+        key, _pub = _test_key()
+        covers = {name: document_digest(body) for name, body in self._documents().items()}
+        return _json.dumps(
+            {
+                "version": 1,
+                "algorithm": "ed25519",
+                "key_id": _TEST_KEY_ID,
+                "covers": covers,
+                "signature": base64.b64encode(key.sign(canonical_payload(covers))).decode(),
+            }
+        ).encode()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("index.sig.json"):
+            if not self.serve_signature:
+                return httpx.Response(404)
+            return httpx.Response(200, content=self._signature())
         if request.url.path.endswith("plugins.json"):
             return httpx.Response(200, content=_index_payload(self.index_latest))
         if request.url.path.endswith("plugin_versions.json"):
@@ -115,6 +164,19 @@ class _StaticIndexTransport(httpx.AsyncBaseTransport):
                 self.versions_status, content=_versions_payload(self.digest, DOWNLOAD_URL)
             )
         return httpx.Response(404)
+
+
+def _attach_index(manager, plugins_dir: Path, transport: _StaticIndexTransport) -> None:
+    """Point the manager's index client at the static seam *and* at the test key.
+
+    The key override is what keeps the production private key out of the test suite;
+    the client takes it as a constructor argument for exactly this reason.
+    """
+    _key, pubkey = _test_key()
+    manager.loader.plugins_dir = plugins_dir
+    manager.index._transport = transport
+    manager.index._public_key_b64 = pubkey
+    manager.index._key_id = _TEST_KEY_ID
 
 
 def _fake_download(served: dict):
@@ -148,8 +210,7 @@ def env(tmp_path, monkeypatch):
     with TestClient(app) as client:
         manager = get_plugin_manager()
         if manager is not None:
-            manager.loader.plugins_dir = plugins_dir
-            manager.index._transport = _StaticIndexTransport()
+            _attach_index(manager, plugins_dir, _StaticIndexTransport())
         served: dict[str, bytes] = {"content": _real_zip()}
         monkeypatch.setattr(
             "soapbot.api.plugins._download_release", _fake_download(served)
@@ -204,14 +265,50 @@ def test_placeholder_digest_is_not_installable(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         manager = get_plugin_manager()
         if manager is not None:
-            manager.loader.plugins_dir = plugins_dir
             placeholder = "sha256:" + "0" * 64
-            manager.index._transport = _StaticIndexTransport(digest=placeholder)
+            _attach_index(manager, plugins_dir, _StaticIndexTransport(digest=placeholder))
         response = client.post(
             "/api/plugins/install-from-index",
             json={"name": "mood-diary", "version": "0.1.0"},
         )
     assert response.status_code == 404  # 无可用版本元数据 = 404，与未知版本同形
+
+
+def test_an_unsigned_index_refuses_one_click(tmp_path, monkeypatch) -> None:
+    """S-SUP-01: the digest anchors the download to the index; the signature anchors
+    the index to the maintainer.
+
+    Without this gate, anyone who can serve a modified catalogue declares their own
+    digest and every downstream check agrees with them. The refusal must be explicit
+    (409 + reason) and must not remove discovery — and manual upload stays available,
+    because that path already means "I have these bytes on purpose".
+    """
+    from soapbot.config import settings
+
+    settings.plugin_index_url = INDEX_URL
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    app = create_app()
+    with TestClient(app) as client:
+        manager = get_plugin_manager()
+        if manager is not None:
+            _attach_index(
+                manager, plugins_dir, _StaticIndexTransport(serve_signature=False)
+            )
+        # Discovery still works.
+        listing = client.get("/api/plugins/discover")
+        assert listing.status_code == 200
+        names = [entry.get("name") for entry in listing.json().get("entries", [])]
+        assert "mood-diary" in names
+
+        response = client.post(
+            "/api/plugins/install-from-index",
+            json={"name": "mood-diary", "version": "0.1.0"},
+        )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "签名" in detail
+    assert not (plugins_dir / "mood-diary").exists()
 
 
 def test_download_failure_is_502_not_silent(tmp_path, monkeypatch) -> None:
@@ -224,8 +321,7 @@ def test_download_failure_is_502_not_silent(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         manager = get_plugin_manager()
         if manager is not None:
-            manager.loader.plugins_dir = plugins_dir
-            manager.index._transport = _StaticIndexTransport()
+            _attach_index(manager, plugins_dir, _StaticIndexTransport())
 
         async def _boom(url: str) -> bytes:
             raise RuntimeError("network down")
@@ -303,8 +399,9 @@ def test_list_marks_update_available(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         manager = get_plugin_manager()
         if manager is not None:
-            manager.loader.plugins_dir = plugins_dir
-            manager.index._transport = _StaticIndexTransport(index_latest="0.2.0")
+            _attach_index(
+                manager, plugins_dir, _StaticIndexTransport(index_latest="0.2.0")
+            )
         monkeypatch.setattr(
             "soapbot.api.plugins._download_release", _fake_download({"content": _real_zip()})
         )
