@@ -46,13 +46,16 @@ documented, deployable decision rather than an unbounded one.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import signal
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,6 +79,64 @@ DEFAULT_PLUGIN_MEMORY_BYTES = 512 * 1024 * 1024
 #: Windows process-creation flag for a new process group. Read defensively because
 #: the constant only exists on Windows.
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+#: Worker scripts materialised on disk, keyed by content digest (see
+#: :func:`worker_script_path`).
+_WORKER_SCRIPTS: dict[str, Path] = {}
+
+
+def worker_script_path(source: str) -> Path:
+    """Write *source* to a private temp file and return its path.
+
+    Why not ``python -c <source>``
+    ------------------------------
+    Windows caps a process command line at 32,767 characters, and the resident
+    worker source had grown to 32,229 of them. That is not a theoretical limit: one
+    more helper class pushed it over and **every** plugin on the host failed to
+    start with ``WinError 206`` ("filename or extension too long"), because the
+    failure happens inside ``CreateProcess`` before any plugin code runs. Trimming
+    the source would only buy a few releases.
+
+    A file also survives control characters and quoting rules that ``list2cmdline``
+    mangles. ``-I`` still applies, and since Python 3.11 it implies ``-P``, so the
+    script's own directory is *not* prepended to ``sys.path`` — importing from the
+    temp directory is not possible just by landing a file next to the worker.
+
+    Same-uid caveat, stated rather than hidden: a plugin process runs as the same
+    user as the host, so it could read (or pre-create) this file. That grants it
+    nothing it does not already have — it can execute arbitrary code as that user
+    anyway — and the file contains only the worker bootstrap, no secrets.
+    """
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+    cached = _WORKER_SCRIPTS.get(digest)
+    if cached is not None and cached.exists():
+        return cached
+    directory = Path(tempfile.gettempdir()) / "soapbot-plugin-workers"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    path = directory / f"worker-{digest}.py"
+    if not path.exists():
+        # Written to a pid-suffixed name then renamed, so two hosts sharing a temp
+        # directory cannot observe a half-written script.
+        staging = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        staging.write_text(source, encoding="utf-8")
+        with contextlib.suppress(OSError):
+            os.chmod(staging, 0o600)
+        os.replace(staging, path)
+    _WORKER_SCRIPTS[digest] = path
+    return path
+
+
+@atexit.register
+def _remove_worker_scripts() -> None:
+    """Drop the materialised scripts at interpreter exit.
+
+    Best effort: on Windows the file may still be mapped by a child that has not been
+    reaped, and the leftover is harmless (it is content-addressed and re-used).
+    """
+    for path in _WORKER_SCRIPTS.values():
+        with contextlib.suppress(OSError):
+            path.unlink()
+    _WORKER_SCRIPTS.clear()
 
 
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
@@ -517,8 +578,9 @@ class IsolatedRunner:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",  # isolated mode: ignore PYTHON* env and user site-packages
-                "-c",
-                _CHILD_BOOTSTRAP,
+                # A file, not "-c": the command line has a hard 32 KiB ceiling on
+                # Windows. See worker_script_path().
+                str(worker_script_path(_CHILD_BOOTSTRAP)),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
