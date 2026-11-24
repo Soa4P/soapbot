@@ -89,6 +89,7 @@ from soapbot.plugins.isolation import (
     PluginCrashedError,
     PluginTimeoutError,
     _kill_tree,
+    plugin_identity,
     sanitize_env,
     worker_script_path,
 )
@@ -1177,6 +1178,7 @@ class PluginWorker:
             }
         )
         try:
+            run_uid, run_gid = plugin_identity()
             self._proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",
@@ -1192,6 +1194,11 @@ class PluginWorker:
                 # plugin could spawn 20 helpers that survived the parent).
                 cwd=str(self.config.plugin_dir),
                 start_new_session=(sys.platform != "win32"),
+                # Privilege separation when configured: the worker runs as its own uid so
+                # it cannot rewrite the host's approval records with the host's
+                # permissions (S-PLUG-04). Both None when unset.
+                user=run_uid,
+                group=run_gid,
             )
             # Windows has no process group that survives a hard kill of the host, so a
             # crash would leave the worker running and holding its pipes. A job object
