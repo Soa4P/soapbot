@@ -139,8 +139,8 @@ def _remove_worker_scripts() -> None:
     _WORKER_SCRIPTS.clear()
 
 
-def privilege_kwargs() -> dict[str, int]:
-    """Spawn kwargs that put the plugin worker in another uid/gid, or ``{}``.
+def plugin_identity() -> tuple[int | None, int | None]:
+    """``(uid, gid)`` the plugin worker should run as, or ``(None, None)``.
 
     Why this is the honest answer to "same-uid self-approval" (S-PLUG-04)
     ---------------------------------------------------------------------
@@ -154,25 +154,21 @@ def privilege_kwargs() -> dict[str, int]:
     Windows has no equivalent in this API (job objects do not change identity), so the
     setting is reported once and ignored rather than silently pretended.
 
-    Returns kwargs for ``asyncio.create_subprocess_exec``; ``user``/``group`` are
-    POSIX-only parameters.
+    Returned as a typed pair rather than a ``dict`` for the ``**`` splat: mypy reads a
+    splatted ``dict[str, int]`` as potentially overriding *every* keyword of
+    ``create_subprocess_exec`` and reports a dozen bogus errors.
     """
     uid = settings.plugin_run_uid
     gid = settings.plugin_run_gid
     if uid is None and gid is None:
-        return {}
+        return (None, None)
     if sys.platform == "win32":
         logger.warning(
             "PLUGIN_RUN_UID/PLUGIN_RUN_GID are POSIX-only; ignoring on Windows — "
             "plugin workers keep the host's identity"
         )
-        return {}
-    kwargs: dict[str, int] = {}
-    if uid is not None:
-        kwargs["user"] = uid
-    if gid is not None:
-        kwargs["group"] = gid
-    return kwargs
+        return (None, None)
+    return (uid, gid)
 
 
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
@@ -611,6 +607,7 @@ class IsolatedRunner:
             )
 
         try:
+            run_uid, run_gid = plugin_identity()
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",  # isolated mode: ignore PYTHON* env and user site-packages
@@ -637,8 +634,9 @@ class IsolatedRunner:
                 creationflags=(_CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
                 # Privilege separation when the operator configured it: the worker gets
                 # its own uid, so it cannot rewrite the host's approval records with the
-                # host's permissions (S-PLUG-04). Empty dict when unset.
-                **privilege_kwargs(),
+                # host's permissions (S-PLUG-04). Both None when unset.
+                user=run_uid,
+                group=run_gid,
             )
         except OSError as exc:  # pragma: no cover - depends on environment
             raise IsolationError(f"could not start plugin process: {exc}") from exc

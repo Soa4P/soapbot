@@ -30,17 +30,17 @@ def _reset(monkeypatch):
     yield
 
 
-def test_unset_means_no_extra_kwargs() -> None:
+def test_unset_means_the_host_identity() -> None:
     """Default must be a no-op: dropping privileges silently would break deployments
     whose plugin directories are only readable by the host user."""
-    assert isolation.privilege_kwargs() == {}
+    assert isolation.plugin_identity() == (None, None)
 
 
 def test_posix_uid_and_gid_are_forwarded(monkeypatch) -> None:
     monkeypatch.setattr(isolation.sys, "platform", "linux")
     monkeypatch.setattr(settings, "plugin_run_uid", 10001, raising=False)
     monkeypatch.setattr(settings, "plugin_run_gid", 10001, raising=False)
-    assert isolation.privilege_kwargs() == {"user": 10001, "group": 10001}
+    assert isolation.plugin_identity() == (10001, 10001)
 
 
 def test_a_gid_alone_still_applies(monkeypatch) -> None:
@@ -48,7 +48,7 @@ def test_a_gid_alone_still_applies(monkeypatch) -> None:
     for; silently ignoring it would be worse than honouring it."""
     monkeypatch.setattr(isolation.sys, "platform", "linux")
     monkeypatch.setattr(settings, "plugin_run_gid", 20000, raising=False)
-    assert isolation.privilege_kwargs() == {"group": 20000}
+    assert isolation.plugin_identity() == (None, 20000)
 
 
 def test_windows_reports_and_ignores(monkeypatch, caplog) -> None:
@@ -59,7 +59,7 @@ def test_windows_reports_and_ignores(monkeypatch, caplog) -> None:
     monkeypatch.setattr(isolation.sys, "platform", "win32")
     monkeypatch.setattr(settings, "plugin_run_uid", 10001, raising=False)
     with caplog.at_level(logging.WARNING, logger="soapbot.plugins.isolation"):
-        assert isolation.privilege_kwargs() == {}
+        assert isolation.plugin_identity() == (None, None)
     assert any("POSIX-only" in record.message for record in caplog.records)
 
 
