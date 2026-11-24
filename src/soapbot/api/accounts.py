@@ -125,6 +125,17 @@ async def create_first_owner(
 @router.post("/register")
 async def register(payload: RegisterRequest, request: Request, response: Response) -> dict[str, Any]:
     _reject_cross_site(request)
+    # Unauthenticated path (S-AUTH-03): bound it like the login endpoints. Its own
+    # budget, so junk-invite traffic cannot lock operators out of logging in.
+    host = _client_host(request) or "unknown"
+    state = _auth_state(request)
+    verdict = state.register_limiter.check(host)
+    if verdict.limited:
+        raise HTTPException(
+            status_code=429,
+            detail="too many registration attempts",
+            headers={"Retry-After": str(int(verdict.retry_after) + 1)},
+        )
     try:
         account = await redeem_invite(
             _db(request),
@@ -134,6 +145,7 @@ async def register(payload: RegisterRequest, request: Request, response: Respons
         )
     except AccountError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    state.register_limiter.reset(host)
     logger.info("account registered username=%s", account.username)
     return _issue(request, response, account)
 

@@ -86,12 +86,17 @@ class AuthState:
     #: without reaching through the service's private state.
     revocations: Any = None
     login_limiter: SlidingWindowLimiter = field(default_factory=_new_login_limiter)
+    #: Separate budget for the unauthenticated register path (S-AUTH-03). Sharing the
+    #: login limiter would let junk-invite traffic lock out legitimate logins, which is
+    #: the failure mode S-AUTH-13 already documented for the two login paths.
+    register_limiter: SlidingWindowLimiter = field(default_factory=_new_login_limiter)
 
     #: A fresh bootstrap token means a fresh login budget: carrying a previous app
     #: instance's failed attempts into this one would lock out the operator for five
     #: minutes after a restart, which is the opposite of what the limit is for.
     def reset_login_budget(self) -> None:
         self.login_limiter = _new_login_limiter()
+        self.register_limiter = _new_login_limiter()
 
     def clear(self) -> None:
         """Forget every installed object, including any login throttling."""
