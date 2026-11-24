@@ -74,9 +74,11 @@ python scripts/deploy_remote.py --host <IP> --user root --port 443 \
 `--verify` 是 14 项只读验收，两者必须分开运行。systemd timer
 `deploy/soapbot-backup.timer` 每日 03:30 调 `deploy/backup.sh`。
 
-`scripts/backup.py` 产出的 zip 与远程 tar.gz **不互通**：zip 含 SQLite 一致性快照
-与 config，不含 `/data/.env`、`secret.key`；`scripts/restore.py` 只吃 zip。恢复前
-先停服务，恢复脚本会拒绝更高 schema、阻止路径穿越，并把旧库改名保留。
+**应用层与部署层现在同一种格式**（S-DEP-12 收敛）：`deploy/backup.sh` 调用的
+`scripts/backup.py` 与 CLI 的 `soapbot backup` 是同一个实现（zip + `manifest.json`，
+含 SQLite 一致性快照、`config/`、`secret.key`/`jwt.key`/`.env` 与 `data/` 其余内容）。
+`--backup` 的整卷 tar 是迁移用快照，不是应用层备份。恢复前先停服务；恢复端会拒绝
+更高 schema、阻止路径穿越、跑 `PRAGMA integrity_check`，并把旧库改名保留。
 
 ## 巡检
 

@@ -15,20 +15,30 @@ soapbot backup create --out /mnt/backup --keep 14
 soapbot backup list
 
 # 校验 + 演练（不落盘）
-soapbot backup restore <data>/backups/soapbot-backup-20261121-120000.tar.gz --dry-run
+soapbot backup restore <data>/backups/soapbot-backup-20261121-120000-123.zip --dry-run
 
 # 恢复（先停服务；恢复前自动快照当前状态）
 docker compose stop    # 或 systemd stop
 soapbot backup restore <归档路径>
 ```
 
-每份归档 = `tar.gz` + `.sha256` 边车；恢复先校验摘要，摘要不符（归档损坏或被改）
-直接拒绝。**数据库走 SQLite 在线备份 API**——服务运行中创建的备份也是一致快照。
+每份归档 = **zip + `manifest.json`**（逐文件 sha256、`schema_version`）加一
+`.sha256` 边车。两层校验各挡一种攻击：边车管整包字节（含 manifest），manifest 管
+恢复时真正写下去的内容——把替换过的文件连同摘要一起重写，能过逐文件校验，过不了
+边车。**数据库走 SQLite 在线备份 API**——服务运行中创建的备份也是一致快照。
+
+> 格式历史（S-DEP-12）：曾经有两套实现（CLI 的 `tar.gz`+边车、部署定时器的
+> `zip`+manifest）。现统一为 **zip+manifest**——那是生产归档既有的格式，换写入端
+> 等于同时改定时器的轮换、`chmod 600` 与恢复手册。`scripts/backup.py` /
+> `scripts/restore.py` 现在是同一实现的薄入口，`deploy/backup.sh` 的命令行不变。
+> 收敛前的 `tar.gz` 归档需用旧版程序恢复（当前读取端会明确拒绝并说明原因）。
 
 **恢复的安全语义**：
 
 * 恢复前自动给当前状态打一份快照（标 pre-restore，进同一轮换）——恢复失败本身可逆；
-* 归档成员逐一检查：绝对路径、`..`、非普通文件一律拒绝（与插件安装器同一套穿越纪律）；
+* 归档成员逐一检查：绝对路径、`..`、非 `data/`/`config/` 前缀一律拒绝（与插件安装器
+  同一套穿越纪律）；解包到暂存目录并跑 `PRAGMA integrity_check`，通过了才动现库；
+* 旧库不覆盖而是改名成 `soapbot.db.pre-restore-<时间戳>`，恢复错了改回来即可；
 * 恢复运行中的活库是危险的（WAL 会打架）——先停服务；忘了停，恢复完重启服务加载。
 
 **备份里有什么**：`data/` 全部——数据库、`config/`（providers/adapters/personas）、
