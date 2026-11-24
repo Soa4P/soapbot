@@ -139,9 +139,14 @@ class OpenAICompatProvider(BaseProvider):
 
             try:
                 if resp.status_code >= 400:
-                    body = await resp.aread()
+                    # Status only (S-MSG-05). The body can echo the prompt, the API key
+                    # or another tenant's data on a relay; the non-streaming path was
+                    # already fixed this way and this one lagged behind — last_error on
+                    # GET /api/providers is member-readable, so the body must not ride
+                    # along. Drain it so the connection can be reused, then discard.
+                    await resp.aread()
                     raise ProviderError(
-                        f"{self.kind} stream HTTP {resp.status_code}: {body[:300]!r}",
+                        f"{self.kind} stream HTTP {resp.status_code}",
                         status=resp.status_code,
                         retry_after=retry_after_of(resp),
                     )
