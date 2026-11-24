@@ -148,6 +148,16 @@ def test_wrong_format_version_or_algorithm_is_refused(signer) -> None:
     assert not _verify(signer, _document(key, covers, algorithm="hmac-sha256"), documents).ok
 
 
+def test_digest_is_line_ending_independent() -> None:
+    """Measured failure: a signature made on Windows (CRLF checkout) failed in CI
+    (LF checkout) and looked exactly like tampering. The digest normalises to LF, so
+    the platform's checkout style is not part of the signed content."""
+    crlf = b'{\r\n  "plugins": []\r\n}\r\n'
+    lf = crlf.replace(b"\r\n", b"\n")
+    assert document_digest(crlf) == document_digest(lf)
+    assert document_digest(b"{}") != document_digest(b'{"a":1}')
+
+
 def test_canonical_payload_is_stable_across_key_order() -> None:
     """Both sides must hash the same bytes, or every verification fails for a reason
     unrelated to security."""
