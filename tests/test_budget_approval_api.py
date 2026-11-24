@@ -192,3 +192,26 @@ async def test_the_view_reports_the_distinct_approver_policy(env) -> None:
     response = await env.client.get("/api/budget")
     assert response.status_code == 200
     assert response.json()["policy"]["require_distinct_approver"] is True
+
+
+async def test_a_member_cannot_read_another_sessions_ledger_by_naming_it(env) -> None:
+    """S-AIM-03: session keys are guessable, so "named" is not a scope check.
+
+    A member naming a session they do not belong to gets 404 (existence is itself
+    information), while the operator still reads it.
+    """
+    await _request(env)
+    env.current.update({"subject": "member-1", "role": "member"})
+
+    named = await env.client.get("/api/budget", params={"session_key": SCOPE})
+    assert named.status_code == 404, named.text
+
+    # The cross-scope view stays closed to members as well.
+    cross = await env.client.get("/api/budget")
+    assert cross.status_code == 403, cross.text
+
+    # The operator is unaffected.
+    env.current.update({"subject": "owner-1", "role": "owner"})
+    allowed = await env.client.get("/api/budget", params={"session_key": SCOPE})
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["requests"], "the operator must still see the ledger"
