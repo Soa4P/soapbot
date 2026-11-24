@@ -35,6 +35,7 @@ from typing import Any
 from soapbot.plugins.manifest import Capability
 from soapbot.plugins.sandbox import (
     MAX_PLUGIN_MEDIA_BYTES,
+    MAX_REPLY_CHARS,
     BilibiliClient,
     CapabilityGuard,
     EncryptedPluginStorage,
@@ -79,9 +80,10 @@ def bind_caller(caller: CallerContext):
     finally:
         _CURRENT_CALLER.reset(token)
 
-#: Hard ceiling on a plugin command's reply. The core uses the same budget, so a
-#: plugin cannot out-shout the bot or flood a group.
-MAX_REPLY_CHARS = 2000
+#: ``MAX_REPLY_CHARS`` is imported from ``sandbox`` (see the import block): the reply
+#: ceiling is enforced on both the in-process and the isolated send path, so it is
+#: defined once, next to :func:`scrub_plugin_output`, and re-exported here because
+#: this module has long been its documented home.
 
 
 MAX_ARGS = 16

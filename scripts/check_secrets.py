@@ -13,7 +13,28 @@ PATTERNS = (
     re.compile(rb"(?i)\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b"),
     re.compile(rb"(?i)\bsk-proj-[A-Za-z0-9_-]{32,}\b"),
     re.compile(rb"(?i)\bAKIA[0-9A-Z]{16}\b"),
+    # S-DOC-01: the shapes this repository actually uses were missing. The historical
+    # leak (a bare Windows admin password pasted into a temp script) matched none of
+    # the four rules above, so this gate would have stayed green through it. These
+    # cover the provider keys soapbot ships with plus the generic assignment shape.
+    re.compile(rb"(?i)\bsk-(?!proj-)[A-Za-z0-9_-]{20,}\b"),
+    re.compile(rb"\bAIza[0-9A-Za-z_-]{30,}\b"),
+    # Assignment shapes, deliberately narrow: `env:` references are configuration, and
+    # short values like "test-key" are fixtures. A literal secret is long and opaque.
+    re.compile(
+        rb"(?i)\b(?:password|passwd|api_key|apikey|access_token|secret_key)"
+        rb"\s*[:=]\s*['\"](?!env:)[^'\"\s]{16,}['\"]"
+    ),
+    re.compile(rb"gAAAAA[A-Za-z0-9_-]{40,}"),  # Fernet ciphertext
 )
+#: Matches containing one of these are documentation/fixtures, not credentials. The
+#: marker must be inside the matched text — a real key never spells "example".
+PLACEHOLDER_MARKERS = (
+    b"example", b"secret", b"fake", b"dummy", b"placeholder", b"sample",
+    b"xxxx", b"do-not-leak", b"should-not-leak", b"not-a-real", b"redacted",
+    b"changeme", b"abcdefgh",
+)
+
 BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".sqlite", ".sqlite3", ".db", ".log"}
 BLOCKED_BASENAMES = {"id_rsa", "id_ed25519"}
 ENV_EXAMPLES = {".env.example", ".env.template", ".env.sample"}
@@ -37,6 +58,10 @@ def check(name: str, content: bytes) -> str | None:
         return None
     for pattern in PATTERNS:
         for match in pattern.finditer(content):
+            # Fixtures and docs mark their fake values ("sk-live-EXAMPLE-…"); a real
+            # credential never spells one of those markers inside itself.
+            if any(marker in match.group().lower() for marker in PLACEHOLDER_MARKERS):
+                continue
             if pattern is PATTERNS[3] and match.group() == b"AKIAIOSFODNN7EXAMPLE":
                 continue
             return "credential-like content"
