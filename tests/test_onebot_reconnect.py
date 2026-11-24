@@ -295,3 +295,126 @@ async def test_a_half_open_socket_is_detected_by_the_liveness_probe(
 
 async def _noop() -> None:
     return None
+
+
+# --------------------------------------------------------------- reverse transport
+
+
+class _FakeRequest:
+    """Just the two attributes ``_client_authorized`` reads."""
+
+    def __init__(self, token: str) -> None:
+        self.headers = {"Authorization": f"Bearer {token}"}
+        self.path = "/onebot/v11/ws"
+
+
+class _AuthorisedWS(_FakeWS):
+    """A reverse-WS client that has already passed the token check."""
+
+    def __init__(self, *, fail: bool = False, token: str = "t0ken") -> None:
+        super().__init__(fail=fail)
+        self.request = _FakeRequest(token)
+        self.remote_address = ("127.0.0.1", 12345)
+
+
+class _HeldWS(_AuthorisedWS):
+    """Stays connected: the read loop blocks until the test cancels it."""
+
+    async def __anext__(self) -> Any:
+        await asyncio.Event().wait()  # never set
+        raise StopAsyncIteration  # pragma: no cover - unreachable
+
+
+class _HandoverWS(_AuthorisedWS):
+    """A socket that hands its slot to a replacement mid-read.
+
+    The takeover has to happen inside the read loop: the handler's own guard refuses
+    a second live client, so nothing can legitimately evict the slot from outside.
+    """
+
+    def __init__(self, adapter: Any, replacement: Any) -> None:
+        super().__init__()
+        self._adapter = adapter
+        self._replacement = replacement
+
+    async def __anext__(self) -> Any:
+        self._adapter._ws = self._replacement
+        raise StopAsyncIteration
+
+
+async def _reverse_handler(monkeypatch: pytest.MonkeyPatch):
+    """Start a reverse adapter and hand back the connection handler it registered."""
+    captured: dict[str, Any] = {}
+
+    async def fake_serve(handler: Any, *_args: Any, **_kwargs: Any) -> Any:
+        captured["handler"] = handler
+
+        class _Server:
+            def close(self) -> None:
+                return None
+
+            async def wait_closed(self) -> None:
+                return None
+
+        return _Server()
+
+    monkeypatch.setattr(onebot11, "ws_serve", fake_serve)
+    adapter = OneBot11Adapter(
+        account_id="1", mode="reverse", access_token="t0ken", port=6700
+    )
+    adapter._refresh_self_info = _noop  # type: ignore[method-assign]
+    await adapter.start()
+    return adapter, captured["handler"]
+
+
+@pytest.mark.asyncio
+async def test_reverse_slot_is_released_when_the_client_disconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-MSG-09: a normal disconnect used to leave the slot filled.
+
+    The handler never cleared ``self._ws``, so the *next* reverse connection — a NapCat
+    restart, a network blip, a protocol-side reconnect — was refused with 1013 "already
+    connected" and the bot stayed offline until the process was restarted. The audit
+    called this a reconnect bug; it was an ownership bug.
+    """
+    adapter, handler = await _reverse_handler(monkeypatch)
+    try:
+        await handler(_AuthorisedWS())  # connects, reads nothing, ends
+        assert adapter._ws is None, "the closed socket stayed in the slot"
+        assert adapter.health.online is False
+
+        # The regression: this second client must be accepted, not 1013'd.
+        second = _HeldWS()
+        task = asyncio.create_task(handler(second))
+        for _ in range(100):
+            if adapter._ws is second:
+                break
+            await asyncio.sleep(0.01)
+        assert adapter._ws is second, "a fresh client was refused after a clean disconnect"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_reverse_handler_does_not_clear_a_newer_clients_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the socket that owns the slot may clear it.
+
+    Cleared unconditionally in ``finally``, a handler that finishes late would evict
+    the replacement client that took the slot while it was winding down — trading one
+    stuck slot for one silently unplugged session. The guard normally prevents two
+    live clients, so the takeover has to be simulated: the old socket hands the slot
+    over mid-read.
+    """
+    adapter, handler = await _reverse_handler(monkeypatch)
+    try:
+        newer = _HeldWS()
+        await handler(_HandoverWS(adapter, newer))
+        assert adapter._ws is newer, "an obsolete handler evicted the live client"
+    finally:
+        await adapter.stop()

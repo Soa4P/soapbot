@@ -90,6 +90,7 @@ from soapbot.plugins.isolation import (
     PluginTimeoutError,
     _kill_tree,
     sanitize_env,
+    worker_script_path,
 )
 from soapbot.plugins.sandbox import CapabilityDeniedError
 
@@ -691,6 +692,26 @@ class _StubPlugin:
         return None
 
 
+class _HostPackageBlocker:
+    """Refuse host-package imports inside the plugin process (S-PLUG-07).
+
+    The stubs are installed in ``sys.modules``, and ``sys.modules`` is consulted
+    before any meta path finder, so legitimate ``soapbot.plugins.*`` imports keep
+    working. What this blocks is the *escape*: a plugin that pops the stub and then
+    imports ``soapbot`` fell through to the real package in site-packages (every
+    real deployment installs it), handing the plugin ``get_secret_box`` and the
+    token minter. Same finder the one-shot runner has carried all along; the
+    resident supervisor path was missing it.
+
+    Third-party libraries stay importable — plugins legitimately use httpx.
+    """
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "soapbot" or name.startswith("soapbot."):
+            raise ImportError("plugin processes may not import " + name)
+        return None
+
+
 def _install_stubs():
     """Install the tiny compatibility surface plugins import, without the host.
 
@@ -799,6 +820,9 @@ async def _serve():
         return
     _apply_limits()
     _install_stubs()
+    # After the stubs: sys.modules wins over finders, so the stub surface survives
+    # while everything else under ``soapbot.*`` is refused.
+    sys.meta_path.insert(0, _HostPackageBlocker())
     try:
         root, main = _boot_path(boot)
     except (ValueError, OSError):
@@ -1156,8 +1180,10 @@ class PluginWorker:
             self._proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",
-                "-c",
-                _CHILD_WORKER,
+                # A file, not "-c": this source is ~32 KiB and Windows rejects a
+                # command line over 32,767 characters with WinError 206 before the
+                # child starts. See isolation.worker_script_path().
+                str(worker_script_path(_CHILD_WORKER)),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
