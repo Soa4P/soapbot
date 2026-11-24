@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-24T23:24:57+08:00",
+  "updated_at": "2026-11-25T00:20:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3921,15 +3921,27 @@
         },
         {
           "id": "a24-t4",
-          "name": "长线：市场索引签名（S-SUP-01）、插件同 uid 自批（S-PLUG-04）、两套备份实现收敛（S-DEP-12）",
+          "name": "长线：两套备份实现收敛（S-DEP-12）",
           "status": "todo",
-          "note": "架构级，需单独设计批次"
+          "note": "scripts/backup.py（zip+manifest）与 soapbot backup（tar.gz+sidecar）分叉，需单独设计批次"
         },
         {
           "id": "a24-t5",
           "name": "P2 批：反向 WS 断连释放槽位（S-MSG-09）、revoke 立即卸载 + ready 帧配额（S-PLUG-05/03）、隔离 send 净化（S-PLUG-01）、history 只回放对话角色（S-AIM-04）、env init_token 持久失效（S-AUTH-02）、密钥门禁补形状+占位标记（S-DOC-01）、子进程禁 import 宿主包（S-PLUG-07）",
           "status": "done",
           "note": "顺带修掉两处自身缺陷：隔离 send 引用 context.MAX_REPLY_CHARS 会 ImportError（无测试覆盖）、env token 的 redeemed 标记因 _path 为空根本没写；worker 脚本改为 temp 文件启动（-c 在 Windows 32K 上限，实测 WinError 206 全插件起不来）"
+        },
+        {
+          "id": "a24-t6",
+          "name": "市场索引分离签名（S-SUP-01）：宿主 Ed25519 验签 + 一键安装签名门 + 维护者离线签名工具；插件仓发布 index.sig.json 并在 CI 验签",
+          "status": "done",
+          "note": "公钥内嵌宿主、私钥离线（~/.soapbot，0600）；发现与手工上传不受影响；摘要按 LF 规范化——Windows 签名在 CI 曾被判成篡改（实测）"
+        },
+        {
+          "id": "a24-t7",
+          "name": "插件 worker 权限分离（S-PLUG-04）：PLUGIN_RUN_UID/GID 让 worker 以另一身份运行",
+          "status": "done",
+          "note": "同 uid 下 HMAC 是假边界（密钥可读），身份切换才是真隔离；未设置时行为不变，Windows 明确 warn 并忽略"
         }
       ],
       "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"
