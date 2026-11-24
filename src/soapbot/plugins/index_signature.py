@@ -99,7 +99,17 @@ def canonical_payload(covers: Mapping[str, str]) -> bytes:
 
 
 def document_digest(body: bytes) -> str:
-    return "sha256:" + hashlib.sha256(body).hexdigest()
+    """SHA-256 of a published document, with line endings normalised to LF.
+
+    Why normalise: the signature covers bytes, and git may check the same file out as
+    CRLF (Windows, ``core.autocrlf``) or LF (Linux, CI). Hashing the raw bytes made a
+    signature that verified on the maintainer's machine fail in CI — measured, and the
+    failure looks exactly like tampering. Normalising to LF removes the platform from
+    the equation; the only thing it stops detecting is a pure line-ending flip, which
+    changes nothing a JSON parser sees.
+    """
+    normalised = body.replace(b"\r\n", b"\n")
+    return "sha256:" + hashlib.sha256(normalised).hexdigest()
 
 
 def _fail(reason: str, key_id: str = "") -> SignatureVerdict:

@@ -14,6 +14,7 @@ Windows behaviour. A live uid switch needs root, which CI does not have.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 import pytest
@@ -90,9 +91,9 @@ async def test_the_resident_worker_start_forwards_the_kwargs(monkeypatch, tmp_pa
         supervisor.WorkerConfig(plugin="p", plugin_dir=plugin_dir, attr="Plugin"),
         surface_handler=lambda *_a, **_k: None,
     )
-    with pytest.raises(Exception):
-        # start() continues into the ready-frame handshake after spawning, which the
-        # fake process cannot provide; the kwargs are what this test is about.
+    # start() continues into the ready-frame handshake after spawning, which the fake
+    # process cannot provide; the spawn kwargs are what this test is about.
+    with contextlib.suppress(Exception):
         await worker.start()
 
     assert captured.get("user") == 10001
