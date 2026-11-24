@@ -126,12 +126,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="create / list / restore data-directory backups (stop the service for restore)",
     )
     backup_sub = p_backup.add_subparsers(dest="backup_cmd", required=True)
-    b_create = backup_sub.add_parser("create", help="archive the data directory now")
+    b_create = backup_sub.add_parser("create", help="archive data/ and config/ now")
     b_create.add_argument("--out", default=None, help="output directory (default <data>/backups)")
     b_create.add_argument("--keep", type=int, default=7, help="how many archives to keep")
     backup_sub.add_parser("list", help="list existing archives with digests")
     b_restore = backup_sub.add_parser("restore", help="restore an archive (pre-restore snapshot is taken)")
-    b_restore.add_argument("archive", help="path to a soapbot-backup-*.tar.gz")
+    b_restore.add_argument("archive", help="path to a soapbot-backup-*.zip")
     b_restore.add_argument("--dry-run", action="store_true", help="verify and plan, touch nothing")
     b_restore.add_argument("--keep", type=int, default=7, help="how many pre-restore snapshots to keep")
 
@@ -206,13 +206,25 @@ def _run_backup(args: argparse.Namespace) -> int:
 
     if args.backup_cmd == "create":
         try:
-            archive = create_backup(settings.data_dir, args.out, keep=args.keep)
-            digest = verify_backup(archive)
+            report = create_backup(
+                settings.data_dir,
+                args.out,
+                keep=args.keep,
+                # Config lives outside data/ precisely so a compromised plugin cannot
+                # rewrite it; a backup without it restores a bot pointing at whatever
+                # config it happens to find.
+                config_dir=settings.config_dir,
+            )
+            manifest = verify_backup(report.path)
         except BackupError as exc:
             print(f"备份失败：{exc}")
             return 1
-        print(f"已创建 {archive}")
-        print(f"sha256 {digest}")
+        checksums = manifest.get("checksums") or {}
+        print(f"已创建 {report.path}")
+        print(
+            f"文件数 {report.files}  schema_version={report.schema_version}  "
+            f"db sha256:{str(checksums.get('data/soapbot.db', ''))[:16]}…"
+        )
         return 0
 
     if args.backup_cmd == "list":
@@ -231,16 +243,20 @@ def _run_backup(args: argparse.Namespace) -> int:
     if args.backup_cmd == "restore":
         try:
             report = restore_backup(
-                Path(args.archive), settings.data_dir,
-                dry_run=args.dry_run, keep=args.keep)
+                Path(args.archive),
+                settings.data_dir,
+                config_dir=settings.config_dir,
+                dry_run=args.dry_run,
+                keep=args.keep,
+            )
         except BackupError as exc:
             print(f"恢复被拒绝：{exc}")
             return 1
         if report.get("dry_run"):
-            print(f"[dry-run] 校验通过：{report['members']} 个文件将恢复到 {report['target']}")
-            print(f"[dry-run] 恢复前会先快照当前状态：{report['would_snapshot']}")
+            print(f"[dry-run] 校验通过：{len(report['members'])} 个成员将恢复到 {settings.data_dir}")
+            print(f"[dry-run] 恢复前会先快照当前状态：{report['pre_restore_snapshot']}")
             return 0
-        print(f"已恢复 {report['members']} 个文件 <- {report['archive']}")
+        print(f"已恢复 {report['files']} 个文件 <- {Path(args.archive).name}")
         print(f"恢复前的状态已快照：{report['pre_restore_snapshot']}")
         print("提醒：如果刚才服务在运行，重启服务以加载恢复出的数据库。")
         return 0

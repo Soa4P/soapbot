@@ -8,10 +8,10 @@
 #   * It will not restore while the bot is running. SQLite has readers with an open
 #     snapshot; replacing the file underneath them gives each connection a different
 #     database, and the failure is corruption a week later rather than an error now.
-#   * It will not write anything until the archive has been verified. scripts/restore.py
-#     checks the manifest checksums, runs PRAGMA integrity_check on the staged copy and
-#     only then renames the old database to soapbot.db.pre-restore-<stamp>. A failed
-#     restore leaves the install exactly as it was.
+#   * It will not write anything until the archive has been verified. `soapbot backup
+#     restore` checks the manifest checksums, runs PRAGMA integrity_check on the staged
+#     copy and only then renames the old database to soapbot.db.pre-restore-<stamp>. A
+#     failed restore leaves the install exactly as it was.
 #
 # The restore runs as the image's own uid (10001), which owns the volume, so no step here
 # needs root. It also runs with no network and read-only scripts.
@@ -25,7 +25,6 @@ fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-/opt/soapbot/deploy/docker-compose.yml}"
 IMAGE="${IMAGE:-soapbot:hardened}"
-ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
@@ -52,16 +51,19 @@ ARCHIVE_NAME=$(basename "$ARCHIVE")
 
 # --data-dir is the volume: it carries both soapbot.db and config/, which is why the
 # restore has one target instead of two that could disagree.
+#
+# The CLI, not ``scripts/restore.py``: that file is now a shim over the same package
+# (audit S-DEP-12), and the image has the package installed — mounting the checkout into
+# a restore buys nothing. The image's own uid (10001) owns the volume.
 docker run --rm \
     --network none \
     --cap-drop ALL \
     --security-opt no-new-privileges:true \
     -v "$VOLUME":/data \
-    -v "$ROOT/scripts":/scripts:ro \
     -v "$ARCHIVE_DIR":/backup:ro \
     --entrypoint python \
-    "$IMAGE" /scripts/restore.py "/backup/$ARCHIVE_NAME" \
-        --data-dir /data --config-dir /data/config
+    "$IMAGE" -m soapbot.cli backup restore "/backup/$ARCHIVE_NAME" \
+        --keep 3
 
 # Only reached when the restore exited 0: a non-zero exit aborted the script above, the
 # trap restarts the service, and nothing on the volume was replaced.
