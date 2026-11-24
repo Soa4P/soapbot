@@ -70,11 +70,23 @@ if [ -z "$CID" ]; then
     exit 1
 fi
 
-# --keep 0: retention is this script's job, and it deletes outside the container.
+# Output is kept, not swallowed: when this fails the only useful thing an operator has
+# is the reason. --keep 0 because retention is this script's job, on the host.
 compose exec -T soapbot python -m soapbot.cli backup create \
-    --out "/tmp/soapbot-backup-$STAMP" --keep 0 >/dev/null
-# One archive per directory, so the wildcard resolves to exactly one file.
-docker cp "$CID:/tmp/soapbot-backup-$STAMP/*.zip" "$ARCHIVE"
+    --out "/tmp/soapbot-backup-$STAMP" --keep 0
+# Copy the whole directory, then pick the archive out of it: `docker cp` with a glob
+# fails with "Could not find the file …/*.zip" when the exec above wrote nothing, which
+# is the least clear possible way to report "the backup did not run" (measured).
+rm -rf "$BACKUP_DIR/.staging-$STAMP"
+docker cp "$CID:/tmp/soapbot-backup-$STAMP" "$BACKUP_DIR/.staging-$STAMP"
+set -- "$BACKUP_DIR"/.staging-$STAMP/*.zip
+if [ ! -f "$1" ]; then
+    echo "the container wrote no archive; see the output above" >&2
+    rm -rf "$BACKUP_DIR/.staging-$STAMP"
+    exit 1
+fi
+mv "$1" "$ARCHIVE"
+rm -rf "$BACKUP_DIR/.staging-$STAMP"
 # The in-container copy is transient: the volume must not grow with backups it never reads.
 compose exec -T soapbot rm -rf "/tmp/soapbot-backup-$STAMP" >/dev/null 2>&1 || true
 

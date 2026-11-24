@@ -87,6 +87,17 @@ def test_roundtrip_restore_returns_the_backed_up_state(data_dir: Path) -> None:
     assert rows == [], "post-backup marker survived the restore"
 
 
+def test_no_stray_sqlite_sidecars_are_left_behind(data_dir: Path) -> None:
+    """A snapshot copy leaves ``-wal``/``-shm`` beside it.
+
+    Measured on the deployment: two stray files per backup accumulated in the output
+    directory, and they look like archives to anyone listing it.
+    """
+    create_backup(data_dir)
+    leftovers = [p.name for p in (data_dir / BACKUP_DIR_NAME).iterdir() if p.name.endswith(("-wal", "-shm"))]
+    assert leftovers == [], leftovers
+
+
 def test_archive_is_a_zip_with_a_manifest(data_dir: Path) -> None:
     """The converged format: zip + manifest, not tar.gz + sidecar-only."""
     archive = create_backup(data_dir).path
