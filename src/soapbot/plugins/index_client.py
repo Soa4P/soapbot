@@ -34,6 +34,13 @@ from typing import Any
 import httpx
 
 from soapbot.core.jsonguard import JsonTooDeepError, check_depth
+from soapbot.plugins.index_signature import (
+    MARKET_KEY_ID,
+    MARKET_PUBLIC_KEY_B64,
+    SIGNATURE_FILENAME,
+    SignatureVerdict,
+    verify_documents,
+)
 from soapbot.plugins.manifest import block_key
 
 logger = logging.getLogger(__name__)
@@ -97,6 +104,12 @@ class IndexSnapshot:
     source: str = ""
     fetched_at: float = 0.0
     error: str = ""
+    #: Whether the catalogue + version metadata carry a valid maintainer signature
+    #: (S-SUP-01). Separate from ``available``: discovery works from an unsigned index
+    #: — that is how a fork or a local file index runs — but one-click install does not.
+    signed: bool = False
+    signature_error: str = ""
+    signature_key_id: str = ""
     warnings: tuple[str, ...] = ()
     """Degraded but usable states. Kept separate from ``error``: a broken *local*
     blocklist does not mean the catalogue could not be fetched, and collapsing the two
@@ -111,6 +124,9 @@ class IndexSnapshot:
             "source": self.source,
             "fetched_at": self.fetched_at,
             "error": self.error,
+            "signed": self.signed,
+            "signature_error": self.signature_error,
+            "signature_key_id": self.signature_key_id,
             "warnings": list(self.warnings),
         }
 
@@ -259,12 +275,18 @@ class IndexClient:
         ttl: float = 900.0,
         blocklist_path: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        public_key_b64: str = MARKET_PUBLIC_KEY_B64,
+        key_id: str = MARKET_KEY_ID,
     ) -> None:
         self.url = url.strip()
         self.timeout = timeout
         self.ttl = ttl
         self._blocklist_path = blocklist_path
         self._transport = transport
+        #: Verification key. Overridable so a fork can ship its own key without
+        #: patching the module, and so tests never need the production private key.
+        self._public_key_b64 = public_key_b64
+        self._key_id = key_id
         self._cached: IndexSnapshot | None = None
         self._local_blocked: dict[str, str] | None = None
         self._local_blocklist_error = ""
@@ -399,14 +421,23 @@ class IndexClient:
         # require the local key to be absent, which it is not.
         blocked.update(_parse_blocked(payload.get("blocked_versions")))
 
-        versions, versions_warning = await self._fetch_versions()
+        versions, versions_warning, versions_raw = await self._fetch_versions()
         warnings = tuple(w for w in (versions_warning,) if w)
 
+        # S-SUP-01: verify the catalogue and the version metadata the maintainer signed.
+        # The *raw* bytes are what get hashed — re-serialising the parsed payload would
+        # verify the parser's output rather than what the host actually serves.
+        documents: dict[str, bytes] = {"plugins.json": body}
+        if versions_raw is not None:
+            documents["plugin_versions.json"] = versions_raw
+        verdict = await self._verify_signature(documents)
+
         logger.info(
-            "plugin index loaded: %d entries, %d blocked, %d versioned",
+            "plugin index loaded: %d entries, %d blocked, %d versioned, signed=%s",
             len(entries),
             len(blocked),
             len(versions),
+            verdict.ok,
         )
         return IndexSnapshot(
             available=True,
@@ -415,8 +446,49 @@ class IndexClient:
             versions=versions,
             source=self.url,
             fetched_at=time.time(),
+            signed=verdict.ok,
+            signature_error="" if verdict.ok else verdict.reason,
+            signature_key_id=verdict.key_id,
             warnings=warnings,
         )
+
+    def _signature_url(self) -> str:
+        base = self.url.rsplit("/", 1)[0]
+        return f"{base}/{SIGNATURE_FILENAME}"
+
+    async def _verify_signature(self, documents: dict[str, bytes]):
+        """Fetch the detached signature and verify it, or explain why it is not usable.
+
+        Never raises: an unreachable signature is reported as an unsigned index, which
+        the install gate treats exactly like an invalid one.
+        """
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                follow_redirects=False,
+                transport=self._transport,
+            ) as client:
+                response = await client.get(
+                    self._signature_url(),
+                    headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"},
+                )
+        except httpx.TimeoutException:
+            return SignatureVerdict(ok=False, reason="签名文件请求超时")
+        except httpx.HTTPError:
+            return SignatureVerdict(ok=False, reason="签名文件不可达")
+        if response.status_code == 404:
+            return SignatureVerdict(ok=False, reason="索引没有签名文件")
+        if response.status_code != 200:
+            return SignatureVerdict(ok=False, reason=f"签名文件返回 {response.status_code}")
+        verdict = verify_documents(
+            response.content,
+            documents,
+            public_key_b64=self._public_key_b64,
+            key_id=self._key_id,
+        )
+        if not verdict.ok:
+            logger.warning("plugin index signature rejected: %s", verdict.reason)
+        return verdict
 
     def _versions_url(self) -> str:
         """``plugin_versions.json`` next to the catalogue (same directory, same origin).
@@ -429,10 +501,17 @@ class IndexClient:
         base = self.url.rsplit("/", 1)[0]
         return f"{base}/plugin_versions.json"
 
-    async def _fetch_versions(self) -> tuple[dict[str, dict[str, dict[str, str]]], str]:
+    async def _fetch_versions(
+        self,
+    ) -> tuple[dict[str, dict[str, dict[str, str]]], str, bytes | None]:
         """Fetch the per-version metadata. Missing or broken → empty + a warning:
         discovery keeps working, one-click install refuses (it refuses *any* version
-        without a real digest anyway)."""
+        without a real digest anyway).
+
+        The raw body is returned alongside the parsed map because the signature covers
+        bytes: hashing a re-serialised dict would authenticate the parser's output, not
+        the document that was served.
+        """
         url = self._versions_url()
         try:
             async with httpx.AsyncClient(
@@ -444,20 +523,20 @@ class IndexClient:
                     url, headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"}
                 )
         except httpx.HTTPError:
-            return {}, "版本元数据不可达，一键安装暂不可用"
+            return {}, "版本元数据不可达，一键安装暂不可用", None
         if response.status_code != 200:
-            return {}, f"版本元数据返回 {response.status_code}，一键安装暂不可用"
+            return {}, f"版本元数据返回 {response.status_code}，一键安装暂不可用", None
         body = response.content
         if len(body) > MAX_INDEX_BYTES:
-            return {}, "版本元数据体积超出上限，一键安装暂不可用"
+            return {}, "版本元数据体积超出上限，一键安装暂不可用", None
         try:
             check_depth(body, limit=MAX_INDEX_DEPTH)
             payload = json.loads(body)
         except (JsonTooDeepError, json.JSONDecodeError, UnicodeDecodeError):
-            return {}, "版本元数据不是合法 JSON，一键安装暂不可用"
+            return {}, "版本元数据不是合法 JSON，一键安装暂不可用", None
         versions_map = payload.get("versions") if isinstance(payload, dict) else None
         if not isinstance(versions_map, dict):
-            return {}, "版本元数据结构不正确，一键安装暂不可用"
+            return {}, "版本元数据结构不正确，一键安装暂不可用", None
 
         out: dict[str, dict[str, dict[str, str]]] = {}
         for name, entries in versions_map.items():
@@ -477,7 +556,7 @@ class IndexClient:
                 }
             if per_version:
                 out[name] = per_version
-        return out, ""
+        return out, "", body
 
     def invalidate(self) -> None:
         """Drop the cache. Called after an install so a just-blocked version is not

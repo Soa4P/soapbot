@@ -814,6 +814,20 @@ class Settings(BaseSettings):
     page repeatedly does not hammer someone else's server, short enough that a revoked
     version shows up in the same session."""
 
+    plugin_index_require_signature: bool = True
+    """Refuse one-click install from an index whose detached signature does not verify.
+
+    The digest check already refuses a modified *download*; the signature is what makes
+    the *index* itself unforgeable — otherwise whoever can serve a modified catalogue
+    can publish their own plugin with their own digest, and every check downstream
+    agrees with them (S-SUP-01).
+
+    Only one-click install is gated: discovery still lists the catalogue (an unsigned
+    fork is useful for testing), and uploading a zip by hand is unchanged — that path
+    already means "I have these bytes on purpose". Turning this off logs a warning and
+    is for a local fork you sign yourself, not for production.
+    """
+
     allow_unknown_private: bool = False
     """Allow private messages from users not on ``private_allowlist``.
 
