@@ -546,7 +546,7 @@ jobs:
           print("installed wheel builds an app:", len(app.routes), "routes")
           PY
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v20
         with:
           name: soapbot-wheel
           path: dist/*.whl
