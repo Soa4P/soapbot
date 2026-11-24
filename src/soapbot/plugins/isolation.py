@@ -139,6 +139,42 @@ def _remove_worker_scripts() -> None:
     _WORKER_SCRIPTS.clear()
 
 
+def privilege_kwargs() -> dict[str, int]:
+    """Spawn kwargs that put the plugin worker in another uid/gid, or ``{}``.
+
+    Why this is the honest answer to "same-uid self-approval" (S-PLUG-04)
+    ---------------------------------------------------------------------
+    Every pipe-level guarantee in this module assumes the child is *only* able to ask.
+    It can still act directly: a worker running as the host's own user can rewrite
+    ``plugin-approvals.json``, read ``jwt.key``, or edit the memory database. An HMAC
+    over the approval file would be signed with a key the same uid can read — a
+    boundary that only looks like one. Dropping the worker to a different uid is the
+    only userspace mechanism that actually separates the two.
+
+    Windows has no equivalent in this API (job objects do not change identity), so the
+    setting is reported once and ignored rather than silently pretended.
+
+    Returns kwargs for ``asyncio.create_subprocess_exec``; ``user``/``group`` are
+    POSIX-only parameters.
+    """
+    uid = settings.plugin_run_uid
+    gid = settings.plugin_run_gid
+    if uid is None and gid is None:
+        return {}
+    if sys.platform == "win32":
+        logger.warning(
+            "PLUGIN_RUN_UID/PLUGIN_RUN_GID are POSIX-only; ignoring on Windows — "
+            "plugin workers keep the host's identity"
+        )
+        return {}
+    kwargs: dict[str, int] = {}
+    if uid is not None:
+        kwargs["user"] = uid
+    if gid is not None:
+        kwargs["group"] = gid
+    return kwargs
+
+
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     """Kill the child *and* anything it spawned.
 
@@ -599,6 +635,10 @@ class IsolatedRunner:
                 # the direct child and the orphans keep holding CPU and memory.
                 start_new_session=(sys.platform != "win32"),
                 creationflags=(_CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
+                # Privilege separation when the operator configured it: the worker gets
+                # its own uid, so it cannot rewrite the host's approval records with the
+                # host's permissions (S-PLUG-04). Empty dict when unset.
+                **privilege_kwargs(),
             )
         except OSError as exc:  # pragma: no cover - depends on environment
             raise IsolationError(f"could not start plugin process: {exc}") from exc

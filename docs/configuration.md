@@ -50,6 +50,9 @@
 | `ALLOW_UNTRUSTED_PLUGINS` | `false` | 允许 `trust: untrusted` 插件持有敏感能力 |
 | `PLUGIN_INTEGRITY_MODE` | `block` | 插件代码在批准后被改动时的处理：`block` 拒绝加载、`warn` 放行并审计、`off` 不检查（批准记录里没有内容摘要时视为 `unknown`，不阻断）|
 | `MAX_PLUGIN_WORKERS` | `16` | 同时存在的插件 worker **进程数**上限，一个插件一个进程。范围 `1..64`；与 `MAX_INFLIGHT_HANDLERS` 不同，`0` 是**非法值**（启动时报错），因为这是安全边界而非吞吐旋钮。注册时卡注册数，启动时再按存活进程数兜底。容量规划：每个 worker 自带一个解释器、一对管道与独立地址空间上限，调大前先按内存估算；容器的 `pids_limit` 只是最后一道兜底。健康报告会同时输出 `max_workers` 与 `live_workers`，只读巡检见 `deploy/plugin-worker-guard.timer` |
+| `PLUGIN_RUN_UID` | 未设置（同 uid） | 让插件 worker 以**另一个 uid** 运行（仅 POSIX）。这是"同 uid 自批"（S-PLUG-04）唯一真实的解法：同一用户下 worker 可以直接重写审批文件给自己批权限，任何 HMAC 都用同一把它能读的钥匙签名。设了它，worker 无法写宿主文件。要求：宿主以 root 启动（或持 `CAP_SETUID`）、插件目录对新 uid 可读；Windows 无等价机制，会 warn 并忽略 |
+| `PLUGIN_RUN_GID` | 未设置 | 上一条的分组；单独设置也生效（只换组是更弱的隔离，但那是运维的要求） |
+| `PLUGIN_INDEX_URL` | 官方目录 | 社区插件索引地址（默认指向 `Soa4P/soapbot-plugins` 的 `plugins.json`）。**只读**。一键安装的信任链：索引决定「有什么」→ 下载后校验索引声明的 SHA-256 → 同一安装器落盘 → 审批屏（人勾能力清单）决定「能做什么」。索引被篡改的后果是「下载与声明不符、被拒绝」，不是代码执行。air-gapped 部署可设**空**恢复旧行为（不发现、不出站） |
 | `PLUGIN_INDEX_URL` | 官方目录 | 社区插件索引地址（默认指向 `Soa4P/soapbot-plugins` 的 `plugins.json`）。**只读**。一键安装的信任链：索引决定「有什么」→ 下载后校验索引声明的 SHA-256 → 同一安装器落盘 → 审批屏（人勾能力清单）决定「能做什么」。索引被篡改的后果是「下载与声明不符、被拒绝」，不是代码执行。air-gapped 部署可设**空**恢复旧行为（不发现、不出站） |
 | `PLUGIN_INDEX_TIMEOUT_SECONDS` | `5` | 单次拉取索引的超时，范围 `0.5..15`。短是刻意的：这次拉取发生在运维正等插件页渲染的时候，慢索引等同于坏索引，页面显示「无法发现」并保持可用 |
 | `PLUGIN_INDEX_TTL_SECONDS` | `900` | 索引缓存时长，范围 `60..86400`。十五分钟：反复打开插件页不会去打别人的服务器，同时一个刚被封禁的版本能在同一次会话里显示出来 |
