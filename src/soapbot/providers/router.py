@@ -170,6 +170,12 @@ class ProviderRouter:
                 "completion_tokens": s.completion_tokens,
                 "consecutive_failures": s.consecutive_failures,
                 "cooling_down": s.disabled_until > now,
+                # Seconds, not just a boolean. "Disabled" with no deadline is the state an
+                # operator cannot tell apart from "broken until I do something"; the panel
+                # could only print a tag, so a 30-second cooldown and a permanent mistake
+                # looked the same. Clamped at zero so an elapsed deadline reads as "0"
+                # rather than a negative number nobody believes.
+                "cooldown_remaining": round(max(0.0, s.disabled_until - now), 1),
             }
             for pid, s in self._stats.items()
         }
