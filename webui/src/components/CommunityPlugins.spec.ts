@@ -63,12 +63,12 @@ describe('CommunityPlugins signature state', () => {
   })
 
   it('disables install and states the reason when the index is unsigned', async () => {
-    Object.assign(catalogue, { signed: false, signature_error: '索引没有签名文件' })
+    Object.assign(catalogue, { signed: false, signature_error: 'index has no signature file' })
     const wrapper = mountView()
     await flushPromises()
     // Discovery still works: the card is there.
     expect(wrapper.text()).toContain('mood-diary')
-    expect(wrapper.text()).toContain('索引没有签名文件')
+    expect(wrapper.text()).toContain('index has no signature file')
     const buttons = installButtons(wrapper)
     expect(buttons).toHaveLength(1)
     expect(buttons[0]!.attributes('disabled')).toBeDefined()
@@ -76,7 +76,7 @@ describe('CommunityPlugins signature state', () => {
   })
 
   it('still lists cards when the index is unsigned (discover ≠ install)', async () => {
-    Object.assign(catalogue, { signed: false, signature_error: '签名校验失败' })
+    Object.assign(catalogue, { signed: false, signature_error: 'signature verification failed' })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.findAll('article')).toHaveLength(1)
