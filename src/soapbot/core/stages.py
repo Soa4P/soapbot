@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from soapbot.config import settings
 from soapbot.core.adapter import Capability
 from soapbot.core.message import MessageScene, MessageSegment, SegmentType
+from soapbot.core.pause import is_paused, note_suppressed
 from soapbot.core.pipeline import PipelineContext, Stage, StageResult
 from soapbot.core.text import INVISIBLE
 from soapbot.security.principal import normalize_id
@@ -284,6 +285,13 @@ class SkipReplyStage(Stage):
         # restriction" instead of silently muting every group.
         if ctx.event.scene is MessageScene.GROUP and ctx.extras.get("replies_here") is False:
             return StageResult(halt=True, reason="group_not_replied")
+        # 全局暂停（四端 /pause）：只挡普通消息，命令必须放行——/resume 本身也是命令，
+        # 一个连命令一起吞掉的暂停就只能从桌面端解除，正是要避免的跨端不对称。归档照旧，
+        # 记录不是运营者能替人抹掉的。原因 token "paused" 会进 trace/metrics，事后能看出
+        # 「那段时间不是模型坏了」。
+        if is_paused() and not _is_command_text(ctx.event.text):
+            note_suppressed()
+            return StageResult(halt=True, reason="paused")
         return StageResult()
 
 
@@ -326,6 +334,16 @@ _WAKE_PREFIX_RE = re.compile(r"^[/!]?\s*", re.UNICODE)
 #: Characters that introduce a slash command. They may also be configured as wake
 #: words, but they must never be stripped from the text — see StripWakeWordStage.
 _COMMAND_PREFIXES = frozenset({"/", "!", "／", "！"})
+
+
+def _is_command_text(text: str) -> bool:
+    """Whether this message is a slash command (any of the accepted prefixes).
+
+    Used by the pause gate: commands must keep working while replies are paused, or
+    ``/resume`` could only be issued from the desktop end.
+    """
+    stripped = (text or "").lstrip()
+    return bool(stripped) and stripped[0] in _COMMAND_PREFIXES
 
 
 class StripWakeWordStage(Stage):
