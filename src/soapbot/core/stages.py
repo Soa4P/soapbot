@@ -289,7 +289,7 @@ class SkipReplyStage(Stage):
         # 一个连命令一起吞掉的暂停就只能从桌面端解除，正是要避免的跨端不对称。归档照旧，
         # 记录不是运营者能替人抹掉的。原因 token "paused" 会进 trace/metrics，事后能看出
         # 「那段时间不是模型坏了」。
-        if is_paused() and not _is_command_text(ctx.event.text):
+        if is_paused() and not _is_command_text(_command_text(ctx)):
             note_suppressed()
             return StageResult(halt=True, reason="paused")
         return StageResult()
@@ -344,6 +344,25 @@ def _is_command_text(text: str) -> bool:
     """
     stripped = (text or "").lstrip()
     return bool(stripped) and stripped[0] in _COMMAND_PREFIXES
+
+
+def _command_text(ctx: PipelineContext) -> str:
+    """The text ``CommandStage`` will see, derived the way ``CommandStage`` derives it.
+
+    **Not** ``ctx.event.text``. That property renders every segment, so the message an
+    operator actually sends in a group arrives as ``"@2268360864 /resume"`` — first
+    character ``@`` — while ``CommandStage`` joins only TEXT segments and sees
+    ``"/resume"``. Reading the rendered form here meant the pause gate suppressed exactly
+    the command that ends the pause: ``/pause`` worked (it was issued while running),
+    ``/resume`` did nothing, and ``/status`` went silent too. Measured on the deployed
+    bot.
+
+    Same segments, same filtering, so the gate and the command table cannot disagree
+    again. ``clean_segments`` is preferred when present, for the same reason the command
+    stage prefers it.
+    """
+    segments = ctx.extras.get("clean_segments") or ctx.event.segments
+    return "".join(s.plain() for s in segments if s.type is SegmentType.TEXT).strip()
 
 
 class StripWakeWordStage(Stage):
