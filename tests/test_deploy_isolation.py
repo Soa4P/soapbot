@@ -375,7 +375,7 @@ def test_sanitize_env_keeps_only_a_small_allowlist() -> None:
 async def test_worker_process_environment_is_small_and_secret_free(monkeypatch):
     """The unit test above is the allowlist; this is the live child agreeing."""
     monkeypatch.setenv("SOAPBOT_MASTER_KEY", "ZmFrZQ==")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-REAL")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-EXAMPLE-REDACTED")
 
     sup, worker = await _boot(
         """
@@ -481,7 +481,7 @@ async def test_exception_message_does_not_cross_the_boundary():
             async def setup(self, ctx):
                 @ctx.command("boom")
                 async def boom(caller, args):
-                    raise RuntimeError("token=sk-live-SHOULD-NOT-LEAK")
+                    raise RuntimeError("token=sk-live-EXAMPLE-REDACTED")
         """
     )
     try:

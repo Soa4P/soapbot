@@ -130,7 +130,7 @@ def test_i2_context_holds_only_own_namespace() -> None:
         storage_backend=backend,
         crypto=_Box(),
     )
-    a.storage.set("api_token", "sk-live-A")
+    a.storage.set("api_token", "sk-live-EXAMPLE-REDACTED")
 
     assert "plugin_a" not in b._storage_backend
     with pytest.raises(KeyError):
@@ -419,7 +419,7 @@ async def test_i4_exception_message_does_not_cross_boundary() -> None:
         await _run(
             "class Plugin:\n"
             "    def handler(self, caller, args):\n"
-            "        raise RuntimeError('token=sk-live-SHOULD-NOT-LEAK')\n"
+            "        raise RuntimeError('token=sk-live-EXAMPLE-REDACTED')\n"
         )
     assert "SHOULD-NOT-LEAK" not in str(exc.value)
     assert "RuntimeError" in str(exc.value)

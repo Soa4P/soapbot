@@ -58,7 +58,7 @@ def check(name: str, content: bytes) -> str | None:
         return None
     for pattern in PATTERNS:
         for match in pattern.finditer(content):
-            # Fixtures and docs mark their fake values ("sk-live-EXAMPLE-…"); a real
+            # Fixtures and docs mark their fake values ("sk-live-EXAMPLE-REDACTED"); a real
             # credential never spells one of those markers inside itself.
             if any(marker in match.group().lower() for marker in PLACEHOLDER_MARKERS):
                 continue

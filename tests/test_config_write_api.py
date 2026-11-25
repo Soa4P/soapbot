@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-LITERAL_KEY = "sk-live-do-not-leak-4f81c2"
+LITERAL_KEY = "sk-live-EXAMPLE-REDACTED"
 
 
 @pytest.fixture

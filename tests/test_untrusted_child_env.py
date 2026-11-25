@@ -124,7 +124,7 @@ async def test_mcp_child_cannot_read_the_master_key_or_provider_keys(
     monkeypatch.setenv("SOAPBOT_MASTER_KEY", "ZmFrZS1tYXN0ZXIta2V5")
     monkeypatch.setenv("SOAPBOT_MASTER_KEY_FILE", "/run/secrets/master")
     monkeypatch.setenv("SOAPBOT_JWT_SECRET", "jwt-secret")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-REAL")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-EXAMPLE-REDACTED")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-REAL")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-REAL")
     # A denylist cannot enumerate these; the allowlist excludes them by default.
@@ -146,7 +146,7 @@ async def test_mcp_child_cannot_read_the_master_key_or_provider_keys(
 
     # And the values themselves are absent, not merely renamed.
     joined = "\n".join(seen.values())
-    for value in ("ZmFrZS1tYXN0ZXIta2V5", "sk-live-REAL", "sk-deepseek-REAL", "hunter2"):
+    for value in ("ZmFrZS1tYXN0ZXIta2V5", "sk-live-EXAMPLE-REDACTED", "sk-deepseek-REAL", "hunter2"):
         assert value not in joined, f"secret value {value!r} was readable by the child"
 
 
