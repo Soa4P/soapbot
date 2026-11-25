@@ -15,7 +15,11 @@
 - `flutter build apk --debug` 实测通过（Gradle assembleDebug 536s），产物
   `build/app/outputs/flutter-apk/app-debug.apk`——**可测试安装包**，直接
   `adb install` 或传到手机点开安装（系统会提示未知来源，允许一次即可）。
-  applicationId 是 `dev.soapbot.archive`；release 签名与上架配置仍不做（见「不做什么」）。
+  applicationId 是 `dev.soapbot.archive`。**release 构建必须自带签名**：把
+  `android/key.properties.example` 复制成 `android/key.properties` 并填好
+  `storeFile / storePassword / keyAlias / keyPassword`；没有它时 release 构建直接失败
+  并说明原因，而不是退回 debug 密钥（debug 密钥的密码是公开的 `android`，人人可签同名
+  更新）。debug APK 不需要任何配置。
 
 ## 可下载的安装包
 
@@ -77,5 +81,6 @@ JDK 17 与 `ANDROID_HOME` 指向的 Android SDK。
 
 - 不实现发送到 QQ、撤回、转发；没有对应的 API 可以调——对话回复也只存在于
   云端会话里。
-- 不做应用商店签名与上架配置。
+- 不做应用商店上架配置（截图、描述、审核材料）。签名不做「默认兜底」：release 必须提供
+  自己的 keystore，否则构建失败。
 - 不缓存消息到本地数据库：存档在云端，本地只保留登录 Cookie。

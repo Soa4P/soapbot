@@ -1,0 +1,15 @@
+# Release signing for the Android app. Copy to key.properties and fill in.
+#
+# key.properties is git-ignored (mobile/android/.gitignore) — never commit it, and never
+# commit the .jks it points at.
+#
+#   keytool -genkey -v -keystore soapbot-release.jks -keyalg RSA -keysize 2048 \
+#           -validity 10000 -alias soapbot
+#
+# Paths are resolved relative to mobile/android/. A missing key.properties is fine for
+# debug builds; a release build fails with an explanation instead of silently using the
+# shared debug key (audit S-FE-02).
+storeFile=soapbot-release.jks
+storePassword=
+keyAlias=soapbot
+keyPassword=

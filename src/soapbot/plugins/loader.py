@@ -570,10 +570,36 @@ class PluginLoader:
 
         if verdict.state != "changed":
             if verdict.state == "unknown" and recorded == "" and self.approvals is not None:
-                logger.info(
-                    "plugin %s has no recorded content digest; integrity is unverified",
-                    name,
-                )
+                # Fill the hole instead of only reporting it. Leaving it empty made the
+                # check vacuous for every pre-existing approval: replacing main.py later
+                # still compared against "" and still said ``unknown``, so the plugin was
+                # never actually guarded (audit S-SUP-04). The limitation that remains is
+                # honest and worth stating: this blesses whatever is on disk at the first
+                # post-upgrade load, so a tree tampered with *before* that load is trusted
+                # once. Every change after it is caught.
+                try:
+                    current = await asyncio.to_thread(digest_tree, directory)
+                except OSError:  # pragma: no cover - unreadable tree
+                    current = ""
+                if current and self.approvals.backfill_content_digest(name, current):
+                    self.audit.record(
+                        kind="plugin",
+                        action="load",
+                        outcome="allow",
+                        detail=f"recorded missing content digest {current[:19]}",
+                        plugin=name,
+                    )
+                    logger.info(
+                        "plugin %s had no recorded content digest; recorded %s so future "
+                        "changes are detected",
+                        name,
+                        current[:19],
+                    )
+                else:
+                    logger.info(
+                        "plugin %s has no recorded content digest; integrity is unverified",
+                        name,
+                    )
             return verdict.state
 
         detail = (

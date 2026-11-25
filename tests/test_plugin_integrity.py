@@ -221,6 +221,51 @@ async def test_an_approval_without_a_recorded_digest_is_not_treated_as_tampering
 
 
 @pytest.mark.asyncio
+async def test_a_legacy_approval_gains_a_digest_on_first_load(tmp_path: Path) -> None:
+    """``unknown`` may happen once; it must not stay the answer forever.
+
+    While the field stayed empty, a later replacement of ``main.py`` also compared
+    against "" and also reported ``unknown`` — so the check never guarded the very
+    plugins it was written for (audit S-SUP-04). Loading now backfills, and the *next*
+    edit is caught.
+    """
+    root = tmp_path / "plugins"
+    directory = _write_plugin(root)
+
+    store = ApprovalStore(tmp_path / "approvals.json")
+    loader = PluginLoader(plugins_dir=root, approvals=store)
+    store.approve(PLUGIN_NAME, set(), digest="sha256:" + "0" * 64, actor="legacy")
+    loader._sync_approvals()
+
+    loaded = await loader.load(PLUGIN_NAME)
+    # The verdict for *this* load is still honest about what was known at the time.
+    assert loaded.integrity == "unknown"
+    await loader.unload(PLUGIN_NAME)
+
+    record = store.get(PLUGIN_NAME)
+    assert record is not None
+    assert record.content_digest == digest_tree(directory)
+    assert record.approved_by == "legacy", "backfill is not a new approval"
+
+    # And the hole is closed: a swap is detected on the next load.
+    (directory / "main.py").write_text("class Plugin: pass\n", encoding="utf-8")
+    forget(directory)
+    with pytest.raises(PluginLoadError):
+        await loader.load(PLUGIN_NAME)
+
+
+def test_backfill_never_overwrites_a_recorded_digest(tmp_path: Path) -> None:
+    """Otherwise the backfill would launder the exact change the check exists to catch."""
+    store = ApprovalStore(tmp_path / "approvals.json")
+    store.approve(PLUGIN_NAME, set(), content_digest="sha256:" + "1" * 64, actor="ops")
+
+    assert store.backfill_content_digest(PLUGIN_NAME, "sha256:" + "2" * 64) is False
+    assert store.get(PLUGIN_NAME).content_digest == "sha256:" + "1" * 64
+    # An unapproved plugin is not invented either.
+    assert store.backfill_content_digest("not-approved", "sha256:" + "3" * 64) is False
+
+
+@pytest.mark.asyncio
 async def test_re_approving_after_a_change_accepts_the_new_code(tmp_path: Path) -> None:
     """The escape hatch must work, or the control gets disabled instead of used."""
     root = tmp_path / "plugins"
