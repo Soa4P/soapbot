@@ -36,7 +36,7 @@
 # number (this script does that too) and later restarts are automatic.
 #
 # Usage (elevated):
-#   powershell -ExecutionPolicy Bypass -File scripts\install_napcat_task.ps1 -QQNumber 2268360864
+#   powershell -ExecutionPolicy Bypass -File scripts\install_napcat_task.ps1 -QQNumber <你的QQ号>
 #   ... add -Start to launch it immediately.
 
 param(

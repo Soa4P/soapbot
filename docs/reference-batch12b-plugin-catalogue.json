@@ -22610,7 +22610,7 @@
   },
   {
    "name": "astrbot_plugin_vts",
-   "desc": "【公开测试版】功能会变、接口会变，也可能有尚未发现的 bug；更新前请备份 plugin_data。 反馈 / 意见 / bug：2799902706@qq.com 她自己的镜子：把 Live2D 模型接入 AstrBot，让她在屏幕上活着。 呼吸、微摆、不规则眨眼、视线跟随鼠标、说话时动嘴、被摸头",
+   "desc": "【公开测试版】功能会变、接口会变，也可能有尚未发现的 bug；更新前请备份 plugin_data。 反馈 / 意见 / bug：[作者公开联系方式已省略] 她自己的镜子：把 Live2D 模型接入 AstrBot，让她在屏幕上活着。 呼吸、微摆、不规则眨眼、视线跟随鼠标、说话时动嘴、被摸头",
    "downloads": 11,
    "category": "sticker",
    "verdict": "borrow",

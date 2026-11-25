@@ -2865,7 +2865,7 @@ batch12 十八类聚类的逐条扩展：每个插件一条记录（机制类目
 | 2823 | astrbot_plugin_steinsgate | 11 | other | watch | 命运石之门主题插件，支持世界线辉光管图片、特殊世界线资料、年表查询与 D-QQ，可通过指令或 LLM 调用。 |
 | 2824 | astrbot_plugin_codex_pulse | 11 | other | watch | 精美卡片追踪 Codex 直接重置、重置卡发放与预告，支持分类群通知、管理员测试卡片和文字回退。 |
 | 2825 | astrbot_plugin_dreamweaver | 11 | other | watch | QQ AI 文字冒险，支持五种题材、自定义剧本、独立进度和存档。 |
-| 2826 | astrbot_plugin_vts | 11 | sticker | borrow | 【公开测试版】功能会变、接口会变，也可能有尚未发现的 bug；更新前请备份 plugin_data。 反馈 / 意见 / bug：2799902706@qq.com 她自己的镜子：把 Live2D 模型接入 AstrBot，让她在屏幕上活着。 呼吸、微摆、不规则眨眼、视线跟随鼠标、说话时动嘴、被摸头 |
+| 2826 | astrbot_plugin_vts | 11 | sticker | borrow | 【公开测试版】功能会变、接口会变，也可能有尚未发现的 bug；更新前请备份 plugin_data。 反馈 / 意见 / bug：[作者公开联系方式已省略] 她自己的镜子：把 Live2D 模型接入 AstrBot，让她在屏幕上活着。 呼吸、微摆、不规则眨眼、视线跟随鼠标、说话时动嘴、被摸头 |
 | 2827 | astrbot_plugin_timenote | 11 | personality | have | 精确到分钟的时间感知：临时上下文自动注入、工具执行后刷新、当前时间查询，保留主人格。 |
 | 2828 | astrbot_plugin_bilicard | 11 | media-parse | borrow | B 站视频信息卡、可选 AI 音频总结与原生视频下载发送；支持时长限制、缓存清理和扫码登录。 |
 | 2829 | astrbot_plugin_terminal_shell | 11 | other | watch | 在 AstrBot WebUI 中以一个页面提供完整运维面板：多标签终端、文件管理、设备状态函数图、自定义模糊背景、ECDH + AES-256-GCM 加密传输，以及 /终端 管理员指令与 LLM Shell 工具。 |

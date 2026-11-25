@@ -297,7 +297,7 @@ def test_login_state_reports_who_is_online(monkeypatch) -> None:
         if path == "/api/auth/login":
             return {"code": 0, "data": {"Credential": "c"}}
         if path == "/api/QQLogin/GetQQLoginInfo":
-            return {"code": 0, "data": {"uin": "2268360864", "nick": "Deceaspe", "online": True}}
+            return {"code": 0, "data": {"uin": "100012345", "nick": "测试用户", "online": True}}
         return {"code": 0, "data": {"isLogin": True, "loginPhase": "ready"}}
 
     monkeypatch.setattr(napcat, "_webui_post", fake_post)
@@ -307,8 +307,8 @@ def test_login_state_reports_who_is_online(monkeypatch) -> None:
 
     state = asyncio.run(napcat.login_state())
     assert state["logged_in"] is True
-    assert state["account"] == "2268360864"
-    assert state["nickname"] == "Deceaspe"
+    assert state["account"] == "100012345"
+    assert state["nickname"] == "测试用户"
 
 
 def test_access_token_is_read_from_the_server_we_wrote(tmp_path, monkeypatch) -> None:
@@ -317,7 +317,7 @@ def test_access_token_is_read_from_the_server_we_wrote(tmp_path, monkeypatch) ->
 
     config = tmp_path / "napcat" / "config"
     config.mkdir(parents=True)
-    (config / "onebot11_2268360864.json").write_text(
+    (config / "onebot11_100012345.json").write_text(
         json.dumps({"network": {"websocketServers": [{"port": 3001, "token": "s3cret"}]}}),
         encoding="utf-8",
     )
@@ -327,8 +327,8 @@ def test_access_token_is_read_from_the_server_we_wrote(tmp_path, monkeypatch) ->
         napcat, "_napcat_config_dirs", lambda: [path for path in [config] if path.is_dir()]
     )
 
-    assert napcat.onebot_access_token("2268360864", port=3001) == "s3cret"
-    assert napcat.onebot_access_token("2268360864", port=3999) == ""
+    assert napcat.onebot_access_token("100012345", port=3001) == "s3cret"
+    assert napcat.onebot_access_token("100012345", port=3999) == ""
 
 
 def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, monkeypatch) -> None:
@@ -344,12 +344,12 @@ def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, mon
     monkeypatch.setattr(
         napcat, "_napcat_config_dirs", lambda: [path for path in [config] if path.is_dir()]
     )
-    path = config / "onebot11_2268360864.json"
+    path = config / "onebot11_100012345.json"
     path.write_text(json.dumps({"network": {"websocketServers": []}}), encoding="utf-8")
     monkeypatch.setattr(napcat, "config_dir", lambda: config)
     monkeypatch.setattr(napcat.settings, "napcat_home", None)
 
-    first = napcat.ensure_onebot_server("2268360864", port=3001)
+    first = napcat.ensure_onebot_server("100012345", port=3001)
     assert first["ok"] is True and first["changed"] is True
 
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -368,7 +368,7 @@ def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, mon
         }
     ]
 
-    second = napcat.ensure_onebot_server("2268360864", port=3001)
+    second = napcat.ensure_onebot_server("100012345", port=3001)
     assert second["ok"] is True and second["changed"] is False
 
 
@@ -405,7 +405,7 @@ def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
         json.dumps(
             {
                 "time": 1,
-                "self_id": 2268360864,
+                "self_id": 100012345,
                 "post_type": "meta_event",
                 "meta_event_type": "lifecycle",
                 "sub_type": "connect",
@@ -415,7 +415,7 @@ def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
             {
                 "status": "ok",
                 "retcode": 0,
-                "data": {"user_id": 2268360864, "nickname": "Deceaspe"},
+                "data": {"user_id": 100012345, "nickname": "测试用户"},
                 "echo": "auto",
             }
         ),
@@ -446,8 +446,8 @@ def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
 
     result = asyncio.run(napcat.probe_onebot())
     assert result["ok"] is True
-    assert result["account"] == "2268360864"
-    assert result["nickname"] == "Deceaspe"
+    assert result["account"] == "100012345"
+    assert result["nickname"] == "测试用户"
 
 
 def test_connecting_writes_the_adapter_it_just_probed(monkeypatch, tmp_path: Path) -> None:
