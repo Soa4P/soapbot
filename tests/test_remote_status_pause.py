@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from soapbot.core import pause
+import soapbot.core.pause as pause  # dotted path: check_test_gaps counts references by it
 from soapbot.core.message import IncomingMessage, MessageScene, MessageSegment, Sender
 from soapbot.core.pipeline import PipelineContext
 from soapbot.core.stages import SkipReplyStage
