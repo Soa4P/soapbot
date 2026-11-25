@@ -39,6 +39,22 @@ if (-not (Test-Path (Join-Path $InstallDir '.venv\Scripts\python.exe'))) {
     throw "no venv at $InstallDir\.venv — pass -InstallDir"
 }
 
+# The action redirects both streams into the install directory, so the account must be
+# able to open those two files. harden-windows.ps1 grants them too, but this script is
+# usable on its own (see the header) and an unopenable redirect fails the action before
+# Python starts — the task then retries a command that can never work, three times, and
+# looks like "the bot does not start and nothing is logged" (audit S-DEP-11).
+foreach ($logName in @('panel.log', 'panel.err')) {
+    $logPath = Join-Path $InstallDir $logName
+    if (-not (Test-Path -LiteralPath $logPath)) {
+        New-Item -ItemType File -Path $logPath -Force | Out-Null
+    }
+    # SID form: the principal is usually S-1-5-19 (LocalService), a well-known SID rather
+    # than a name, and icacls resolves `*SID` directly.
+    & icacls $logPath /grant "*${AccountSid}:(M)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "could not grant $AccountSid write access to $logPath" }
+}
+
 # NOTE: `&&` must be escaped as `&amp;&amp;`. Unescaped, Register-ScheduledTask rejects the
 # whole XML with "The task XML is malformed", which reads like a schema problem rather
 # than an escaping one.

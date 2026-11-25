@@ -118,6 +118,22 @@ def test_the_hardening_script_replaces_rather_than_extends_the_acl() -> None:
         assert f"'{sub}'" in harden, f"没有单独处理 {sub} 目录的写权限"
 
 
+def test_both_redirect_files_are_writable_by_the_task_account() -> None:
+    """`>> panel.log 2>> panel.err` needs *both* files; one missing kills the action.
+
+    cmd opens every redirect before it starts the program, so an unwritable `panel.err`
+    means Python never runs, the action exits immediately, and RestartOnFailure retries a
+    command that cannot succeed. harden-windows.ps1 granted only panel.log, and the
+    installer assumed harden had already run (audit S-DEP-11).
+    """
+    harden = _text("scripts/harden-windows.ps1")
+    installer = _text("scripts/install_windows_task.ps1")
+    for text, name in ((harden, "harden-windows.ps1"), (installer, "install_windows_task.ps1")):
+        assert "panel.log" in text, f"{name} 没有处理 panel.log"
+        assert "panel.err" in text, f"{name} 没有处理 panel.err 的重定向权限"
+    assert "2>&gt;&gt;" in installer or "2>>" in installer, "任务动作里没有 stderr 重定向"
+
+
 def test_the_desktop_shell_restarts_the_same_name() -> None:
     shell = _text("desktop/src-tauri/src/main.rs")
     assert f'"{TASK}"' in shell, "桌面壳的 Windows fallback 与服务名不一致"
