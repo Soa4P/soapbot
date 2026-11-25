@@ -1038,7 +1038,33 @@ async def _read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
     return json.loads(body.decode("utf-8"))
 
 
-async def _write_frame(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
+#: How long a write may spend waiting for the child to read before the worker is treated
+#: as wedged. The pipe buffer is 64 KiB on Linux, so a child that stops reading fills it
+#: and ``drain()`` then never returns — and the caller holding the invoke lock waits with
+#: it (audit S-PLUG-09). Generous because a healthy child drains in microseconds; this is
+#: a liveness bound, not a performance knob.
+WRITE_DRAIN_TIMEOUT = 5.0
+
+
+def _abort_writer(writer: asyncio.StreamWriter) -> None:
+    """Tear the pipe down so a half-written frame cannot be resumed into.
+
+    Closing the transport rather than just cancelling the drain: the header is already in
+    the buffer, and letting the child read a length-prefixed frame whose body never
+    arrives desyncs every subsequent frame. A dead worker is the recoverable outcome.
+    """
+    with contextlib.suppress(Exception):
+        transport = getattr(writer, "transport", None)
+        if transport is not None:
+            transport.abort()
+
+
+async def _write_frame(
+    writer: asyncio.StreamWriter,
+    msg: dict[str, Any],
+    *,
+    timeout: float = WRITE_DRAIN_TIMEOUT,
+) -> None:
     """Serialize and send, refusing to allocate an unbounded outbound frame.
 
     Inbound limits alone are not enough: a plugin can return a huge value and the
@@ -1052,7 +1078,17 @@ async def _write_frame(writer: asyncio.StreamWriter, msg: dict[str, Any]) -> Non
         )
     writer.write(len(data).to_bytes(4, "big"))
     writer.write(data)
-    await writer.drain()
+    try:
+        await asyncio.wait_for(writer.drain(), timeout=timeout)
+    except TimeoutError as exc:
+        _abort_writer(writer)
+        raise IsolationError(
+            f"plugin stopped reading its stdin: no drain within {timeout:.1f}s"
+        ) from exc
+    except asyncio.CancelledError:
+        # Cancellation is not a reason to leave a partial frame in the pipe.
+        _abort_writer(writer)
+        raise
 
 
 def _caller_payload(caller: Any) -> dict[str, Any]:
