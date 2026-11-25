@@ -297,7 +297,7 @@ def test_login_state_reports_who_is_online(monkeypatch) -> None:
         if path == "/api/auth/login":
             return {"code": 0, "data": {"Credential": "c"}}
         if path == "/api/QQLogin/GetQQLoginInfo":
-            return {"code": 0, "data": {"uin": "100012345", "nick": "Deceaspe", "online": True}}
+            return {"code": 0, "data": {"uin": "100012345", "nick": "测试用户", "online": True}}
         return {"code": 0, "data": {"isLogin": True, "loginPhase": "ready"}}
 
     monkeypatch.setattr(napcat, "_webui_post", fake_post)
@@ -308,7 +308,7 @@ def test_login_state_reports_who_is_online(monkeypatch) -> None:
     state = asyncio.run(napcat.login_state())
     assert state["logged_in"] is True
     assert state["account"] == "100012345"
-    assert state["nickname"] == "Deceaspe"
+    assert state["nickname"] == "测试用户"
 
 
 def test_access_token_is_read_from_the_server_we_wrote(tmp_path, monkeypatch) -> None:
@@ -415,7 +415,7 @@ def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
             {
                 "status": "ok",
                 "retcode": 0,
-                "data": {"user_id": 100012345, "nickname": "Deceaspe"},
+                "data": {"user_id": 100012345, "nickname": "测试用户"},
                 "echo": "auto",
             }
         ),
@@ -447,7 +447,7 @@ def test_the_probe_skips_the_servers_opening_event(monkeypatch) -> None:
     result = asyncio.run(napcat.probe_onebot())
     assert result["ok"] is True
     assert result["account"] == "100012345"
-    assert result["nickname"] == "Deceaspe"
+    assert result["nickname"] == "测试用户"
 
 
 def test_connecting_writes_the_adapter_it_just_probed(monkeypatch, tmp_path: Path) -> None:

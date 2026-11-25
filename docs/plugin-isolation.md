@@ -60,7 +60,7 @@ c.command("owned")        # 成功注册 —— 拿到了从未声明的 11 项�
 
 ```python
 # 修复前，实测成功：
-a.storage.set("api_token", "sk-live-SECRET-OF-PLUGIN-A")
+a.storage.set("api_token", "sk-live-EXAMPLE-REDACTED")
 b._storage_backend["plugin_a"]["api_token"]   # 拿到 A 的密钥
 ```
 
@@ -114,7 +114,7 @@ c._observed_sessions.add("onebot11:group:999999999")   # 再 send 即可向任�
 | `os.kill(getppid(), SIGKILL)` | `CRASHED` 110ms，主机存活 |
 | `while True` | `TIMEOUT` 3011ms |
 | 内存炸弹 | `TIMEOUT` 3033ms |
-| `raise RuntimeError('token=sk-live-...')` | `CRASHED`，**消息未跨界** |
+| `raise RuntimeError('token=sk-live-EXAMPLE-REDACTED')` | `CRASHED`，**消息未跨界** |
 | 返回 `object()` | `CRASHED` 非可序列化 |
 | `import soapbot` | `CRASHED` 导入失败 |
 

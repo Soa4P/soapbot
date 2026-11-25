@@ -116,12 +116,12 @@ def test_log_filter_redacts_credential_shaped_text() -> None:
         level=logging.WARNING,
         pathname=__file__,
         lineno=1,
-        msg="upstream said api_key=sk-live-example-12345678",
+        msg="upstream said api_key=sk-live-EXAMPLE-REDACTED",
         args=(),
         exc_info=None,
     )
     assert logging_setup._SanitisingFilter().filter(record) is True
-    assert "sk-live-example" not in record.getMessage()
+    assert "sk-live-EXAMPLE-REDACTED" not in record.getMessage()
 
 
 def test_plain_formatter_cleans_the_traceback_too() -> None:

@@ -271,8 +271,8 @@ async def test_review_load_rejects_bad_names(tmp_path: Path, name: str) -> None:
     "detail,secret",
     [
         (
-            "GET https://api.example.com?token=sk-live-abcdefgh12345678 status=200",
-            "sk-live-abcdefgh12345678",
+            "GET https://api.example.com?token=sk-live-EXAMPLE-REDACTED status=200",
+            "sk-live-EXAMPLE-REDACTED",
         ),
         ("Authorization: Bearer abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
         ("request failed api_key=AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),

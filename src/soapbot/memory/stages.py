@@ -494,6 +494,13 @@ class CommandStage(Stage):
         # 急停：只许拉闸、不许合闸——MANAGE_CONFIG 起步。复活没有命令（见
         # screen/kill.py），被劫持的聊天永远救不活它；这个不对称是设计的一部分。
         "panic": Permission.MANAGE_CONFIG,
+        # 远端只读状态：/status 报版本、运行时长、暂停状态与已跳过条数——都是弱端也
+        # 可以知道的运维事实，不含 provider、主机名、路径或任何凭据。
+        "status": Permission.USE_COMMAND,
+        # 全局暂停/恢复回复：MANAGE_CONFIG（ADMIN）。它不改配置、不触发执行、重启即
+        # 失效（fail-safe）；但会让整个 bot 变哑，所以不是成员能按的按钮。
+        "pause": Permission.MANAGE_CONFIG,
+        "resume": Permission.MANAGE_CONFIG,
         # 键鼠控制面第二阶段：/act-grant 签发授权持有（MANAGE_CONFIG），/act 动作
         # 在持有窗内执行——每个动作仍过完整门禁链（急停现读 + flag + 专用机 +
         # grant 有效），SCREEN_OPS 记录动作类型与坐标，永不记键入正文。
@@ -847,11 +854,70 @@ class CommandStage(Stage):
             lines.append("/recall-msg <消息ID> — 撤回消息（也可直接回复消息后发送）")
         if adapter is not None and adapter.supports(Capability.KICK):
             lines.append("/kick <QQ> — 移出本群")
+        # 状态与暂停对任何能发命令的人都可见；暂停会插在 ADMIN 段里广告，因为成员按不动。
+        lines.append("/status — 版本、运行时长与回复状态")
+        # 只在调用者确实能执行时广告：帮助文本里预告一条必然 403 的命令，是另一种形式的噪音。
+        principal = ctx.extras.get("principal")
+        if principal is not None and principal.can(Permission.MANAGE_CONFIG):
+            lines.append("/pause — 暂停回复（命令仍可用）")
+            lines.append("/resume — 恢复回复")
         lines.append("/help — 显示本帮助")
         return "\n".join(lines)
 
     async def _cmd_ping(self, ctx: PipelineContext, args: list[str]) -> str:
         return f"pong（会话 {ctx.event.session_key}）"
+
+    async def _cmd_status(self, ctx: PipelineContext, args: list[str]) -> str:
+        """弱端可读的运维事实：版本、运行时长、暂停状态、被暂停跳过的条数。
+
+        刻意不含 provider 名称、主机名、数据目录或任何配置值——群成员能知道「它还活着、
+        是什么版本、现在是不是被暂停了」，不该知道它连的是谁、跑在哪。
+        """
+        import time as _time
+
+        from soapbot import __version__
+        from soapbot.core import pause
+
+        uptime = int(_time.monotonic() - pause.STARTED_AT)
+        hours, rest = divmod(uptime, 3600)
+        minutes, seconds = divmod(rest, 60)
+        span = f"{hours}h{minutes:02d}m" if hours else f"{minutes}m{seconds:02d}s"
+        return "\n".join([
+            f"soapbot {__version__}",
+            f"运行时长：{span}",
+            f"回复状态：{pause.status_line()}",
+        ])
+
+    async def _cmd_pause(self, ctx: PipelineContext, args: list[str]) -> str | None:
+        """暂停回复。命令仍可用——否则 /resume 只能从桌面端按，正是要避免的不对称。"""
+        from soapbot.core import pause
+
+        principal = ctx.extras.get("principal")
+        actor = getattr(principal, "display_name", "") or getattr(principal, "user_id", "")
+        changed, previous = pause.pause(actor=actor)
+        self.audit.record(
+            kind="command", action="cmd:pause", outcome="allow",
+            principal=principal,
+            detail="replies paused" if changed else f"already paused by {previous or '?'}",
+        )
+        if not changed:
+            return f"已经在暂停中（由 {previous or '未记录'} 发起）。发 /resume 恢复。"
+        return "已暂停回复（命令仍然可用；/resume 恢复；重启也会自动恢复）。"
+
+    async def _cmd_resume(self, ctx: PipelineContext, args: list[str]) -> str | None:
+        from soapbot.core import pause
+
+        principal = ctx.extras.get("principal")
+        actor = getattr(principal, "display_name", "") or getattr(principal, "user_id", "")
+        changed, previous = pause.resume(actor=actor)
+        self.audit.record(
+            kind="command", action="cmd:resume", outcome="allow",
+            principal=principal,
+            detail="replies resumed" if changed else "was not paused",
+        )
+        if not changed:
+            return "当前没有暂停。"
+        return f"已恢复回复（暂停由 {previous or '未记录'} 发起）。"
 
     async def _cmd_look(self, ctx: PipelineContext, args: list[str]) -> str | None:
         """看一眼专用工作机的屏幕（第一阶段只看不碰）。
