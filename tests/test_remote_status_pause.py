@@ -28,9 +28,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 import soapbot.core.pause as pause  # dotted path: check_test_gaps counts references by it
-from soapbot.core.message import IncomingMessage, MessageScene, MessageSegment, Sender
+from soapbot.core.message import (
+    IncomingMessage,
+    MessageScene,
+    MessageSegment,
+    SegmentType,
+    Sender,
+)
 from soapbot.core.pipeline import PipelineContext
-from soapbot.core.stages import SkipReplyStage
+from soapbot.core.stages import SkipReplyStage, _command_text
 from soapbot.memory.stages import CommandStage
 from soapbot.security.principal import Role
 
@@ -77,6 +83,54 @@ async def test_pause_never_swallows_commands(text: str) -> None:
     result = await SkipReplyStage().run(_ctx(text))
     assert result.halt is False, f"{text!r} was swallowed by the pause"
     assert pause.suppressed == 0
+
+
+def _group_mention_ctx(text: str) -> PipelineContext:
+    """A real group message: the bot is @-mentioned, so the AT segment comes first.
+
+    ``event.text`` renders that AT as ``"@2268360864"``; ``CommandStage`` joins only
+    TEXT segments. The pause gate used the rendered form, which is how ``/resume`` came
+    to do nothing while ``/pause`` (issued unpaused) had worked.
+    """
+    event = IncomingMessage(
+        adapter="onebot11",
+        message_id="2",
+        scene=MessageScene.GROUP,
+        group_id="1",
+        self_id="2268360864",
+        sender=Sender(user_id="2191659120", nickname="运营"),
+        segments=[
+            MessageSegment(type=SegmentType.AT, data={"qq": "2268360864"}),
+            MessageSegment.text(" " + text),
+        ],
+    )
+    ctx = PipelineContext(event=event, adapter=object())
+    ctx.extras["replies_here"] = True
+    return ctx
+
+
+async def test_a_paused_group_command_still_gets_through_the_mention() -> None:
+    """Measured on the deployed bot: /pause took effect, /resume silently did nothing."""
+    pause.pause(actor="tester")
+    ctx = _group_mention_ctx("/resume")
+    assert ctx.event.text.startswith("@"), "fixture must reproduce the @-prefixed form"
+
+    result = await SkipReplyStage().run(ctx)
+
+    assert result.halt is False, "/resume must survive the pause gate in a group"
+    assert pause.suppressed == 0
+    # It is also the same text the command stage acts on.
+    assert ctx.event.text == "@2268360864 /resume"
+    assert _command_text(ctx) == "/resume"
+
+
+async def test_a_paused_group_message_without_a_command_is_still_suppressed() -> None:
+    """The fix must not turn the pause off for group chatter."""
+    pause.pause(actor="tester")
+    result = await SkipReplyStage().run(_group_mention_ctx("在吗"))
+    assert result.halt is True
+    assert result.reason == "paused"
+    assert pause.suppressed == 1
 
 
 async def test_not_paused_means_no_change() -> None:
