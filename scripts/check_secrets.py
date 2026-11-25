@@ -77,6 +77,31 @@ def staged() -> list[tuple[str, bytes]]:
     return result
 
 
+def _rev_list(local: str, remote: str) -> list[str]:
+    """Commits reachable from ``local`` but not ``remote``, resilient to a rewritten remote.
+
+    After a history rewrite the remote tip is an object that no longer exists locally, so
+    ``rev-list local ^remote`` fails with "bad object". Failing closed there is right in
+    principle (the gate must not guess) but wrong in effect: it blocks the *one* push that
+    removes a leaked credential. The honest fallback is to stop pretending we know what is
+    new and scan the entire local history instead — slower, and it cannot miss anything.
+
+    This was lost once already: a later commit rebuilt the tree from branches created
+    before it existed, silently reverting it. That is why the fallback lives next to the
+    call site instead of a helper module — a revert has to delete the call too.
+    """
+    try:
+        return git("rev-list", local, f"^{remote}").decode().splitlines()
+    except subprocess.CalledProcessError:
+        print(
+            f"Secret scan: cannot compare {local[:12]} against remote {remote[:12]} "
+            "(object missing locally — typical after a history rewrite); "
+            "scanning the full local history instead.",
+            file=sys.stderr,
+        )
+        return git("rev-list", local).decode().splitlines()
+
+
 def outgoing(lines: list[str]) -> list[tuple[str, bytes]]:
     seen: set[tuple[str, str]] = set()
     result = []
@@ -88,7 +113,7 @@ def outgoing(lines: list[str]) -> list[tuple[str, bytes]]:
         if local == "0" * 40 or not re.fullmatch(r"[0-9a-f]{40,64}", local):
             continue
         if re.fullmatch(r"[0-9a-f]{40,64}", remote) and int(remote, 16):
-            commits = git("rev-list", local, f"^{remote}").decode().splitlines()
+            commits = _rev_list(local, remote)
         else:
             commits = git("rev-list", local, "--not", "--remotes").decode().splitlines()
         for commit in commits:
