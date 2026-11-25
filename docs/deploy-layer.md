@@ -207,6 +207,8 @@ worker 启动前就被别人花掉一部分，于是子进程第一次 `run_in_e
 
 超时用 `killpg` 杀**整个进程组**。此前只杀直接子进程，插件 spawn 的 20 个 helper 会存活并继续吃 CPU——"被隔离"的插件仍在烧机器。
 
+**优雅退出也曾漏掉这一步**（审计 S-PLUG-02）：`_kill_tree` 在 `proc.returncode is not None` 时直接返回——这个判断对单个 pid 正确，对进程组错误。插件的正常关机路径是子进程收到 `shutdown` 帧后自己退出（退出码 0），于是根本没人给进程组发信号：`unload`/`stop_all` 之后它派生的 helper 继续活着，**卸载等于没卸载**；一次性调用路径同理，一次泄漏一份。现在所有退出路径统一走 `kill_group_after_exit(pid)`——子进程被 reap 之后仍对组发 `SIGKILL`，组已空则是 `ProcessLookupError`，幂等，所以 `stop()` / `_abort()` / 退出看护任务各自调用也无需顺序约定。Windows 没有「leader 退出后仍存在」的进程组，改为**每个 worker 一个 Job Object**：句柄由该 worker 持有，`stop()`/崩溃/放弃三条路径都会关掉它，关句柄即杀树；宿主死掉时所有句柄同时关闭，原有的「宿主死则全灭」保证不变。此前全进程共用一个 job，既不能按插件清理，也无法在卸载时触发。
+
 另外修复了一个静默失效：`isolation._CHILD_BOOTSTRAP` 的 `_apply_limits()` 曾引用只存在于宿主模块的 `DEFAULT_PLUGIN_MEMORY_BYTES`，`NameError` 被裸 `except: pass` 吞掉，导致一次性 runner 的所有资源限制从未生效。现在默认值是字面量，其它异常会打印到 stderr 而不是消失。
 
 ### 3.4 进程数上限与统一回收

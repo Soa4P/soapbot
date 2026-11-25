@@ -89,6 +89,7 @@ from soapbot.plugins.isolation import (
     PluginCrashedError,
     PluginTimeoutError,
     _kill_tree,
+    kill_group_after_exit,
     plugin_identity,
     sanitize_env,
     worker_script_path,
@@ -1113,6 +1114,12 @@ class PluginWorker:
         self._reader_task: asyncio.Task | None = None
         self._exit_task: asyncio.Task | None = None
         self._frames: asyncio.Queue | None = None
+        #: Windows job-object handle for this worker's own process tree.
+        #:
+        #: Held (not dropped) so that closing it is the kill switch: on unload the job
+        #: empties and any helper the plugin forked dies with it. ``None`` off Windows,
+        #: where the process group is used instead (S-PLUG-02).
+        self._job: int | None = None
         self._invoke_lock = asyncio.Lock()
         self._active: _ActiveRequest | None = None
         self._mismatched_frames = 0
@@ -1202,10 +1209,12 @@ class PluginWorker:
             )
             # Windows has no process group that survives a hard kill of the host, so a
             # crash would leave the worker running and holding its pipes. A job object
-            # with kill-on-close is the OS-level equivalent; a no-op elsewhere.
-            from soapbot.plugins.job_object import assign as _assign_to_job
+            # with kill-on-close is the OS-level equivalent, and holding the handle lets
+            # this worker's tree be killed on *unload* too — closing it is the trigger
+            # (S-PLUG-02). A no-op elsewhere, where the group is signalled instead.
+            from soapbot.plugins.job_object import attach as _attach_job
 
-            _assign_to_job(self._proc.pid)
+            self._job = _attach_job(self._proc.pid)
         except OSError as exc:  # pragma: no cover - environment dependent
             raise IsolationError(f"could not start plugin worker: {exc}") from exc
 
@@ -1276,6 +1285,8 @@ class PluginWorker:
             _kill_tree(proc)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), timeout=1.0)
+            # Same release as every other exit: setup may already have forked helpers.
+            self._release_tree(proc.pid)
             raise PluginTimeoutError("plugin setup did not finish in time") from None
         if not isinstance(ready, dict) or ready.get("type") != "ready":
             raise WorkerCrashedError("plugin worker sent an unexpected boot reply")
@@ -1367,7 +1378,9 @@ class PluginWorker:
             if self._proc is proc and self._frames is queue:
                 self._close_frames(queue)
 
-    async def _watch_exit(self, proc, queue: asyncio.Queue) -> None:
+    async def _watch_exit(
+        self, proc: asyncio.subprocess.Process, queue: asyncio.Queue
+    ) -> None:
         """Reap the child even when it dies while nobody is calling it."""
         code = await proc.wait()
         if self._proc is not proc or self._frames is not queue:
@@ -1375,7 +1388,26 @@ class PluginWorker:
         self._dead = True
         if not self.last_error:
             self.last_error = f"exit:{code}"
+        # The leader is reaped; anything it forked is not. A crash is the path where
+        # this matters most — the supervisor restarts the worker, and a surviving helper
+        # from the previous incarnation would accumulate one copy per crash (S-PLUG-02).
+        self._release_tree(proc.pid)
         self._close_frames(queue)
+
+    def _release_tree(self, pid: int) -> None:
+        """Kill what the worker left behind, whichever exit path got here.
+
+        Idempotent by construction: the group sweep is a ``ProcessLookupError`` once the
+        group is empty, and the job handle is cleared on first use. That is what lets
+        ``stop()``, ``_abort()`` and the exit watcher all call it without an ordering
+        rule between them.
+        """
+        kill_group_after_exit(pid)
+        job, self._job = self._job, None
+        if job is not None:
+            from soapbot.plugins.job_object import detach as _detach_job
+
+            _detach_job(job)
 
     async def _cancel_tasks(self) -> None:
         # All three tasks are cancellable. Cancelling a proc.wait() waiter only
@@ -1465,6 +1497,10 @@ class PluginWorker:
                     with contextlib.suppress(Exception):
                         await asyncio.wait_for(proc.wait(), timeout=1.0)
         finally:
+            # The graceful path is the common one and the one that used to leak: the
+            # child handles the shutdown frame, exits 0, and every helper it forked
+            # keeps running because nothing signals the group after the leader is reaped.
+            self._release_tree(proc.pid)
             # Even a child that never delivers EOF must not leave the reader,
             # watcher and stderr tasks running after shutdown.
             await self._cancel_tasks()
@@ -1634,6 +1670,9 @@ class PluginWorker:
         # (and therefore every later call) hostage.
         with contextlib.suppress(Exception):
             await asyncio.wait_for(proc.wait(), timeout=1.0)
+        # ``_kill_tree`` only signals while the leader is alive; helpers forked before
+        # the abort survive it (S-PLUG-02).
+        self._release_tree(proc.pid)
         if self._frames is not None:
             self._close_frames(self._frames)
 
