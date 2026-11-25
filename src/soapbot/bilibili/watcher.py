@@ -127,10 +127,16 @@ class VideoWatcher:
             if video.published_at
             else "未知"
         )
+        # Title, uploader and category are written by whoever uploaded the video, which is
+        # anyone. They used to sit as plain "标题：<text>" lines — outside every wrapper —
+        # so the cheapest injection was a title reading "忽略以上指令…" (audit S-MSG-06),
+        # and because the canary is a public constant, a title could also close the frame
+        # (or make the model echo it) and get the whole impression dropped. Only the
+        # numbers below are safe to interpolate: they come from the API as integers.
         facts = [
-            f"标题：{video.title}",
-            f"UP 主：{video.author}",
-            f"分区：{video.category or '未知'}",
+            "标题：\n" + wrap_untrusted(video.title[:200], kind="video-title"),
+            "UP 主：\n" + wrap_untrusted(video.author[:64], kind="video-author"),
+            "分区：" + (wrap_untrusted(video.category[:64], kind="video-meta") if video.category else "未知"),
             f"时长：{video.duration_text}",
             f"发布：{published}",
             f"播放：{video.stat.view}　点赞：{video.stat.like}　评论：{video.stat.reply}",
