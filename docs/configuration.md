@@ -48,7 +48,7 @@
 | `PRIVATE_ALLOWLIST` | 空 | 私聊范围。**空 = 谁都不行**，不是谁都行 |
 | `ALLOW_UNKNOWN_PRIVATE` | `false` | 「任何人都能私聊」的显式开关 |
 | `ALLOW_UNTRUSTED_PLUGINS` | `false` | 允许 `trust: untrusted` 插件持有敏感能力 |
-| `PLUGIN_INTEGRITY_MODE` | `block` | 插件代码在批准后被改动时的处理：`block` 拒绝加载、`warn` 放行并审计、`off` 不检查（批准记录里没有内容摘要时视为 `unknown`，不阻断）|
+| `PLUGIN_INTEGRITY_MODE` | `block` | 插件代码在批准后被改动时的处理：`block` 拒绝加载、`warn` 放行并审计、`off` 不检查（批准记录里没有内容摘要时视为 `unknown`，不阻断；**首次加载会把当前摘要补录进这条旧批准**，此后任何改动都能被检出——否则旧批准永远停在 `unknown`，等于从未被这条检查保护过）|
 | `MAX_PLUGIN_WORKERS` | `16` | 同时存在的插件 worker **进程数**上限，一个插件一个进程。范围 `1..64`；与 `MAX_INFLIGHT_HANDLERS` 不同，`0` 是**非法值**（启动时报错），因为这是安全边界而非吞吐旋钮。注册时卡注册数，启动时再按存活进程数兜底。容量规划：每个 worker 自带一个解释器、一对管道与独立地址空间上限，调大前先按内存估算；容器的 `pids_limit` 只是最后一道兜底。健康报告会同时输出 `max_workers` 与 `live_workers`，只读巡检见 `deploy/plugin-worker-guard.timer` |
 | `PLUGIN_RUN_UID` | 未设置（同 uid） | 让插件 worker 以**另一个 uid** 运行（仅 POSIX）。这是"同 uid 自批"（S-PLUG-04）唯一真实的解法：同一用户下 worker 可以直接重写审批文件给自己批权限，任何 HMAC 都用同一把它能读的钥匙签名。设了它，worker 无法写宿主文件。要求：宿主以 root 启动（或持 `CAP_SETUID`）、插件目录对新 uid 可读；Windows 无等价机制，会 warn 并忽略 |
 | `PLUGIN_RUN_GID` | 未设置 | 上一条的分组；单独设置也生效（只换组是更弱的隔离，但那是运维的要求） |
