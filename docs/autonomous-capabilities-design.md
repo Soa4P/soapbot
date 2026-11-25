@@ -128,7 +128,7 @@ UIA 覆盖不到的自绘界面回退；窗口绑定（只操作声明过的窗�
 5. **会话可见性**：审计只记 frames/used/dropped/duration_ms/bytes 与 session，成功与
    拒绝都进审计；面板可见。
 
-两个入口：四端任一端发 `/look [帧数]`（宿主命令，抓帧后**不短路模型**——命令产出物是
+两个入口：四端**管理员**发 `/look [帧数]`（宿主命令，`VIEW_SCREEN` = ADMIN；抓帧后**不短路模型**——命令产出物是
 上下文不是文本，模型带着图回答用户的问题）；插件经 `screen.capture` 能力申请
 （`ctx.screen_capture(frames)`），拿到的只有 ref + 元数据，帧由宿主在同一轮模型调用前
 注入。`_tile`/`_frame_signature` 从 `ai/vision.py` 提升为公开函数（`tile_frames` /
