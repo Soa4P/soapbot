@@ -319,15 +319,28 @@ async def list_adapters(_: dict = Depends(require_api_auth)) -> dict:
 
 @router.get("/providers")
 async def list_providers(_: dict = Depends(require_api_auth)) -> dict:
-    """Provider chain in failover order, with health counters."""
+    """Provider chain in failover order, with health counters.
+
+    ``breaker`` is included here as well as in ``/api/runtime`` because the two answers
+    serve different questions: 02 answers "is the bot healthy", 07 answers "why is this
+    row not answering". An operator fixing a key on 07 should not have to remember that
+    the reason nothing works lives on another page — and the breaker is the only state
+    that explains "every row looks enabled, and the bot is still silent".
+    """
     runtime = _runtime()
     if runtime.providers is None:
-        return {"providers": [], "stats": {}, "count": 0}
+        return {
+            "providers": [],
+            "stats": {},
+            "count": 0,
+            "breaker": {"open": False, "retry_after": 0.0, "consecutive_total_failures": 0},
+        }
     providers = runtime.providers.list_providers()
     return {
         "providers": providers,
         "stats": runtime.providers.stats(),
         "count": len(providers),
+        "breaker": runtime.providers.breaker_status(),
     }
 
 

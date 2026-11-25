@@ -6,7 +6,9 @@ import {
   type DiffResult,
   type PersonaCard,
   type ProbeResult,
+  type ProviderBreaker,
   type ProviderEntry,
+  type ProviderStat,
   type ProvidersDocument,
   type ProvidersPatch,
 } from '@/api/client'
@@ -40,8 +42,18 @@ import { useAsync } from '@/lib/useAsync'
 const providers = useAsync(() => api.providers())
 const personas = useAsync(() => api.personas())
 
-const providerRows = computed<any[]>(() => providers.data.value?.providers ?? [])
-const stats = computed<Record<string, any>>(() => providers.data.value?.stats ?? {})
+const providerRows = computed<Array<ProviderEntry & { slots?: string[] }>>(
+  () => providers.data.value?.providers ?? [],
+)
+const stats = computed<Record<string, ProviderStat>>(() => providers.data.value?.stats ?? {})
+/**
+ * The breaker, when the server reports one. Defaults closed so an older backend — or a
+ * response from before the field existed — renders as "nothing is wrong" rather than
+ * flashing a pause banner on every load.
+ */
+const breaker = computed<ProviderBreaker>(
+  () => providers.data.value?.breaker ?? { open: false, retry_after: 0, consecutive_total_failures: 0 },
+)
 const personaRows = computed<any[]>(() => personas.data.value?.personas ?? [])
 const binding = computed<any>(() => personas.data.value?.binding ?? {})
 
@@ -165,8 +177,35 @@ async function saveCard(): Promise<void> {
   }
 }
 
-function statFor(id: string): any {
-  return stats.value[id] ?? {}
+/** Zero is the truthful default: a provider with no recorded traffic has no failures. */
+const NO_STAT: ProviderStat = {
+  calls: 0,
+  failures: 0,
+  success_rate: 0,
+  last_error: '',
+  last_latency_ms: 0,
+  p50_latency_ms: 0,
+  p95_latency_ms: 0,
+  prompt_tokens: 0,
+  completion_tokens: 0,
+  consecutive_failures: 0,
+  cooling_down: false,
+  cooldown_remaining: 0,
+}
+
+function statFor(id: string): ProviderStat {
+  return stats.value[id] ?? NO_STAT
+}
+
+/**
+ * The health line under a row: what the last attempt actually said.
+ *
+ * Truncated for display and kept in a `title` in full, because the useful part is often
+ * at the end (``401 Unauthorized: invalid api key``) while the prefix is a URL nobody
+ * needs to read twice.
+ */
+function healthText(id: string): string {
+  return truncate(statFor(id).last_error ?? '', 80)
 }
 
 /* ------------------------------------------------------------- write flow */
@@ -476,6 +515,19 @@ async function applyChanges(): Promise<void> {
     {{ t('config.restartBanner', { n: appliedFields.length }) }}
   </div>
 
+  <!-- The breaker is the one state where every row looks fine and the bot still says
+       nothing. Page 02 reports it too, but an operator reading *this* page is the one
+       who can fix it, and "0 failures on every row" with a silent bot is otherwise a
+       contradiction. -->
+  <div v-if="breaker.open" class="warn-banner" role="status">
+    {{
+      t('config.breakerOpen', {
+        n: breaker.consecutive_total_failures,
+        s: Math.ceil(breaker.retry_after ?? 0),
+      })
+    }}
+  </div>
+
   <section class="panel">
     <div class="panel__head">
       <h2>{{ t('config.chain') }}</h2>
@@ -499,6 +551,7 @@ async function applyChanges(): Promise<void> {
               <th scope="col">{{ t('common.capability') }}</th>
               <th scope="col" class="num">{{ t('overview.priority') }}</th>
               <th scope="col">{{ t('common.status') }}</th>
+              <th scope="col">{{ t('config.health') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -518,6 +571,25 @@ async function applyChanges(): Promise<void> {
                 </span>
                 <span v-if="statFor(row.id).failures" class="tag bad" style="margin-left: 4px">
                   {{ t('config.failures', { n: statFor(row.id).failures }) }}
+                </span>
+              </td>
+              <td>
+                <!-- enabled + cooling: the row reads "enabled" while the router is
+                     skipping it, which is precisely the "green row, silent bot" shape. -->
+                <span v-if="statFor(row.id).cooling_down" class="tag bad">
+                  {{ t('config.coolingFor', { s: Math.ceil(statFor(row.id).cooldown_remaining) }) }}
+                </span>
+                <span v-else-if="statFor(row.id).calls" class="tag ok">
+                  {{ t('config.p50', { ms: Math.round(statFor(row.id).p50_latency_ms) }) }}
+                </span>
+                <span v-else class="hint">{{ t('config.noTraffic') }}</span>
+                <span
+                  v-if="statFor(row.id).last_error"
+                  class="hint"
+                  style="display: block; margin-top: 3px"
+                  :title="statFor(row.id).last_error"
+                >
+                  {{ healthText(row.id) }}
                 </span>
               </td>
             </tr>
@@ -570,6 +642,25 @@ async function applyChanges(): Promise<void> {
                   aria-label="Provider ID"
                   @input="markEdited(row.id)"
                 />
+                <!-- Runtime health next to the id, because this is the row whose key the
+                     operator is about to "fix". Without it the page asks them to edit a
+                     provider while hiding that it is the one failing, and a green Test
+                     button (which sends no key) then reads as proof that nothing is wrong. -->
+                <span
+                  v-if="statFor(row.id).cooling_down"
+                  class="tag bad"
+                  style="display: block; margin-top: 3px"
+                >
+                  {{ t('config.coolingFor', { s: Math.ceil(statFor(row.id).cooldown_remaining) }) }}
+                </span>
+                <span
+                  v-if="statFor(row.id).last_error"
+                  class="hint"
+                  style="display: block; margin-top: 3px"
+                  :title="statFor(row.id).last_error"
+                >
+                  {{ healthText(row.id) }}
+                </span>
               </th>
               <td>
                 <input

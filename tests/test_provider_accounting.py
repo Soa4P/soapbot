@@ -104,6 +104,30 @@ async def test_chat_still_cools_down_after_repeated_failures() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cooldown_reports_a_remaining_deadline_not_just_a_flag() -> None:
+    """``cooling_down`` alone cannot be told apart from "broken until I fix it".
+
+    The panel can only print a tag, so a 60-second cooldown and a permanently wrong key
+    looked identical. The remaining seconds are what make the row actionable, and they
+    must stay zero — never negative — once the deadline has passed.
+    """
+    router, provider = _router()
+    provider.fail_chat = True
+
+    stat_before = router.stats()["fake"]
+    assert stat_before["cooldown_remaining"] == 0.0
+
+    for _ in range(3):
+        with pytest.raises(ProviderError):
+            await router.chat(ChatRequest(messages=[]))
+
+    stat = router.stats()["fake"]
+    assert stat["cooling_down"] is True
+    assert 55.0 < stat["cooldown_remaining"] <= 60.0, "the deadline is ~60s away, not a flag"
+
+
+
+@pytest.mark.asyncio
 async def test_chat_accumulates_tokens_and_reports_latency_percentiles() -> None:
     router, _provider = _router()
 

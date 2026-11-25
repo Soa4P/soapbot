@@ -117,7 +117,7 @@ export const api = {
 
   runtime: () => request<any>('/api/runtime'),
   adapters: () => request<any>('/api/adapters'),
-  providers: () => request<any>('/api/providers'),
+  providers: () => request<ProvidersResponse>('/api/providers'),
   personas: () => request<any>('/api/personas'),
 
   // Archive accounts (owner-only endpoints; the panel token is the credential).
@@ -808,6 +808,43 @@ export interface ProvidersDocument {
   unchanged_sentinel: string
   restart_required: boolean
   hint: string
+}
+
+/**
+ * Per-provider health, as the router counts it.
+ *
+ * `cooling_down` and `cooldown_remaining` are separate on purpose: the router skips a
+ * provider until a deadline passes, and a bare "cooling" tag cannot be told apart from
+ * "broken". `last_error` is already redacted server-side — it is displayed because it
+ * usually names the fix ("401", "invalid api key"), not to expose request content.
+ */
+export interface ProviderStat {
+  calls: number
+  failures: number
+  success_rate: number
+  last_error: string
+  last_latency_ms: number
+  p50_latency_ms: number
+  p95_latency_ms: number
+  prompt_tokens: number
+  completion_tokens: number
+  consecutive_failures: number
+  cooling_down: boolean
+  cooldown_remaining: number
+}
+
+/** The circuit breaker: open means *no* provider is being attempted at all. */
+export interface ProviderBreaker {
+  open: boolean
+  retry_after: number
+  consecutive_total_failures: number
+}
+
+export interface ProvidersResponse {
+  providers: Array<ProviderEntry & { slots?: string[] }>
+  stats: Record<string, ProviderStat>
+  count: number
+  breaker: ProviderBreaker
 }
 
 export interface ProvidersPatch {

@@ -95,6 +95,49 @@ def test_providers_view_includes_health_counters(runtime_client: TestClient) -> 
     assert body["stats"]["mock-openai"]["calls"] == 0
 
 
+def test_providers_view_reports_the_breaker_and_the_cooldown_deadline(
+    runtime_client: TestClient,
+) -> None:
+    """07 has to explain "every row is enabled and the bot still says nothing".
+
+    That sentence has two causes and neither was on the page: a provider being skipped
+    for its remaining cooldown seconds, and the breaker refusing to attempt anything at
+    all. Both are reported here, in the same response the page already loads.
+    """
+    body = runtime_client.get("/api/providers").json()
+    assert body["breaker"] == {
+        "open": False,
+        "retry_after": 0.0,
+        "consecutive_total_failures": 0,
+    }
+    assert body["stats"]["mock-openai"]["cooling_down"] is False
+    assert body["stats"]["mock-openai"]["cooldown_remaining"] == 0.0
+
+
+def test_providers_view_reports_a_closed_breaker_with_no_providers_configured(
+    tmp_path, monkeypatch
+) -> None:
+    """Zero providers is the state where the bot answers nothing at all.
+
+    The key must still be a well-formed closed breaker rather than absent: the page reads
+    it unconditionally, and a missing field would make "no providers configured" look
+    like "the server is too old to know".
+    """
+    from soapbot.app import create_app
+
+    config_dir = _config(tmp_path, providers="providers: []\n")
+    monkeypatch.setattr(settings, "enable_runtime", True)
+    monkeypatch.setattr(settings, "config_dir", config_dir)
+
+    with TestClient(create_app()) as client:
+        body = client.get("/api/providers").json()
+
+    assert body["count"] == 0
+    assert body["breaker"]["open"] is False
+    assert body["breaker"]["retry_after"] == 0.0
+
+
+
 def test_personas_view_lists_installed_cards(runtime_client: TestClient) -> None:
     body = runtime_client.get("/api/personas").json()
     assert body["count"] >= 1
