@@ -241,6 +241,30 @@ class ApprovalStore:
         self._flush()
         return True
 
+    def backfill_content_digest(self, plugin: str, digest: str) -> bool:
+        """Record the current code digest for an approval that has none.
+
+        Approvals written before ``content_digest`` existed say nothing about the code,
+        so the loader reports ``unknown`` and *loads anyway*. That is right once, and
+        wrong forever after: while the field stays empty, every later replacement of
+        ``main.py`` also reports ``unknown``, so the check never guarded the plugin it
+        was written for (audit S-SUP-04). Recording the digest at first load makes the
+        *next* change detectable without refusing anything today.
+
+        Deliberately refuses to overwrite an existing digest: writing over a real
+        recorded value would launder exactly the change this check exists to catch, so
+        only an empty field is filled. Returns whether it wrote.
+        """
+        self.load()
+        record = self._records.get(plugin)
+        if record is None or record.content_digest or not digest:
+            return False
+        record.content_digest = digest
+        # The approval timestamp and actor stay as they are: this is not a new decision,
+        # it is the same decision with its missing evidence filled in.
+        self._flush()
+        return True
+
     # ------------------------------------------------------------------ queries
     def get(self, plugin: str) -> ApprovalRecord | None:
         self.load()
