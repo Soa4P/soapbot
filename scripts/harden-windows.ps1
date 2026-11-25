@@ -29,7 +29,7 @@
         Administrators  Full        recursive
         SYSTEM          Full        recursive
         <account>       Read+Execute on the install directory
-        <account>       Modify      on data\, config\, plugins\, panel.log, .env
+        <account>       Modify      on data\, config\, plugins\, panel.log, panel.err, .env
 
     `config\` and `.env` are writable because the panel edits them (`api/settings.py`
     rewrites `.env`); `plugins\` because installing a plugin writes there; `data\` because
@@ -150,12 +150,16 @@ foreach ($sub in @('data', 'config', 'plugins')) {
     if (Set-Dacl $path $MODIFY) { Write-Host "    $sub : readable and writable" }
 }
 
-# panel.log is created by the redirect in the task action; a read-only root would make
-# `cmd /c ... >> panel.log` fail before Python ever starts, and the task would look like
-# it ran with no output anywhere.
-$logPath = Join-Path $Dir 'panel.log'
-if (-not (Test-Path -LiteralPath $logPath)) { New-Item -ItemType File -Path $logPath -Force | Out-Null }
-Set-Dacl $logPath $MODIFY | Out-Null
+# panel.log and panel.err are created by the redirects in the task action; a read-only
+# root would make `cmd /c ... >> panel.log 2>> panel.err` fail before Python ever starts,
+# and the task would look like it ran with no output anywhere. panel.err is easy to miss
+# and the failure is total: cmd cannot open *either* stream, so the action exits and
+# RestartOnFailure retries a command that can never work (audit S-DEP-11).
+foreach ($logName in @('panel.log', 'panel.err')) {
+    $logPath = Join-Path $Dir $logName
+    if (-not (Test-Path -LiteralPath $logPath)) { New-Item -ItemType File -Path $logPath -Force | Out-Null }
+    Set-Dacl $logPath $MODIFY | Out-Null
+}
 
 # .env exists in both shapes: install.ps1 puts it under data\, deploy\windows-bootstrap.ps1
 # beside the code. Both are rewritten by the settings API, so both need to stay writable —
