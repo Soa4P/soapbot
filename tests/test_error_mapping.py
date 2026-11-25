@@ -25,7 +25,7 @@ def test_every_kind_has_a_status_and_a_safe_sentence() -> None:
 
 
 def test_safe_detail_does_not_echo_the_exception_text() -> None:
-    secret = "/srv/soapbot/data/.env with api_key=sk-live-EXAMPLE-REDACTED"
+    secret = "/srv/soapbot/data/.env with api_key=sk-live-abcdef123456"
     detail = safe_detail(422, RuntimeError(secret), "test_origin")
     assert "/srv/soapbot" not in detail
     assert "sk-live" not in detail

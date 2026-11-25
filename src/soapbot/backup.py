@@ -219,7 +219,11 @@ def create_backup(
                     # changing, so hashing it would certify bytes that are not here.
                     checksums[f"data/{DB_NAME}"] = _sha256_bytes(body)
                 finally:
-                    snapshot.unlink(missing_ok=True)
+                    # SQLite leaves ``-shm``/``-wal`` beside a copy it opened. Observed
+                    # on the deployment: two stray files per backup left in the output
+                    # directory, growing with every run and looking like archives.
+                    for leftover in (snapshot, Path(str(snapshot) + "-wal"), Path(str(snapshot) + "-shm")):
+                        leftover.unlink(missing_ok=True)
 
             for name in DATA_SIBLINGS:
                 source = data_dir / name
@@ -445,6 +449,50 @@ def _install(staged: Path, target: Path) -> None:
     tmp = target.with_name(f".{target.name}.restore-tmp")
     tmp.write_bytes(staged.read_bytes())
     os.replace(tmp, target)
+
+
+def harden_archives(out_dir: Path) -> dict[str, Any]:
+    """Tighten permissions on archives written before the 0600/0700 discipline.
+
+    Upgrading does not fix history: an archive created by the old deployment path is
+    world-readable and contains ``secret.key``, ``.env`` and the whole database, so it
+    is the master key rather than "just data" (audit S-DEP-06 residual). This makes that
+    fix one command instead of a find/xargs invocation an operator has to get right.
+
+    Returns counts so the caller can report what actually changed. Modes are POSIX-only;
+    on Windows the call is a no-op that says so rather than pretending.
+    """
+    out_dir = Path(out_dir)
+    report: dict[str, Any] = {
+        "directory": str(out_dir),
+        "archives": 0,
+        "sidecars": 0,
+        "supported": True,
+    }
+    if not out_dir.is_dir():
+        report["supported"] = False
+        report["reason"] = "目录不存在"
+        return report
+    if os.name == "nt":
+        # NTFS ACLs are the equivalent control and are not what this function touches;
+        # saying "done" would leave the operator believing something changed.
+        report["supported"] = False
+        report["reason"] = "Windows 不使用 POSIX 模式位，请用 icacls 收紧 ACL"
+        return report
+    with contextlib.suppress(OSError):
+        out_dir.chmod(0o700)
+    for path in sorted(out_dir.glob("soapbot-*")):
+        if path.is_dir():
+            continue
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+            # `.sha256` sidecars carry the archive digest only, but they are grouped
+            # with the archives on purpose: one mode, one rule, nothing to forget.
+            if path.suffix == ".sha256":
+                report["sidecars"] += 1
+            elif path.suffix in (".zip", ".gz"):
+                report["archives"] += 1
+    return report
 
 
 def restore_backup(
