@@ -1,13 +1,24 @@
-"""Kill plugin workers when the host dies, on Windows.
+"""Kill a plugin worker's whole tree on Windows — at host death *and* at unload.
 
-``start_new_session`` plus ``killpg`` covers Linux: the group dies with the parent.
-Windows has no equivalent process group that survives a hard kill, so a crashed host
-leaves plugin children running and holding their pipes. A Job Object with
-``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` is the OS-level answer: when the last handle
-to the job closes (including on abnormal process exit) every assigned process dies.
+``start_new_session`` plus ``killpg`` covers Linux: the worker leads its own process
+group, so one signal reaches every helper it forked. Windows has no such group, and
+``taskkill /T`` only walks a tree whose root is still alive — after a graceful shutdown
+the root is gone and its helpers survive (audit S-PLUG-02).
 
-The handle is created once and deliberately never closed: closing it is the kill
-switch, so it has to outlive every worker.
+A Job Object with ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` is the OS-level answer: when
+the last handle to the job closes, every assigned process dies. Children inherit job
+membership, so a helper the plugin forks is covered without enumerating anything.
+
+One job **per worker**, not one job for the process:
+
+* host death closes every handle at once → every job empties, which is the original
+  guarantee;
+* unloading one plugin closes only that job → its helpers die and the other plugins
+  keep running. A single shared job could not do this: terminating it would take down
+  every plugin at once.
+
+``attach`` returns ``None`` off Windows, so callers need no platform check and a test
+can assert the non-Windows behaviour without a VM.
 """
 
 from __future__ import annotations
@@ -24,8 +35,6 @@ _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-
-_job_handle: int | None = None
 
 
 class _IoCounters(ctypes.Structure):
@@ -64,16 +73,17 @@ class _ExtendedLimit(ctypes.Structure):
     ]
 
 
-def assign(pid: int) -> bool:
-    """Put ``pid`` in the kill-on-close job. Returns ``False`` when unsupported.
+def attach(pid: int) -> int | None:
+    """Create a job, put ``pid`` in it, and return the handle.
 
-    Failure is not fatal: the worker still runs, it just lacks this last line of
-    defence. Returning a bool instead of raising keeps the caller free of platform
-    checks, and lets a test assert the non-Windows behaviour without a VM.
+    ``None`` means the job is unavailable: not Windows, creation refused, or the process
+    could not be assigned (nested jobs are fine on Windows 8+, but group policy can still
+    block it). The worker runs either way — it just lacks this last line of defence — so
+    failure is logged at warning level and never raised. The caller owns the handle and
+    must :func:`detach` it.
     """
-    global _job_handle
     if os.name != "nt":
-        return False
+        return None
     try:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -91,37 +101,71 @@ def assign(pid: int) -> bool:
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
-        if _job_handle is None:
-            handle = kernel32.CreateJobObjectW(None, None)
-            if not handle:
-                logger.warning("job object creation failed")
-                return False
-            info = _ExtendedLimit()
-            info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            if not kernel32.SetInformationJobObject(
-                handle,
-                _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-                ctypes.byref(info),
-                ctypes.sizeof(info),
-            ):
-                kernel32.CloseHandle(handle)
-                logger.warning("job object limits rejected")
-                return False
-            _job_handle = handle
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            logger.warning("job object creation failed")
+            return None
+        info = _ExtendedLimit()
+        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        ):
+            kernel32.CloseHandle(handle)
+            logger.warning("job object limits rejected")
+            return None
 
         process = kernel32.OpenProcess(
             _PROCESS_SET_QUOTA | _PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid)
         )
         if not process:
+            kernel32.CloseHandle(handle)
             logger.warning("cannot open plugin process %s for job assignment", pid)
-            return False
+            return None
         try:
-            if not kernel32.AssignProcessToJobObject(_job_handle, process):
+            if not kernel32.AssignProcessToJobObject(handle, process):
                 logger.warning("job assignment failed for plugin process %s", pid)
-                return False
+                kernel32.CloseHandle(handle)
+                return None
         finally:
             kernel32.CloseHandle(process)
-        return True
+        return int(handle)
     except Exception as exc:  # pragma: no cover - platform dependent
         logger.warning("job object unavailable: %s", type(exc).__name__)
+        return None
+
+
+def detach(handle: int | None) -> None:
+    """Close the job's last handle, which kills every process still in it.
+
+    Called on every worker exit path — graceful shutdown, crash and abandon — because
+    closing late is the difference between "the plugin was unloaded" and "the plugin's
+    helper is still burning CPU".
+
+    Nothing here kills anything while the worker is meant to be running: the job only
+    empties when its handle goes away, which happens on unload or when the host dies
+    with the handle still open.
+    """
+    if handle is None or os.name != "nt":
+        return
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle(wintypes.HANDLE(handle))
+    except Exception as exc:  # pragma: no cover - platform dependent
+        logger.warning("closing plugin job failed: %s", type(exc).__name__)
+
+
+def assign(pid: int) -> bool:
+    """Boolean form of :func:`attach` for callers that only ask whether it worked.
+
+    It creates a job and drops the handle immediately, so it cannot clean up later —
+    callers that want kill-on-unload must hold the handle from :func:`attach`.
+    """
+    handle = attach(pid)
+    if handle is None:
         return False
+    detach(handle)
+    return True
