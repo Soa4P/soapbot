@@ -306,40 +306,61 @@ PY""",
 
 
 def build_backup_steps(run: Run, keep: int) -> list[Step]:
-    """Snapshot the data volume and prove the archive is readable.
+    """Application-layer backup, then prove the archive is readable.
 
-    The failure mode worth guarding against is not "no file appeared" — it is a file of
-    plausible size that `tar` cannot open. The listing step is the one that matters.
+    This used to ``tar czf`` the live volume from an Alpine container running as root.
+    Three problems, all measured: a raw tar of a WAL database can capture it mid-write
+    (it opens and is silently missing the newest messages), the archive landed with the
+    default 0644 while carrying ``secret.key``/``.env``/the whole database, and the
+    ``.tgz`` it produced is a format the restore path does not read — so the only thing
+    this "backup" reliably did was look reassuring (audit S-DEP-06 residual).
+
+    Now it runs the same ``soapbot backup create`` the timer runs, inside the service
+    container (which already has the database open read-write), copies the archive out
+    and tightens it to 0600. The listing step still matters: a file of plausible size
+    that cannot be opened is the failure mode that passes every size check.
     """
     pre = _prelude(run)
     backup_dir = f"{run.directory}/backups"
+    quoted = shlex.quote(backup_dir)
     return [
         Step(
-            "打包数据卷",
+            "应用层备份并拷出",
             pre
-            + f"mkdir -p {shlex.quote(backup_dir)}\n"
+            + f"mkdir -p {quoted} && chmod 700 {quoted}\n"
             + "$C ps -q soapbot >/dev/null\n"
-            + "v=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Name}}{{end}}{{end}}' $($C ps -q soapbot))\n"
-            + '[ -n "$v" ] || { echo "no /data volume found"; exit 1; }\n'
-            + "docker run --rm --network none -v \"$v\":/data:ro -v "
-            + f"{shlex.quote(backup_dir)}:/backup alpine:3 "
-            + "sh -c 'tar czf /backup/soapbot-$(date +%F-%H%M%S).tgz -C /data .'\n"
-            + f"ls -1t {shlex.quote(backup_dir)}/*.tgz | head -1",
+            + 'cid=$($C ps -q soapbot | head -1)\n'
+            + "stamp=$(date +%F-%H%M%S)\n"
+            + '$C exec -T soapbot python -m soapbot.cli backup create --out "/tmp/deploy-backup-$stamp" --keep 0 >/dev/null\n'
+            + f'docker cp "$cid:/tmp/deploy-backup-$stamp" {quoted}/.staging-$stamp\n'
+            + f"mv {quoted}/.staging-$stamp/*.zip {quoted}/soapbot-$stamp.zip\n"
+            + f"rm -rf {quoted}/.staging-$stamp\n"
+            + '$C exec -T soapbot rm -rf "/tmp/deploy-backup-$stamp" || true\n'
+            + f"chmod 600 {quoted}/soapbot-$stamp.zip\n"
+            + f"echo {quoted}/soapbot-$stamp.zip",
             "打印新归档路径",
-            "拉不到 alpine 或卷名对不上；归档没生成说明这条备份链根本不工作。",
+            "容器没在跑，或镜像里没有 soapbot CLI；归档没生成说明这条备份链根本不工作。",
             expect="soapbot-",
         ),
         Step(
             "只保留最近 N 份",
-            pre + f"ls -1t {shlex.quote(backup_dir)}/*.tgz | tail -n +{keep + 1} | xargs -r rm -f; "
-            f"ls -1 {shlex.quote(backup_dir)} | wc -l",
+            pre
+            + f"ls -1t {quoted}/soapbot-*.zip "
+            + f"{quoted}/soapbot-*.tgz 2>/dev/null | tail -n +{keep + 1} | xargs -r rm -f; "
+            + f"ls -1 {quoted} | wc -l",
             f"剩余不超过 {keep} 份",
             "轮转没生效会把磁盘慢慢填满。",
         ),
         Step(
             "归档可列出内容",
-            pre + f"tar -tzf $(ls -1t {shlex.quote(backup_dir)}/*.tgz | head -1) | grep -m1 -E 'secret\\.key|soapbot\\.db'",
-            "能列出 secret.key 或 soapbot.db",
+            # busybox `unzip -l` in a throwaway container: the host may have no Python,
+            # and the archive cannot be read reliably from a checkout either. The glob
+            # is expanded inside the container, so no host value becomes shell input.
+            pre
+            + f"docker run --rm --network none -v {quoted}:/b:ro alpine:3 "
+            + "sh -c 'unzip -l /b/*.zip' 2>/dev/null "
+            + "| grep -m1 -E 'data/(soapbot\\.db|secret\\.key)'",
+            "能列出 data/soapbot.db 或 data/secret.key",
             "归档损坏或打包时目录搞错了——文件存在不能证明能恢复。",
         ),
     ]

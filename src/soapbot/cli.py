@@ -130,6 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
     b_create.add_argument("--out", default=None, help="output directory (default <data>/backups)")
     b_create.add_argument("--keep", type=int, default=7, help="how many archives to keep")
     backup_sub.add_parser("list", help="list existing archives with digests")
+    b_harden = backup_sub.add_parser(
+        "harden", help="tighten permissions on archives written before 0600/0700"
+    )
+    b_harden.add_argument("--out", default=None, help="archive directory (default <data>/backups)")
     b_restore = backup_sub.add_parser("restore", help="restore an archive (pre-restore snapshot is taken)")
     b_restore.add_argument("archive", help="path to a soapbot-backup-*.zip")
     b_restore.add_argument("--dry-run", action="store_true", help="verify and plan, touch nothing")
@@ -198,6 +202,7 @@ def _run_backup(args: argparse.Namespace) -> int:
     from soapbot.backup import (
         BackupError,
         create_backup,
+        harden_archives,
         list_backups,
         restore_backup,
         verify_backup,
@@ -240,9 +245,24 @@ def _run_backup(args: argparse.Namespace) -> int:
             print(f"{name}  {size} bytes  sha256:{digest[:16]}…")
         return 0
 
+    if args.backup_cmd == "harden":
+        # Upgrading does not fix history: an old archive is world-readable and holds
+        # secret.key/.env/the database. One command, so the fix is not a find/xargs the
+        # operator has to get right (audit S-DEP-06 residual).
+        out = Path(args.out) if getattr(args, "out", None) else settings.data_dir / "backups"
+        hardened = harden_archives(out)
+        if not hardened.get("supported", True):
+            print(f"未处理：{hardened.get('reason', '不支持当前平台')}")
+            return 0
+        print(
+            f"已收紧 {hardened['directory']}：目录 0700，"
+            f"{hardened['archives']} 个归档 + {hardened['sidecars']} 个 .sha256 置 0600"
+        )
+        return 0
+
     if args.backup_cmd == "restore":
         try:
-            report = restore_backup(
+            restored = restore_backup(
                 Path(args.archive),
                 settings.data_dir,
                 config_dir=settings.config_dir,
@@ -252,12 +272,12 @@ def _run_backup(args: argparse.Namespace) -> int:
         except BackupError as exc:
             print(f"恢复被拒绝：{exc}")
             return 1
-        if report.get("dry_run"):
-            print(f"[dry-run] 校验通过：{len(report['members'])} 个成员将恢复到 {settings.data_dir}")
-            print(f"[dry-run] 恢复前会先快照当前状态：{report['pre_restore_snapshot']}")
+        if restored.get("dry_run"):
+            print(f"[dry-run] 校验通过：{len(restored['members'])} 个成员将恢复到 {settings.data_dir}")
+            print(f"[dry-run] 恢复前会先快照当前状态：{restored['pre_restore_snapshot']}")
             return 0
-        print(f"已恢复 {report['files']} 个文件 <- {Path(args.archive).name}")
-        print(f"恢复前的状态已快照：{report['pre_restore_snapshot']}")
+        print(f"已恢复 {restored['files']} 个文件 <- {Path(args.archive).name}")
+        print(f"恢复前的状态已快照：{restored['pre_restore_snapshot']}")
         print("提醒：如果刚才服务在运行，重启服务以加载恢复出的数据库。")
         return 0
 

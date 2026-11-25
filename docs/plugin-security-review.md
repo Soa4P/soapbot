@@ -81,7 +81,7 @@
 |---|---|
 | **等级** | 🔴 高危 |
 | **位置** | `security/audit.py` · `AuditLog.record` |
-| **复现** | `detail="GET https://api.example.com?token=sk-live-EXAMPLE-REDACTED"` → 原样存入并可从 `GET /api/security/audit` 取出 |
+| **复现** | `detail="GET https://api.example.com?token=sk-live-abcdefgh12345678"` → 原样存入并可从 `GET /api/security/audit` 取出 |
 
 **危害**：审计流会推送到 WebUI 日志中心并落盘。插件把带凭据的 URL 写进 `detail`（这是最常见写法），等于**由负责记录安全事件的组件发布密钥**。且该数据会长期留在日志与前端内存中。
 
