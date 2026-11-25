@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -10,7 +12,7 @@ plugins {
  * Read during configuration, but only *required* when a release build is requested — see
  * the task-graph check at the bottom of this file. A debug build therefore needs no setup.
  */
-val keystoreProperties = java.util.Properties().apply {
+val keystoreProperties = Properties().apply {
     val file = rootProject.file("key.properties")
     if (file.exists()) {
         file.inputStream().use { load(it) }
