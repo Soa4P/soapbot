@@ -349,6 +349,12 @@ export const api = {
       source: string
       fetched_at: number
       error: string
+      // S-SUP-01: the server refuses one-click install from an index whose detached
+      // signature does not verify. The page says so before the button is pressed,
+      // instead of letting the operator discover it as a 409.
+      signed: boolean
+      signature_error: string
+      signature_key_id: string
       warnings: string[]
     }>(`/api/plugins/discover${refresh ? '?refresh=true' : ''}`),
   pluginTasks: (limit = 200) =>
