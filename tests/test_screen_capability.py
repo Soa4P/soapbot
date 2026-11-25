@@ -414,3 +414,38 @@ async def test_look_command_refuses_with_a_token_when_disabled(monkeypatch) -> N
     reply = await stage._cmd_look(ctx, [])
     assert reply is not None and "screen_disabled" in reply
     assert "clean_segments" not in ctx.extras  # nothing was captured
+
+
+# ------------------------------------------------------- who may ask (audit S-MSG-01)
+
+
+def test_look_requires_admin_not_merely_use_command() -> None:
+    """A group member must not be able to read the operator's desktop.
+
+    The old floor was ``USE_COMMAND``, justified by "a disabled capture yields only a
+    refusal token". That answers *can it run*, not *who may run it*: with capture
+    enabled, any member could ask and have the model describe the operator's screen back
+    into the group (audit S-MSG-01).
+    """
+    from soapbot.memory.stages import CommandStage
+    from soapbot.security.principal import (
+        PERMISSION_MIN_ROLE,
+        Permission,
+        PermissionDeniedError,
+        Principal,
+        Role,
+    )
+
+    permission = CommandStage.COMMAND_PERMISSIONS["look"]
+    assert permission is Permission.VIEW_SCREEN
+    assert PERMISSION_MIN_ROLE[permission] is Role.ADMIN
+
+    member = Principal(
+        user_id="1", role=Role.MEMBER, scene="group", group_id="1", authenticated=True
+    )
+    with pytest.raises(PermissionDeniedError):
+        member.require(Permission.VIEW_SCREEN)
+    admin = Principal(
+        user_id="2", role=Role.ADMIN, scene="group", group_id="1", authenticated=True
+    )
+    admin.require(Permission.VIEW_SCREEN)  # does not raise
