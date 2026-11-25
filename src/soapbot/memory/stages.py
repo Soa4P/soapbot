@@ -486,10 +486,11 @@ class CommandStage(Stage):
         # The controls that matter are elsewhere — a per-session query limit and a
         # per-deployment kill switch — and neither is expressed by a role floor.
         "bili": Permission.USE_COMMAND,
-        # 看屏幕（第一阶段只看不碰）：命令本身不设角色门槛——真正的门禁是「部署开关 +
-        # 专用机器声明」双重门（screen/capture.py），关着时任何人输入都只得到一句带
-        # 原因 token 的拒绝，不产生任何抓帧。与 budget/bili 同一条设计逻辑。
-        "look": Permission.USE_COMMAND,
+        # 看屏幕：VIEW_SCREEN（ADMIN 起步）。原来的理由是「部署开关 + 专用机器声明已
+        # 双重门禁，关着时任何人也只能拿到拒绝 token」——那只回答了「能不能跑」，没回答
+        # 「谁可以跑」。部署**开着**时，群里任何成员都能让 bot 读运营者的桌面、再让模型
+        # 把内容描述回群里：只读也不该给群成员看（审计 S-MSG-01）。
+        "look": Permission.VIEW_SCREEN,
         # 急停：只许拉闸、不许合闸——MANAGE_CONFIG 起步。复活没有命令（见
         # screen/kill.py），被劫持的聊天永远救不活它；这个不对称是设计的一部分。
         "panic": Permission.MANAGE_CONFIG,

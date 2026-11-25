@@ -389,6 +389,33 @@ Restart=always
 RestartSec=5
 {run_as}
 
+# Sandboxing (audit S-DEP-05 residual). `User=` alone keeps the process off root but
+# still leaves it free to rewrite /etc, read other users' homes, and create a payload in
+# /tmp that survives a restart. These directives are the systemd-side equivalents of the
+# container profile the docker path gets, and they are deliberately the conservative set:
+# no `SystemCallFilter` and no `MemoryDenyWriteExecute`, because a Python service with
+# numpy/openssl loads its own code pages and a syscall allowlist would fail in ways that
+# look like a broken build rather than a blocked syscall.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+# What the service legitimately writes: SQLite + uploads under data/, panel-edited config,
+# and the .env page 12 saves. Everything else on the filesystem is read-only to it.
+ReadWritePaths={root}/data {root}/config {env_path}
+
 [Install]
 WantedBy=multi-user.target
 """

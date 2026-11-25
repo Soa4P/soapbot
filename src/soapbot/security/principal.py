@@ -156,6 +156,19 @@ class Permission(StrEnum):
     stopping is always cheaper than starting.
     """
 
+    VIEW_SCREEN = "view_screen"
+    """Ask the bot to look at its dedicated machine's screen (``/look``).
+
+    ADMIN, not ``USE_COMMAND``. ``screen`` is view-only and gated by a deployment switch
+    plus a dedicated-machine declaration, and the earlier reasoning was that a disabled
+    capture produces only a refusal token. That reasoning answers "can it run?" and not
+    "who may run it": on a deployment where capture *is* enabled, any group member could
+    ask the bot to read the operator's desktop and have the model describe it back into
+    the group — a group member has no business reading the operator's machine, even
+    read-only (audit S-MSG-01). The floor matches ``MODERATE_GROUP``: the output is
+    visible to the group and attributed to the bot's owner.
+    """
+
     VIEW_AUDIT = "view_audit"
 
 
@@ -171,6 +184,7 @@ PERMISSION_MIN_ROLE: dict[Permission, Role] = {
     Permission.MANAGE_KNOWLEDGE: Role.ADMIN,
     Permission.MANAGE_CONFIG: Role.ADMIN,
     Permission.MODERATE_GROUP: Role.ADMIN,
+    Permission.VIEW_SCREEN: Role.ADMIN,
     Permission.APPROVE_PAYMENT: Role.OWNER,
     Permission.MANAGE_MCP: Role.OWNER,
     Permission.CONTROL_GRANT: Role.OWNER,

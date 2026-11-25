@@ -43,6 +43,7 @@ param(
     [string]$NapCatDir = 'C:\napcat',
     [string]$TaskName = 'NapCat',
     [string]$QQNumber = '',
+    [string]$Account = 'SYSTEM',
     [switch]$Start
 )
 
@@ -52,10 +53,36 @@ if (-not (Test-Path (Join-Path $NapCatDir 'napcat.bat'))) {
     throw "no napcat.bat at $NapCatDir — pass -NapCatDir"
 }
 
+# ---- ACLs before the task exists (audit S-DEP-04) --------------------------------------
+# The task ran as SYSTEM and executed `cmd /c C:\napcat\napcat.bat`, from a directory any
+# local user could write. That is a straight local escalation: drop a file where SYSTEM is
+# about to execute and it becomes SYSTEM's code. The account choice below softens the
+# blast radius; this does the actual work — the install tree becomes read/execute for
+# users and write only for SYSTEM/Administrators. NapCat itself writes here, but it runs
+# as the task principal, so it keeps its own access.
+$napcatBat = Join-Path $NapCatDir 'napcat.bat'
+& icacls.exe $NapCatDir /inheritance:r `
+    /grant '*S-1-5-18:(OI)(CI)F' `
+    /grant '*S-1-5-32-544:(OI)(CI)F' `
+    /grant '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "icacls failed on $NapCatDir; a world-writable install dir would let any local user replace what this task runs"
+}
+# run.log is opened through a shell redirect by the task principal; make sure an inherited
+# "users may write" ACE on a pre-existing file cannot undo the directory change above.
 $log = Join-Path $NapCatDir 'run.log'
-$taskArgs = "/c $NapCatDir\napcat.bat"
-if ($QQNumber) { $taskArgs += " -q $QQNumber" }
-$taskArgs += " > $log 2>&1"
+if (Test-Path $log) {
+    & icacls.exe $log /inheritance:r `
+        /grant '*S-1-5-18:F' /grant '*S-1-5-32-544:F' | Out-Null
+}
+
+# ---- arguments, quoted ----------------------------------------------------------------
+# `"/c $NapCatDir\napcat.bat"` breaks on `C:\Program Files\...` and, worse, lets a path with
+# spaces turn the rest of the line into separate arguments. `cmd /c call` with quoted paths
+# is the form that survives both.
+$taskArgs = '/c call "{0}"' -f $napcatBat
+if ($QQNumber) { $taskArgs += ' -q {0}' -f $QQNumber }
+$taskArgs += ' >> "{0}" 2>&1' -f $log
 
 # Set autoLoginAccount so the WebUI path also attempts a quick login without -q.
 if ($QQNumber) {
@@ -75,7 +102,11 @@ if ($QQNumber) {
 }
 
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $taskArgs
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' `
+# Principal: SYSTEM by default because NapCat must start before anyone logs in and needs
+# no interactive session; the ACL block above is what makes that acceptable (nothing
+# writable it executes). `-Account` lets an operator pick a different identity, which also
+# removes SYSTEM from the picture entirely.
+$principal = New-ScheduledTaskPrincipal -UserId $Account `
     -LogonType ServiceAccount -RunLevel Highest
 $boot = New-ScheduledTaskTrigger -AtStartup
 $boot.Delay = 'PT45S'
@@ -88,11 +119,20 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal
     -Trigger $boot -Settings $settings -Force | Out-Null
 
 $t = Get-ScheduledTask -TaskName $TaskName
-Write-Host ("Installed {0}: ExecutionTimeLimit={1} triggers={2} args={3}" -f `
-    $TaskName, $t.Settings.ExecutionTimeLimit, $t.Triggers.Count, $t.Actions.Arguments)
+Write-Host ("Installed {0}: running as {1}, ExecutionTimeLimit={2} triggers={3}" -f `
+    $TaskName, $Account, $t.Settings.ExecutionTimeLimit, $t.Triggers.Count)
+Write-Host ("  args: {0}" -f $t.Actions.Arguments)
 
 if ($t.Settings.ExecutionTimeLimit -ne [timespan]::Zero) {
     throw 'ExecutionTimeLimit was not cleared — the 72h kill would still apply'
+}
+
+# Prove the ACL actually took: a world-writable install directory is the escalation this
+# script exists to close, and `icacls` can "succeed" on a path that then inherits a broad
+# ACE back from its parent when another tool re-enables inheritance.
+$usersAce = (& icacls.exe $NapCatDir 2>$null | Select-String -SimpleMatch 'Users' | ForEach-Object { $_.Line }) -join ' '
+if ($usersAce -match '\((F|M)\)') {
+    Write-Host '  warning: Users still have write/full control on the install dir; re-run icacls /inheritance:r' -ForegroundColor Yellow
 }
 
 if ($Start) { Start-ScheduledTask -TaskName $TaskName }
