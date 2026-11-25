@@ -670,7 +670,10 @@ class IsolatedRunner:
         assert proc.stdin and proc.stdout and proc.stderr
         try:
             proc.stdin.write(request)
-            await proc.stdin.drain()
+            # Bounded: a child that never reads its stdin fills the 64 KiB pipe and
+            # ``drain()`` then waits forever, which looks exactly like a hung host
+            # (audit S-PLUG-09). The read side is already bounded below.
+            await asyncio.wait_for(proc.stdin.drain(), timeout=self.timeout)
             proc.stdin.close()
             # Keep stderr draining so a chatty child cannot block on its own stderr
             # pipe while the parent waits for the reply.
@@ -711,6 +714,16 @@ class IsolatedRunner:
                 stderr_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await stderr_task
+        except TimeoutError as exc:
+            # Its own handler, not the OSError one: TimeoutError is not an OSError, and a
+            # bare escape would reach the caller looking like an unrelated bug.
+            _kill_tree(proc)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            kill_group_after_exit(proc.pid)
+            raise PluginTimeoutError(
+                f"plugin did not read its request within {self.timeout:.1f}s"
+            ) from exc
         except OSError as exc:  # pragma: no cover - platform dependent
             raise IsolationError(f"plugin I/O failed: {type(exc).__name__}") from exc
 

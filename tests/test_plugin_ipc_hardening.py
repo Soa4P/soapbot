@@ -407,3 +407,51 @@ def test_authorization_stays_in_the_parent() -> None:
     assert "CapabilityGuard" not in sup._CHILD_WORKER
     assert "ALLOWED_SURFACES" in Path(sup.__file__).read_text(encoding="utf-8")
     assert "_surface_handler" in Path(sup.__file__).read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------- write-side liveness (S-PLUG-09)
+class _StuckWriter:
+    """A pipe whose reader has stopped: ``drain()`` never completes."""
+
+    def __init__(self) -> None:
+        self.aborted = False
+        self.chunks: list[bytes] = []
+        self.transport = self
+
+    def write(self, data: bytes) -> None:
+        self.chunks.append(data)
+
+    async def drain(self) -> None:
+        await asyncio.Event().wait()
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
+async def test_a_child_that_stops_reading_cannot_wedge_the_caller() -> None:
+    """The invoke lock is held across this write; an unbounded drain never returns.
+
+    Measured shape of the bug: the child stops reading, the 64 KiB stdin pipe fills,
+    ``drain()`` waits forever, and the caller — holding the lock — waits with it, so one
+    stuck plugin stalls every later call (audit S-PLUG-09).
+    """
+    writer = _StuckWriter()
+    with pytest.raises(IsolationError, match="stopped reading"):
+        await asyncio.wait_for(
+            sup._write_frame(writer, {"type": "reply"}, timeout=0.05),  # type: ignore[arg-type]
+            timeout=2.0,
+        )
+    assert writer.aborted, "the pipe must be torn down, not left half-written"
+
+
+async def test_cancelling_a_write_aborts_the_pipe() -> None:
+    """A half-written frame desyncs every later frame, so cancel must kill the pipe."""
+    writer = _StuckWriter()
+    task = asyncio.ensure_future(
+        sup._write_frame(writer, {"type": "reply"}, timeout=30)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert writer.aborted
