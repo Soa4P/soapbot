@@ -290,6 +290,12 @@ export default {
   'plugins.discoverNoIndex': 'No community index configured. Set SOAPBOT_PLUGIN_INDEX_URL to discover plugins here.',
   'plugins.discoverEmpty': 'The community index lists no plugins yet.',
   'plugins.refreshIndex': 'Refresh',
+  'plugins.indexSigned':
+    'Index is signed (key {key}): the catalogue and the version metadata are both verified against the maintainer key.',
+  'plugins.indexUnsigned': 'The index failed signature verification: {reason}',
+  'plugins.indexUnsignedNoReason': 'no valid signature',
+  'plugins.indexUnsignedHow':
+    'One-click install is refused by the server (discovery and manual zip upload still work). Manual upload still requires approving capabilities one by one.',
   'plugins.latest': 'Latest',
   'plugins.versions': 'Versions',
   'plugins.source': 'Index source',

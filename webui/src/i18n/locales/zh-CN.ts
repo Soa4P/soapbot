@@ -304,6 +304,11 @@ export default {
   'plugins.discoverNoIndex': '未配置社区索引。设置 SOAPBOT_PLUGIN_INDEX_URL 后可在此发现插件。',
   'plugins.discoverEmpty': '社区索引里还没有插件。',
   'plugins.refreshIndex': '重新获取',
+  'plugins.indexSigned': '索引已签名（密钥 {key}）：目录与版本元数据都经过维护者签名校验。',
+  'plugins.indexUnsigned': '索引未通过签名校验：{reason}',
+  'plugins.indexUnsignedNoReason': '没有有效签名',
+  'plugins.indexUnsignedHow':
+    '一键安装已被服务端拒绝（发现与手动上传 zip 不受影响）。手动上传仍需要逐项授权能力。',
   'plugins.latest': '最新',
   'plugins.versions': '版本',
   'plugins.source': '索引来源',

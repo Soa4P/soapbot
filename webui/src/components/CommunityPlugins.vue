@@ -37,6 +37,11 @@ const entries = computed(() => catalogue.data.value?.entries ?? [])
 const blocked = computed<Record<string, string>>(() => catalogue.data.value?.blocked ?? {})
 const available = computed(() => catalogue.data.value?.available ?? false)
 const warnings = computed(() => catalogue.data.value?.warnings ?? [])
+/** 服务端会拒绝对未签名索引的一键安装（409）。在按下按钮之前就把这件事说清楚：
+ *  否则操作者点一次、吃到一条错误，才知道这个部署不能一键装。 */
+const signed = computed(() => catalogue.data.value?.signed === true)
+const signatureError = computed(() => String(catalogue.data.value?.signature_error ?? ''))
+const signatureKey = computed(() => String(catalogue.data.value?.signature_key_id ?? ''))
 
 /** A plugin is "blocked" if any of its listed versions is blocked. */
 function blockedVersions(name: string, versions: string[]): { version: string; reason: string }[] {
@@ -98,6 +103,17 @@ async function install(name: string, version: string): Promise<void> {
       {{ warning }}
     </div>
 
+    <!-- An unsigned index is not an error (discovery still works) but it *is* the
+         reason every install button below is disabled. Saying it once, above the cards,
+         beats making the operator discover it by clicking. -->
+    <div v-if="available && !signed" class="warn-banner" role="status">
+      {{ t('plugins.indexUnsigned', { reason: signatureError || t('plugins.indexUnsignedNoReason') }) }}
+      <span class="hint">{{ t('plugins.indexUnsignedHow') }}</span>
+    </div>
+    <p v-else-if="available && signed" class="hint" style="margin: 0">
+      {{ t('plugins.indexSigned', { key: signatureKey || '—' }) }}
+    </p>
+
     <!-- Three distinct states, because "cannot discover" and "nothing listed" need
          different actions from the operator: one is a network/config problem, the other
          is simply an empty catalogue. Collapsing them into one message hides that. -->
@@ -155,7 +171,8 @@ async function install(name: string, version: string): Promise<void> {
           <button
             class="btn"
             type="button"
-            :disabled="installing !== ''"
+            :disabled="installing !== '' || !signed"
+            :title="signed ? '' : t('plugins.indexUnsignedHow')"
             @click="install(entry.name, entry.latest)"
           >
             {{
