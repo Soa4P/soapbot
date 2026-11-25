@@ -211,6 +211,29 @@ def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     with SuppressProcessLookup():
         proc.kill()
 
+
+def kill_group_after_exit(pid: int) -> None:
+    """SIGKILL the process group led by ``pid``, even after the leader was reaped.
+
+    ``_kill_tree`` returns early once ``proc.returncode`` is not ``None``, which is
+    right for a single pid and wrong for a group. Helpers a plugin forked keep the
+    group alive, and after a *graceful* shutdown — the normal path, where the child
+    handles the shutdown frame and exits on its own — nothing else ever signals them.
+    Measured consequence (audit S-PLUG-02): unloading a plugin left the helper it
+    started running, so ``unload`` did not unload.
+
+    The window this depends on is one scheduling tick: the leader has just been
+    reaped, and the group id is only reusable after every member is gone, which is
+    exactly the case this call is meant to prevent. Signalling a group that is already
+    empty is a ``ProcessLookupError`` and is suppressed.
+    """
+    if sys.platform == "win32":
+        # Windows keeps no process group after the leader exits. Survivors there are
+        # killed by closing the worker's job object — see ``job_object.detach``.
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pid, signal.SIGKILL)
+
 #: A plugin invocation must finish inside this window. Enforced by the parent, so
 #: it holds even if the child ignores SIGTERM or is stuck in C code.
 DEFAULT_TIMEOUT = 8.0
@@ -690,6 +713,12 @@ class IsolatedRunner:
                     await stderr_task
         except OSError as exc:  # pragma: no cover - platform dependent
             raise IsolationError(f"plugin I/O failed: {type(exc).__name__}") from exc
+
+        # The success path used to contain nothing that signalled the group: the child
+        # answered, exited 0, and any helper it forked kept running — once per call, for
+        # a plugin that starts one each time. ``proc.kill()`` only runs when something
+        # went wrong, which is exactly backwards (S-PLUG-02).
+        kill_group_after_exit(proc.pid)
 
         if proc.returncode != 0:
             # Never include stderr text in the exception: it is plugin-controlled and
