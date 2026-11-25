@@ -245,6 +245,9 @@ async def test_abort_never_waits_forever_for_a_stuck_child(monkeypatch) -> None:
     """The invoke lock must be releasable even if the child never delivers EOF."""
     class _StuckProc:
         returncode = None
+        # A real ``asyncio.subprocess.Process`` always has one; the abort path now uses
+        # it to sweep the process group after the leader is gone (S-PLUG-02).
+        pid = 4242
 
         async def wait(self):
             await asyncio.Event().wait()
@@ -253,9 +256,14 @@ async def test_abort_never_waits_forever_for_a_stuck_child(monkeypatch) -> None:
     proc = _StuckProc()
     worker._proc = proc
     monkeypatch.setattr(sup, "_kill_tree", lambda _p: None)
+    # Never signal a real process group from a test: 4242 is a stand-in, and on POSIX a
+    # ``killpg`` on a recycled id would reach somebody else's tree.
+    swept: list[int] = []
+    monkeypatch.setattr(sup, "kill_group_after_exit", lambda pid: swept.append(pid))
 
     await asyncio.wait_for(worker._abort("timeout"), timeout=2.5)
     assert worker.last_error == "timeout"
+    assert swept == [4242], "the abort path must sweep the group after the leader waits out"
 
 
 async def test_unregister_releases_capacity_after_unload() -> None:
@@ -270,8 +278,11 @@ async def test_unregister_releases_capacity_after_unload() -> None:
     assert [row.plugin for row in supervisor.health()] == ["b"]
 
 
-async def test_exit_watcher_reaps_an_idle_death_and_is_generation_safe() -> None:
+async def test_exit_watcher_reaps_an_idle_death_and_is_generation_safe(monkeypatch) -> None:
     class _WaitProc:
+        # Present for the same reason as above: the exit watcher sweeps the group.
+        pid = 4343
+
         def __init__(self, code: int) -> None:
             self.code = code
 
@@ -283,11 +294,14 @@ async def test_exit_watcher_reaps_an_idle_death_and_is_generation_safe() -> None
     queue = asyncio.Queue()
     worker._proc = proc
     worker._frames = queue
+    swept: list[int] = []
+    monkeypatch.setattr(sup, "kill_group_after_exit", lambda pid: swept.append(pid))
 
     await worker._watch_exit(proc, queue)
     assert worker._dead is True
     assert worker.last_error == "exit:7"
     assert queue.get_nowait() is sup._CHANNEL_CLOSED
+    assert swept == [4343], "a crash must not leave the worker's tree behind"
 
     # A watcher from a previous process generation must not mark a new worker dead.
     worker._dead = False
