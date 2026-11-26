@@ -55,7 +55,7 @@ SIGNATURE_ALGORITHM = "ed25519"
 MAX_SIGNATURE_BYTES = 8 * 1024
 
 #: The documents a signature may cover, in the names the signature document uses.
-COVERED_DOCUMENTS = ("plugins.json", "plugin_versions.json")
+COVERED_DOCUMENTS = ("plugins.json", "plugin_versions.json", "archived_plugins.json")
 
 #: Maintainer signing key. Rotating it is a release-level change: the private key is
 #: offline, so a new key means a new embedded constant here.

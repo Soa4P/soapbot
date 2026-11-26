@@ -107,6 +107,13 @@ class IndexSnapshot:
     #: Whether the catalogue + version metadata carry a valid maintainer signature
     #: (S-SUP-01). Separate from ``available``: discovery works from an unsigned index
     #: — that is how a fork or a local file index runs — but one-click install does not.
+    archived: dict[str, str] = field(default_factory=dict)
+    """``name -> reason`` for plugins the catalogue has withdrawn (S-SUP-08).
+
+    A statement, not an enforcement: the host never disables or removes a plugin because
+    of this. It is what lets the panel tell an operator "the maintainer has withdrawn
+    this one, here is why" instead of leaving a withdrawn plugin running silently
+    forever."""
     signed: bool = False
     signature_error: str = ""
     signature_key_id: str = ""
@@ -120,6 +127,7 @@ class IndexSnapshot:
             "available": self.available,
             "entries": [e.to_dict() for e in self.entries],
             "blocked": dict(self.blocked),
+            "archived": dict(self.archived),
             "versions": self.versions,
             "source": self.source,
             "fetched_at": self.fetched_at,
@@ -422,7 +430,8 @@ class IndexClient:
         blocked.update(_parse_blocked(payload.get("blocked_versions")))
 
         versions, versions_warning, versions_raw = await self._fetch_versions()
-        warnings = tuple(w for w in (versions_warning,) if w)
+        archived, archived_warning, archived_raw = await self._fetch_archived()
+        warnings = tuple(w for w in (versions_warning, archived_warning) if w)
 
         # S-SUP-01: verify the catalogue and the version metadata the maintainer signed.
         # The *raw* bytes are what get hashed — re-serialising the parsed payload would
@@ -430,7 +439,21 @@ class IndexClient:
         documents: dict[str, bytes] = {"plugins.json": body}
         if versions_raw is not None:
             documents["plugin_versions.json"] = versions_raw
+        if archived_raw is not None:
+            # Signed like the other two: an unsigned archived list would be exactly the
+            # document an attacker would rewrite to *hide* a withdrawal, or to add one
+            # that was never made.
+            documents["archived_plugins.json"] = archived_raw
         verdict = await self._verify_signature(documents)
+
+        # A signed index whose signature does not cover the withdrawn list leaves that
+        # list unauthenticated — the one document an attacker would rewrite to *hide* a
+        # withdrawal. Ignore it rather than display data nothing vouches for.
+        if archived and verdict.ok and "archived_plugins.json" not in verdict.covered:
+            archived = {}
+            archived_warning = "撤回清单不在签名覆盖范围内，已忽略"
+            logger.warning("plugin index: archived list is not covered by the signature")
+        warnings = tuple(w for w in (versions_warning, archived_warning) if w)
 
         logger.info(
             "plugin index loaded: %d entries, %d blocked, %d versioned, signed=%s",
@@ -443,6 +466,7 @@ class IndexClient:
             available=True,
             entries=entries,
             blocked=blocked,
+            archived=archived,
             versions=versions,
             source=self.url,
             fetched_at=time.time(),
@@ -500,6 +524,41 @@ class IndexClient:
         """
         base = self.url.rsplit("/", 1)[0]
         return f"{base}/plugin_versions.json"
+
+    async def _fetch_archived(self) -> tuple[dict[str, str], str, bytes | None]:
+        """Fetch the withdrawn-plugin list. Optional: absence is not degraded.
+
+        An index that has never withdrawn anything does not publish the file, so a 404
+        is the normal case and must not produce a warning the operator has to read every
+        time they open the panel.
+        """
+        from soapbot.plugins.archived import index_archived_url, parse_archived
+
+        url = index_archived_url(self.url)
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                follow_redirects=False,
+                transport=self._transport,
+            ) as client:
+                response = await client.get(
+                    url, headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"}
+                )
+        except httpx.HTTPError:
+            return {}, "", None
+        if response.status_code == 404:
+            return {}, "", None
+        if response.status_code != 200:
+            return {}, f"撤回清单返回 {response.status_code}，已忽略", None
+        body = response.content
+        if len(body) > MAX_INDEX_BYTES:
+            return {}, "撤回清单体积超出上限，已忽略", None
+        try:
+            check_depth(body, limit=MAX_INDEX_DEPTH)
+            payload = json.loads(body)
+        except (JsonTooDeepError, json.JSONDecodeError, UnicodeDecodeError):
+            return {}, "撤回清单不是合法 JSON，已忽略", None
+        return parse_archived(payload), "", body
 
     async def _fetch_versions(
         self,

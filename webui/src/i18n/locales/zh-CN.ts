@@ -318,6 +318,8 @@ export default {
   'plugins.blockedVersion': '已封禁',
   'plugins.blockedReason': '封禁原因：{reason}',
   'plugins.blockedInstall': '该版本已被封禁，安装会被拒绝。',
+  'plugins.withdrawn': '目录已撤回',
+  'plugins.withdrawnHint': '维护者已把这个插件从市场撤回：{reason}。本机不会自动停用它——是否继续使用由你决定。',
   'plugins.installedBlocked': '当前安装的 {version} 已被封禁；重载或重启后将拒绝加载',
   'plugins.officialEmpty': '没有随包发布的插件。',
   'plugins.communityHint': '一键安装 = 下载 + digest 校验 + 落盘；装完仍需在插件页勾选能力并加载。',

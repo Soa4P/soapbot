@@ -172,10 +172,10 @@ async def test_cache_is_reused_within_ttl() -> None:
     await client.snapshot()
     await client.snapshot()
 
-    # Three files per fetch now: plugins.json, plugin_versions.json (the digest anchor
-    # for one-click install) and index.sig.json (S-SUP-01). Cache reuse means the
-    # *set* is fetched once.
-    assert calls == 3
+    # Four files per fetch now: plugins.json, plugin_versions.json (the digest anchor for
+    # one-click install), archived_plugins.json (S-SUP-08) and index.sig.json (S-SUP-01).
+    # Cache reuse means the *set* is fetched once.
+    assert calls == 4
 
 
 @pytest.mark.asyncio
@@ -197,7 +197,7 @@ async def test_force_bypasses_the_cache() -> None:
     await client.snapshot()
     await client.snapshot(force=True)
 
-    assert calls == 6  # two fetches × (catalogue + versions + signature)
+    assert calls == 8  # two fetches × (catalogue + versions + archived + signature)
 
 
 @pytest.mark.asyncio

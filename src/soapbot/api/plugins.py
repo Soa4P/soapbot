@@ -373,6 +373,12 @@ async def list_plugins(request: Request) -> dict:
     manager = _manager()
     loader = manager.loader
     report = loader.discover()
+    # One fetch (cached inside the client) for the whole listing, rather than one per
+    # plugin: the panel asks for every installed plugin on every refresh.
+    try:
+        catalogue_archived = dict((await manager.index.snapshot()).archived)
+    except Exception:  # pragma: no cover - snapshot() is documented never to raise
+        catalogue_archived = {}
 
     installed = []
     for manifest in report.found:
@@ -426,6 +432,9 @@ async def list_plugins(request: Request) -> dict:
                     if record is not None
                     else None
                 ),
+                # Withdrawn by the maintainer (S-SUP-08). Reported, never enforced: the
+                # operator decides what happens to a plugin they may still want.
+                "withdrawn": catalogue_archived.get(manifest.name, ""),
                 "integrity": loaded.integrity if loaded else None,
             }
         )
