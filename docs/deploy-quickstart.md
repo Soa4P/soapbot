@@ -83,8 +83,26 @@ bash /tmp/soapbot-install.sh
 bash /tmp/soapbot-install.sh --tag v0.1.0
 ```
 
+**要「这几个字节」而不是「这个 ref」，用 commit SHA 加摘要**（审计 S-DEP-08）：
+
+```bash
+bash /tmp/soapbot-install.sh --ref <40 位 commit sha> --sha256 <第一次安装时打印的归档摘要>
+```
+
+- `--ref` 只接受三样东西：40 位 commit SHA（唯一确定一棵树）、`vX.Y.Z` 标签、或分支名。
+  分支会被接受但打一行警告——它明天指向的可能不是同一棵树；长度不对的「SHA」直接拒绝；
+  以 `-` 开头的 ref 也直接拒绝（否则会被 curl 当成参数）。
+- `--sha256` 会把下载到的归档与给定摘要比对，**不一致即失败退出**；不给时安装器会打印
+  实际摘要，记下来就是下一次的 pin。机器上既没有 `sha256sum` 也没有 `shasum` 时它会
+  明确说「没算摘要」，而不是假装算过。
+
 默认 `/opt/soapbot`，以 root 运行时注册 `soapbot.service` 并 `systemctl enable --now`。
 非 root 或加 `--no-service` 时只把服务放到后台并写 `panel.log`。
+
+`deploy/install.sh`（那条 `sudo bash` 的入口）在缺 Python 3.12 时会加
+`ppa:deadsnakes/ppa` —— 那是一个**第三方 apt 源**。不想让它替你做这个决定就设
+`SOAPBOT_SKIP_PPA=1`，它会改为提示你自己装好 Python；已经装了 python3.12 的机器根本不会
+走到这一步。
 
 修改目录或端口：
 

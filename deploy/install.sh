@@ -12,9 +12,16 @@
 set -euo pipefail
 
 REPO="${REPO:-https://github.com/Soa4P/soapbot.git}"
+#: A branch, a tag, or a commit SHA. Passed to git as given; a SHA is the only ref that
+#: names exactly one tree (audit S-DEP-08). Printed below so the log says what was used.
 BRANCH="${BRANCH:-master}"
 DIR="${DIR:-/opt/soapbot}"
 BOOTSTRAP_ARGS=("$@")
+#: Skip adding the deadsnakes PPA when the distribution has no Python 3.12. Set this on a
+#: machine where Python comes from somewhere you trust more (the distro backports, a
+#: pyenv build, an internal mirror) — the installer then fails with instructions instead of
+#: adding a third-party apt source on your behalf.
+SKIP_PPA="${SOAPBOT_SKIP_PPA:-0}"
 
 maybe_sudo() {
   if [[ "$(id -u)" -eq 0 ]]; then "$@"; else sudo "$@"; fi
@@ -73,11 +80,26 @@ fi
 
 # Ubuntu 22.04's 3.10 cannot run this project. Installing it here beats letting pip fail
 # seven steps later with a traceback nobody asked for.
-if command -v python3 >/dev/null 2>&1 && ! python3 - <<'PY'
+#
+# The PPA is a *third-party apt source*: adding it means Ubuntu will install python3.12
+# (and its updates) from a maintainer outside the distribution. That is a normal trade on
+# 22.04 and a bad one on a machine with a policy against extra sources, so it is opt-out
+# and the choice is stated rather than made silently (audit S-DEP-08).
+if command -v python3.12 >/dev/null 2>&1; then
+  : # already available: nothing to add
+elif command -v python3 >/dev/null 2>&1 && python3 - <<'PY'
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
 then
+  : # system python3 is new enough
+elif [[ "$SKIP_PPA" == "1" ]]; then
+  die "Python 3.12+ is missing and SOAPBOT_SKIP_PPA=1 is set.
+      Install it yourself (distro backports, pyenv, an internal mirror), then re-run.
+      The installer will not add ppa:deadsnakes/ppa when you asked it not to."
+else
+  printf '\n      Python 3.12+ is missing; adding ppa:deadsnakes/ppa (a third-party apt source).\n'
+  printf '      Set SOAPBOT_SKIP_PPA=1 to install Python yourself instead.\n'
   maybe_sudo apt-get install -y -qq software-properties-common
   maybe_sudo add-apt-repository -y ppa:deadsnakes/ppa
   maybe_sudo apt-get update -qq
