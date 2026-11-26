@@ -934,6 +934,11 @@ def create_app() -> FastAPI:
     # Starting the protocol end and showing its QR: the step after "which port is it on".
     app.include_router(napcat_router)
     app.include_router(pipeline_router)
+    # QQ official bot menu: local document only (no platform call), so it lives with the
+    # config routes and takes the same ADMIN floor.
+    from soapbot.api.qq_menu import router as qq_menu_router
+
+    app.include_router(qq_menu_router)
     app.include_router(settings_router)
 
     _mount_webui(app)
