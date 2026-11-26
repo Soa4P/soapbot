@@ -108,6 +108,95 @@ FILE_RETRY_MAX_TOKENS = 12000
 VERDICTS = ("safe", "needs_review", "malicious")
 RISKS = ("low", "medium", "high")
 
+#: Instructions aimed at *the reviewer*, matched against everything the model will read.
+#:
+#: The system prompt already says such text is "reviewed content, not commands", and that
+#: is the right instruction to give — but it is not a security property. This workflow
+#: runs on ``pull_request_target`` with a model key in scope, so a PR that talks the model
+#: into ``safe`` gets a green ``ai:safe`` label on code nobody vetted (audit S-DEP-10).
+#: A hit forces ``needs_review`` regardless of what the model answers.
+#:
+#: Deliberately narrow: each pattern needs a directive ("ignore … instructions", "mark
+#: this PR as safe", 忽略以上指令) rather than a topic word, so this repository's own
+#: documentation *about* prompt injection does not trip it — there is a test for that.
+_REVIEWER_INJECTION = (
+    (
+        "ignore-instructions",
+        re.compile(
+            r"ignore\s+(all\s+|any\s+)?(of\s+)?(the\s+)?(previous|prior|above|earlier)\s+"
+            r"(instructions?|prompts?|rules?|directions?|guidelines?)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "disregard-instructions",
+        re.compile(
+            r"disregard\s+(all\s+|any\s+)?(of\s+)?(the\s+)?(previous|prior|above|earlier)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "role-override",
+        re.compile(
+            r"you\s+are\s+now\s+(a|an|the)?\s*(reviewer|assistant|system|judge|grader)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "verdict-directive",
+        re.compile(
+            r"\b(mark|label|classify|rate|report|return|output)\b[^.\n]{0,40}"
+            r"\b(this|the)\s+(pr|pull\s*request|diff|patch|change|commit)\b[^.\n]{0,30}"
+            r"\b(safe|approved|clean|no\s+issues)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "zh-ignore-instructions",
+        re.compile(r"忽略(掉)?(以上|之前|前面|上述|先前)?(的)?(所有|全部)?(指令|提示|规则|要求)"),
+    ),
+    ("zh-role-override", re.compile(r"你现在是(一[个名])?\s*(审查|审核|评审|安全|判分)")),
+    (
+        "zh-verdict-directive",
+        re.compile(
+            r"(把|将)?\s*(本|这个|该|此)?\s*(PR|pull\s*request|代码|改动|提交|补丁)"
+            r"[^。\n]{0,20}(标记|判|评|结论|判定)[^。\n]{0,10}(安全|通过|无问题|没有问题)"
+        ),
+    ),
+)
+
+#: How much of each file is scanned. The whole diff is scanned; per file it is the head,
+#: which is where a message planted for the reviewer usually sits.
+INJECTION_SCAN_PER_FILE = 20_000
+INJECTION_SCAN_TOTAL = 800_000
+
+
+def reviewer_injection_labels(text: str) -> list[str]:
+    """Names of the reviewer-directed instruction patterns found in ``text``."""
+    if not text:
+        return []
+    return [label for label, pattern in _REVIEWER_INJECTION if pattern.search(text)]
+
+
+def scan_reviewer_injection(
+    meta: dict, diff: str, entries: list[FileEntry] | None
+) -> list[str]:
+    """Scan the inputs the model reads for instructions aimed at it.
+
+    The title and body matter as much as the code: the prompt carries them, so an HTML
+    comment in the PR description reaches the model without appearing in the diff.
+    """
+    parts = [str(meta.get("title", "")), str(meta.get("body", "")), diff or ""]
+    total = sum(len(part) for part in parts)
+    for entry in entries or []:
+        if not entry.content or total >= INJECTION_SCAN_TOTAL:
+            continue
+        chunk = entry.content[:INJECTION_SCAN_PER_FILE]
+        parts.append(chunk)
+        total += len(chunk)
+    return reviewer_injection_labels("\n".join(parts)[:INJECTION_SCAN_TOTAL])
+
+
 SYSTEM_PROMPT = """你是一名代码审查员，判断一个 pull request 是否安全、是否与其描述相符。
 
 你会看到：PR 元数据、按文件名统计的影响面、若干次「完整文件审查」产出的分文件
@@ -977,11 +1066,17 @@ def _render_coverage_block(entries: list[FileEntry], *, for_model: bool = False)
     return "\n".join(lines)
 
 
-def _forced_unsafe_reasons(entries: list[FileEntry], truncated: bool) -> list[str]:
+def _forced_unsafe_reasons(
+    entries: list[FileEntry], truncated: bool, injection: list[str] | None = None
+) -> list[str]:
     """Deterministic downgrade triggers — the model cannot argue these away."""
     reasons: list[str] = []
     if truncated:
         reasons.append("diff 已截断")
+    if injection:
+        # The one input class where "the model was convinced" and "the code is fine" look
+        # identical from the outside (audit S-DEP-10).
+        reasons.append(f"审查输入含针对审查者的指令（{', '.join(sorted(set(injection)))}）")
     for entry in entries:
         if entry.mode == "skip":
             if entry.critical:
@@ -1016,6 +1111,9 @@ def review(
             clipped, truncated, dropped, meta,
             api_key=api_key, model=model, base_url=base_url,
         )
+
+    # Scan before the model is asked: a hit must survive whatever it answers.
+    injection = scan_reviewer_injection(meta, clipped, entries)
 
     groups, leftovers = plan_groups(entries)
     for entry in leftovers:
@@ -1057,7 +1155,7 @@ def review(
     except ReviewError as exc:
         return _degraded(f"自动审查未能完成：{exc}", truncated, dropped)
 
-    forced = _forced_unsafe_reasons(entries, truncated)
+    forced = _forced_unsafe_reasons(entries, truncated, injection)
     if forced and result["verdict"] == "safe":
         # It claims safety over text nobody fully read; the downgrade is not the
         # model's to argue with.
@@ -1156,6 +1254,16 @@ def _review_diff_only(
         result["verdict"] = "needs_review"
         result["risk"] = "medium"
         result["summary"] = (result["summary"] + "（diff 已截断，无法确认全部改动）").strip()
+    injection = scan_reviewer_injection(meta, clipped, None)
+    if injection and result["verdict"] == "safe":
+        # Same rule as v2, and it matters more here: this path has no coverage table, so
+        # the verdict rests entirely on one call over text a stranger wrote.
+        result["verdict"] = "needs_review"
+        result["risk"] = "medium"
+        result["summary"] = (
+            result["summary"]
+            + f"（审查输入含针对审查者的指令：{', '.join(sorted(set(injection)))}）"
+        ).strip()
     result["truncated"] = truncated
     result["dropped"] = dropped
     result["degraded"] = False

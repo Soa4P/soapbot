@@ -71,3 +71,32 @@ def test_ai_review_keeps_its_own_scoped_permissions() -> None:
     granted = re.findall(r"^\s{2}(\w[\w-]*):\s*(read|write)", text, re.MULTILINE)
     writes = {name for name, level in granted if level == "write"}
     assert writes <= {"pull-requests", "issues"}, f"ai-review 申请了额外写权限：{writes}"
+
+
+def test_fork_prs_do_not_spend_the_review_key() -> None:
+    """`pull_request_target` + ``secrets`` is a bill someone else can run up.
+
+    The maintainer cannot merge a fork PR without reading it, so a model pass buys
+    nothing — and every push by a stranger would cost a call (audit S-DEP-10). The
+    model steps are therefore gated, and the fork path still writes a comment so the
+    operator is told a human is needed rather than seeing a silent green check.
+    """
+    text = (ROOT / ".github" / "workflows" / "ai-review.yml").read_text(encoding="utf-8")
+    fenced = "github.event.pull_request.head.repo.full_name == github.repository"
+    for step in ("Read the diff as text", "Materialise the PR tree as text", "Ask the model"):
+        start = text.index(f"- name: {step}")
+        header = text[start : start + 400]
+        assert fenced in header, f"{step} 没有被 fork 条件拦住"
+    # ... and the fork path says why, instead of passing silently.
+    assert "Fork PRs are not auto-reviewed" in text
+    fork_step = text[text.index("Fork PRs are not auto-reviewed") :][:600]
+    assert "comment.md" in fork_step
+
+
+def test_the_review_script_has_a_deterministic_injection_guard() -> None:
+    """Prompt injection must not be the only thing between a PR and `ai:safe`."""
+    script = (ROOT / "scripts" / "ai_review.py").read_text(encoding="utf-8")
+    assert "scan_reviewer_injection" in script
+    assert "_forced_unsafe_reasons" in script
+    # The v2 path and the diff-only fallback both consult it.
+    assert script.count("scan_reviewer_injection(") >= 2
