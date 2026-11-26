@@ -119,6 +119,55 @@ def _is_os_environ(node: ast.expr) -> bool:
     return False
 
 
+def _subprocess_shell_name(node: ast.expr) -> str:
+    """``shell`` keyword target names a launcher that starts a shell for us."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return ""
+
+
+def _forbid_shell_kwarg(code: str, level: str, detail: str) -> Result:
+    """AST check: no call passes ``shell`` truthy, however it is spelled.
+
+    The substring contract for ``shell=True`` is satisfied by ``shell = True`` (spaces,
+    which a formatter can introduce) and by ``**{"shell": True}`` — both give the same
+    process a shell. The AST sees the keyword wherever it is written; it also catches
+    ``os.popen``/``subprocess.getoutput``, which take no such keyword and were not in any
+    contract at all (audit S-DEP-15).
+    """
+    offenders: list[str] = []
+    shell_helpers = frozenset({"popen", "getoutput", "getstatusoutput", "system"})
+    for path in PY_FILES:
+        try:
+            tree = ast.parse(_text(path))
+        except SyntaxError:  # pragma: no cover - the lint gate owns syntax
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _subprocess_shell_name(node.func)
+            if name in shell_helpers and isinstance(node.func, ast.Attribute):
+                module = _subprocess_shell_name(node.func.value)
+                if module == "os" or module == "subprocess":
+                    offenders.append(f"{path.relative_to(ROOT)}:{node.lineno} {module}.{name}(")
+            for keyword in node.keywords:
+                if keyword.arg != "shell":
+                    continue
+                truthy = isinstance(keyword.value, ast.Constant) and bool(
+                    keyword.value.value
+                )
+                if truthy:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno} shell=True"
+                    )
+    return Result(
+        code, level, not offenders, detail,
+        "; ".join(offenders) if offenders else f"absent in {len(PY_FILES)} files",
+    )
+
+
 def _forbid_host_env(code: str, level: str, detail: str) -> Result:
     """AST check: no third-party child is handed the host environment.
 
@@ -301,6 +350,7 @@ def checks() -> list[Result]:
     add(_forbid_in(PY_FILES, "os.system(", "s02", "critical", "no os.system in the package"))
     add(_forbid_in(PY_FILES, "create_subprocess_shell", "s02", "critical", "no shell subprocess"))
     add(_require(SRC / "mcp" / "client.py", "create_subprocess_exec", "s02", "critical", "MCP argv stays a list"))
+    add(_forbid_shell_kwarg("s02", "critical", "no shell keyword or os/system helper, in any spelling (AST)"))
 
     # 03 — deserialisation
     add(_forbid_in(PY_FILES, "import pickle", "s03", "critical", "no pickle import"))
