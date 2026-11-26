@@ -395,9 +395,12 @@ export default {
   'runtime.quotaLimit': '每用户配额',
   'runtime.quotaRefused': '本轮已拒绝',
   'security.tokensHint':
-    '令牌在没有被吊销前一直有效。退出登录会吊销当前这一枚；「吊销全部」用于设备丢失时，它会让此前签发的所有令牌立刻失效，并为你换发一枚新的。',
+    '令牌在没有被吊销前一直有效。退出登录会吊销当前这一枚；「吊销全部」用于设备丢失时，它会让此前签发的所有令牌立刻失效——包括你自己这一枚，之后必须用新的引导令牌重新登录。',
   'security.revokeAll': '吊销全部令牌',
-  'security.tokensRevoked': '已吊销此前所有令牌，并为当前会话换发了新令牌。',
+  'security.tokensRevoked': '已吊销此前全部令牌，当前会话也已失效。请用下面的引导令牌重新登录。',
+  'security.bootstrapAfterRevoke': '新的引导令牌（在登录框里粘贴它）：',
+  'security.bootstrapShownOnce':
+    '它只在这里显示这一次。离开本页后，请到服务器的 data/init_token.txt 读取（服务重启也会重新生成一枚）。',
   'security.revokedBefore': '全局吊销时间点：{when}（此前的令牌一律失效）',
   'security.tokenId': '令牌 ID',
   'security.expires': '原到期时间',

@@ -197,6 +197,46 @@ def is_loopback(request: Request) -> bool:
     return _client_host(request) in _LOOPBACK_HOSTS
 
 
+#: Names that unambiguously mean "this machine" in a ``Host`` header. Deliberately not
+#: ``_LOOPBACK_HOSTS``: that set includes the empty string (a request with no client
+#: address is treated as local by the historical reads-are-open rule) and ``testclient``
+#: (TestClient's default). Neither is evidence about what the caller *addressed*.
+_LOOPBACK_NAMES = frozenset(
+    {"127.0.0.1", "::1", "localhost", "0:0:0:0:0:0:0:1", "localhost.localdomain"}
+)
+
+
+def _host_header_names_this_machine(request: Request) -> bool:
+    """Whether the ``Host`` header says the caller meant this machine (S-AUTH-10).
+
+    The credential-less loopback path grants operator-level *reads*. "Arrived from
+    127.0.0.1" does not establish that: a page on ``evil.example`` whose DNS record is
+    rebound to 127.0.0.1 produces a genuinely local connection whose ``Host`` names the
+    attacker's domain. Checking the header as well is what separates "a local process is
+    talking to us" from "a browser was pointed at us by a name somebody else controls".
+
+    A reverse proxy on the same host serving the panel under a domain puts that domain
+    in ``SOAPBOT_TRUSTED_HOSTS``; requests that carry a credential never reach this
+    check, so logging in is unaffected either way.
+    """
+    raw = request.headers.get("host", "") or ""
+    if not raw:
+        return False
+    try:
+        # ``urlsplit`` strips the port and the IPv6 brackets; a header like
+        # "127.0.0.1:6185" must compare equal to "127.0.0.1".
+        host = urlsplit(f"//{raw}").hostname or ""
+    except ValueError:
+        return False
+    host = host.strip().lower().rstrip(".")
+    if not host:
+        return False
+    if host in _LOOPBACK_NAMES:
+        return True
+    configured = {str(item).strip().lower().rstrip(".") for item in settings.trusted_hosts}
+    return host in configured
+
+
 def _bearer(request: Request) -> str:
     header = request.headers.get("Authorization", "") or ""
     if header.lower().startswith("bearer "):
@@ -373,6 +413,21 @@ def authenticate(request: Request) -> dict[str, Any]:
         )
 
     _reject_cross_site(request)
+    if not _host_header_names_this_machine(request):
+        # The connection is local, but it was not *addressed* to us (S-AUTH-10). Refusing
+        # here costs nothing legitimate: a local client that means this machine can use
+        # a loopback name or a credential, and the panel itself is served from the same
+        # origin, so its own reads never take this branch unauthenticated.
+        get_audit_log().record(
+            kind="authz",
+            action="loopback_host",
+            outcome="deny",
+            detail=f"host={request.headers.get('host', '')[:80]} path={request.url.path}",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="untrusted Host header for an unauthenticated local request",
+        )
     if settings.strict_loopback_auth and request.method in _MUTATING:
         get_audit_log().record(
             kind="authz",

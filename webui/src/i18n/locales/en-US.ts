@@ -382,9 +382,13 @@ export default {
   'runtime.quotaLimit': 'Per-user quota',
   'runtime.quotaRefused': 'Refused this process',
   'security.tokensHint':
-    'A token stays valid until it is revoked. Signing out revokes the current one; "Revoke all" is for a lost device — it kills every token issued so far and hands you a replacement.',
+    'A token stays valid until it is revoked. Signing out revokes the current one; "Revoke all" is for a lost device — it kills every token issued so far, including your own, and you have to sign in again with the new bootstrap token.',
   'security.revokeAll': 'Revoke all tokens',
-  'security.tokensRevoked': 'All previously issued tokens are revoked; a new token was issued for this session.',
+  'security.tokensRevoked':
+    'Every token issued so far is revoked, including this session. Sign in again with the bootstrap token below.',
+  'security.bootstrapAfterRevoke': 'New bootstrap token (paste it into the login dialog):',
+  'security.bootstrapShownOnce':
+    'Shown once, here. After you leave this page, read data/init_token.txt on the server (a restart also mints a fresh one).',
   'security.revokedBefore': 'Global cut-off: {when} (everything issued before it is refused)',
   'security.tokenId': 'Token id',
   'security.expires': 'Would expire',

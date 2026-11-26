@@ -372,6 +372,51 @@ def test_a_logged_in_napcat_without_onebot_gets_the_server_written(tmp_path, mon
     assert second["ok"] is True and second["changed"] is False
 
 
+def test_repairing_the_entry_keeps_the_operator_token(tmp_path, monkeypatch) -> None:
+    """S-MSG-10: "repair the connection" must not remove authentication.
+
+    The entry is rewritten from a template whose ``token`` is empty, so a listener the
+    operator had protected came back unauthenticated — the panel reported success, and
+    any local process could then speak the OneBot protocol to the bot.
+    """
+    import json
+
+    config = tmp_path / "napcat" / "config"
+    config.mkdir(parents=True)
+    monkeypatch.setattr(
+        napcat, "_napcat_config_dirs", lambda: [path for path in [config] if path.is_dir()]
+    )
+    path = config / "onebot11_100012345.json"
+    path.write_text(
+        json.dumps(
+            {
+                "network": {
+                    "websocketServers": [
+                        {
+                            "name": "soapbot",
+                            "enable": False,
+                            "host": "127.0.0.1",
+                            "port": 3001,
+                            "token": "keep-me",
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(napcat, "config_dir", lambda: config)
+    monkeypatch.setattr(napcat.settings, "napcat_home", None)
+
+    result = napcat.ensure_onebot_server("100012345", port=3001)
+
+    assert result["changed"] is True
+    entry = json.loads(path.read_text(encoding="utf-8"))["network"]["websocketServers"][0]
+    assert entry["enable"] is True, "修复的目的就是让它可用"
+    assert entry["token"] == "keep-me", "修复不能顺手把鉴权抹掉"
+    assert entry["host"] == "127.0.0.1"
+
+
 def test_without_docker_the_status_says_so_instead_of_raising(monkeypatch) -> None:
     """The usual Windows host has no Docker; that is the answer, not an exception."""
     monkeypatch.setattr(napcat, "docker_available", lambda: False)

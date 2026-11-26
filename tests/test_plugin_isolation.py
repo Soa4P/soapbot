@@ -456,9 +456,12 @@ async def test_i4_child_cannot_import_host_package() -> None:
 def _fake_request(host: str, *, headers: dict[str, str] | None = None, method: str = "GET"):
     from types import SimpleNamespace
 
+    # A real request always carries a Host header, and the credential-less loopback path
+    # now requires it to name this machine (S-AUTH-10) — a fake without one models a
+    # request that cannot arrive.
     return SimpleNamespace(
         client=SimpleNamespace(host=host),
-        headers=headers or {},
+        headers=headers if headers is not None else {"host": "127.0.0.1"},
         method=method,
         url=SimpleNamespace(path="/api/plugins"),
         state=SimpleNamespace(),
@@ -515,7 +518,9 @@ def test_i5_loopback_get_is_not_origin_checked() -> None:
     """Read-only cross-origin GETs stay allowed: they leak nothing a token protects."""
     from soapbot.api.plugins import _authorize
 
-    _authorize(_fake_request("127.0.0.1", headers={"Origin": "https://other.example"}))
+    _authorize(
+        _fake_request("127.0.0.1", headers={"Origin": "https://other.example", "host": "127.0.0.1"})
+    )
 
 
 def test_i5_plugin_endpoints_require_loopback_via_testclient() -> None:

@@ -955,6 +955,21 @@ class Settings(BaseSettings):
     this off restores the old "loopback is trusted for everything" behaviour; only
     the test suite does that, so its business assertions do not each have to become
     a login script. The strict path itself is pinned by tests/test_auth_cookie.py."""
+
+    trusted_hosts: IdList = Field(default_factory=list)
+    """Extra ``Host`` header values that count as this machine (audit S-AUTH-10).
+
+    "The request came from 127.0.0.1" is not the same claim as "the request was
+    addressed to 127.0.0.1". A page on ``evil.example`` whose domain resolves to
+    127.0.0.1 (DNS rebinding) produces a loopback request whose ``Host`` names the
+    attacker's domain, and the credential-less loopback path would treat it as the
+    operator. That path now also requires ``Host`` to name a loopback address, or a
+    value listed here.
+
+    Only needed when a reverse proxy on the *same host* serves the panel under a
+    domain: list that domain. Requests carrying a credential are unaffected, so a
+    logged-in panel keeps working either way.
+    """
     cookie_secure: bool = False
     """Set true behind an HTTPS reverse proxy. Over plain loopback HTTP a Secure
     cookie is never sent back, which would make login look like a no-op."""
@@ -1038,6 +1053,7 @@ class Settings(BaseSettings):
         "group_blacklist",
         "user_blacklist",
         "browse_allow_hosts",
+        "trusted_hosts",
         mode="before",
     )
     @classmethod
