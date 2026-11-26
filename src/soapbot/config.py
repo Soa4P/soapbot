@@ -709,6 +709,22 @@ class Settings(BaseSettings):
     bilibili_rate_per_minute: int = 12
     bilibili_max_comments: int = 8
     """How many hot comments to feed the impression prompt."""
+    bilibili_live_rooms: str = ""
+    """Live rooms to follow, comma-separated ids. Empty means "no polling".
+
+    A room id, not a slug: ``live.bilibili.com/22612345`` — the number after the last
+    slash. Junk entries are dropped with a log line rather than refusing the list.
+    """
+    bilibili_live_sessions: str = ""
+    """Where an announce goes: comma-separated session keys (``onebot11:group:123``).
+
+    Explicit keys, not "the group that asked": an announcement is host-initiated, and
+    the host has no request to inherit a target from. Naming the sessions is also what
+    keeps a live feed from becoming a broadcast to every group the bot is in.
+    """
+    bilibili_live_interval_minutes: int = Field(default=5, ge=1, le=60)
+    """Poll interval. Live status does not change by the second, and every poll spends
+    the account's request budget (``bilibili_rate_per_minute``)."""
 
     jwt_secret: SecretStr = SecretStr("")
     """Signing key for admin tokens.

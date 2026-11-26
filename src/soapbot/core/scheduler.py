@@ -128,6 +128,21 @@ class RuntimeScheduler:
                 self.last_error = f"budget: {type(exc).__name__}: {exc}"
                 logger.exception("budget sweep failed")
 
+        announcer = getattr(self.runtime, "live_announcer", None)
+        client = getattr(self.runtime, "bilibili", None)
+        if announcer is not None and client is not None:
+            try:
+                from soapbot.bilibili.live import room_fetcher
+
+                # ``poll`` owns the interval; this tick is every 30 s only because the
+                # other periodic work needs it.
+                said = await announcer.poll(room_fetcher(client))
+                if said:
+                    logger.info("bilibili live: %d announcement(s)", len(said))
+            except Exception as exc:
+                self.last_error = f"bilibili_live: {type(exc).__name__}: {exc}"
+                logger.exception("bilibili live tick failed")
+
         idle_folds = getattr(self.runtime, "idle_folds", None)
         if idle_folds is not None:
             try:

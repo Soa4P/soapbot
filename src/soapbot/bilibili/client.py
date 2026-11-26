@@ -55,6 +55,10 @@ from soapbot.security.ratelimit import SlidingWindowLimiter
 logger = logging.getLogger(__name__)
 
 API_HOST = "https://api.bilibili.com"
+#: Live-room endpoints live on their own host. Explicit, and checked again below: a host
+#: that comes from anywhere but this constant is a request the client must refuse.
+LIVE_HOST = "https://api.live.bilibili.com"
+ALLOWED_API_HOSTS = frozenset({API_HOST, LIVE_HOST})
 SHORT_HOSTS = frozenset({"b23.tv", "bili2233.cn"})
 VIDEO_HOSTS = frozenset({"www.bilibili.com", "m.bilibili.com", "bilibili.com"})
 
@@ -275,8 +279,17 @@ class BilibiliClient:
 
     # ------------------------------------------------------------------- transport
     async def _get_json(
-        self, path: str, params: dict[str, object], *, signed: bool = False
+        self,
+        path: str,
+        params: dict[str, object],
+        *,
+        signed: bool = False,
+        host: str = API_HOST,
     ) -> dict:
+        if host not in ALLOWED_API_HOSTS:
+            # The host is not a caller-supplied value anywhere today; the check exists so
+            # it cannot become one quietly.
+            raise BilibiliError("拒绝向未授权的 B 站主机发请求")
         if signed and self.tier != "l2":
             raise BilibiliTierError(
                 f"该接口需要 L2（wbi 签名）档位，当前为 {self.tier.upper()}"
@@ -289,7 +302,7 @@ class BilibiliClient:
         if signed:
             query = sign(query, await self._signing_key())
 
-        url = f"{API_HOST}{path}"
+        url = f"{host}{path}"
         self.stats["calls"] += 1
         try:
             response = await self._client().get(url, params=query)
@@ -377,6 +390,23 @@ class BilibiliClient:
             raise BilibiliError("短链指向了非 B 站地址，已拒绝")
         kind, ident = parse_target(location)
         return f"{kind}:{ident}"
+
+    async def live_room(self, room_id: int) -> dict:
+        """Raw live-room info for ``room_id`` (``room/v1/Room/get_info``).
+
+        Returns the payload rather than a parsed object: the field names here change
+        without notice, and the announcer only needs ``live_status``/``title``/
+        ``online``. Parsing lives next to the feature that reads it, so this stays a
+        transport method.
+
+        Unsigned public endpoint: live-room status is visible to anyone, and it is not
+        part of the wbi-signed surface, so L1 is enough.
+        """
+        if room_id <= 0:
+            raise BilibiliError("room_id must be positive")
+        return await self._get_json(
+            "/room/v1/Room/get_info", {"room_id": room_id}, host=LIVE_HOST
+        )
 
     async def video(self, target: str) -> VideoInfo:
         """Fetch video detail by BV/av id or URL."""

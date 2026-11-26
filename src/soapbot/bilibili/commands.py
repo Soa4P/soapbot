@@ -31,6 +31,7 @@ from soapbot.security.ratelimit import SlidingWindowLimiter
 logger = logging.getLogger(__name__)
 
 _WATCH_WORDS = frozenset({"watch", "观后感", "感想", "评一下"})
+_LIVE_WORDS = frozenset({"live", "直播", "开播"})
 
 
 class BilibiliCommands:
@@ -39,7 +40,8 @@ class BilibiliCommands:
     USAGE = (
         "用法：\n"
         "/bili <BV号 | av号 | 链接>　— 查看视频信息\n"
-        "/bili 观后感 <BV号 | av号 | 链接>　— 生成一段基于公开信息的观后感"
+        "/bili 观后感 <BV号 | av号 | 链接>　— 生成一段基于公开信息的观后感\n"
+        "/bili 直播 [直播间号]　— 看关注中的直播间是否在播"
     )
 
     def __init__(
@@ -74,6 +76,9 @@ class BilibiliCommands:
         words = [a for a in args if a.strip()]
         if not words:
             return self.USAGE
+
+        if words[0].lower() in _LIVE_WORDS:
+            return await self._live(ctx, words[1:])
 
         wants_impression = words[0].lower() in _WATCH_WORDS
         target = " ".join(words[1:] if wants_impression else words).strip()
@@ -110,6 +115,33 @@ class BilibiliCommands:
             # the target) or an internal traceback.
             logger.exception("bilibili command failed")
             return f"B 站查询失败（{type(exc).__name__}），请稍后再试。"
+
+    async def _live(self, ctx, rest: list[str]) -> str:
+        """Manual live check: the configured rooms, or the one the caller names.
+
+        Deliberately a *report*, not a state change: asking does not reset the
+        announcer's baseline, so a manual look does not swallow the next real
+        transition.
+        """
+        from soapbot.bilibili.live import parse_room_info, parse_rooms, render_status
+        from soapbot.config import settings
+
+        if rest and rest[0].isdigit():
+            room_ids = [int(rest[0])]
+        else:
+            room_ids = parse_rooms(settings.bilibili_live_rooms)
+        if not room_ids:
+            return "还没有关注直播间。在 .env 里设 BILIBILI_LIVE_ROOMS=<直播间号>。"
+
+        lines: list[str] = []
+        for room_id in room_ids[:5]:
+            try:
+                status = parse_room_info(room_id, await self.watcher.client.live_room(room_id))
+            except BilibiliError as exc:
+                lines.append(f"{room_id}：查询失败（{exc}）")
+                continue
+            lines.append(f"{room_id}：{render_status(status)}")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------ rendering
     def render_video(self, video) -> str:

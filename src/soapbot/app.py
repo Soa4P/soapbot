@@ -289,6 +289,10 @@ async def _start_runtime() -> None:
 
     await _attach_adapters(runtime)
 
+    # After adapters: an announcement needs a send path that exists. Before the
+    # scheduler: the first tick is 30 s away.
+    _install_live_announcer(runtime)
+
     # One subscription for every notification channel. Attached here rather than in
     # build_runtime so hand-assembled runtimes in tests stay free of global state;
     # the notifier owns no credentials of its own, it reads them from settings.
@@ -304,6 +308,40 @@ async def _start_runtime() -> None:
     scheduler = RuntimeScheduler(runtime)
     scheduler.start()
     _SCHEDULER = scheduler
+
+
+def _install_live_announcer(runtime: Any) -> None:
+    """Follow configured Bilibili live rooms, if any are configured.
+
+    Host-initiated: there is no request to inherit a target from, so the session keys are
+    named in configuration. Both halves are required — rooms without sessions would poll
+    for nobody, and sessions without rooms is a configuration mistake worth not starting
+    a timer for.
+    """
+    from soapbot.bilibili.live import LiveAnnouncer, parse_rooms
+
+    rooms = parse_rooms(settings.bilibili_live_rooms)
+    sessions = tuple(
+        item.strip() for item in settings.bilibili_live_sessions.split(",") if item.strip()
+    )
+    if not (settings.enable_bilibili and rooms and sessions):
+        runtime.live_announcer = None
+        return
+    from soapbot.security.audit import get_audit_log
+
+    runtime.live_announcer = LiveAnnouncer(
+        rooms=rooms,
+        sessions=sessions,
+        send=runtime._send_via_adapter,
+        audit=get_audit_log(),
+        interval_minutes=settings.bilibili_live_interval_minutes,
+    )
+    logger.info(
+        "bilibili live: following %d room(s) every %d min into %d session(s)",
+        len(rooms),
+        settings.bilibili_live_interval_minutes,
+        len(sessions),
+    )
 
 
 async def _start_onebot_gateway(runtime: Any) -> None:

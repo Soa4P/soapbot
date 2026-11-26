@@ -71,6 +71,9 @@
 | `ENABLE_BUDGET` | `true` | 额度账本默认开启（¥500/期、¥100/笔的保守上限），设 `false` 可完全移除 `/budget` 命令族 |
 | `BUDGET_REQUIRE_DISTINCT_APPROVER` | `true` | 需第二位审批人；单 owner 部署可显式设 `false`，但审批退化为确认框，事件与审计都会标 `degraded` |
 | `ENABLE_BILIBILI` | `false` | 可选能力，默认关闭 |
+| `BILIBILI_LIVE_ROOMS` | 空 | 关注的直播间号，逗号分隔（`live.bilibili.com/22612345` 里最后那串数字）。空 = 不轮询。非数字项会被丢并记一条日志 |
+| `BILIBILI_LIVE_SESSIONS` | 空 | 开播/下播播报到哪些会话，逗号分隔的会话键（`onebot11:group:123`）。**显式写键**是因为播报由宿主发起，没有请求可以继承目标；这也避免它变成向所有群的广播 |
+| `BILIBILI_LIVE_INTERVAL_MINUTES` | `5` | 轮询间隔（1–60 分钟）。直播状态不会按秒变化，而每次轮询都花账号的请求预算（`BILIBILI_RATE_PER_MINUTE`） |
 | `BROWSE_ALLOW_HOSTS` | 空 | 允许读取公开页面的域名，逗号分隔；**空 = 拒绝一切**。可写 `.example.com` 覆盖子域 |
 | `BROWSE_MAX_BYTES` | `524288` | 单个页面响应体硬上限 |
 | `BROWSE_TIMEOUT_SECONDS` | `10` | 页面与 robots.txt 的读取超时 |
