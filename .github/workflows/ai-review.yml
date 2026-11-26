@@ -47,7 +47,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      # A fork PR can only be merged by a maintainer, so spending the model key on it buys
+      # nothing — and on a public repository it lets a stranger make every push cost money
+      # (audit S-DEP-10). The verdict is `needs_review` by construction: no review ran, so
+      # no label may claim otherwise. The comment step is written here because the model
+      # steps are skipped and their usual author of comment.md never runs.
+      - name: Fork PRs are not auto-reviewed
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## ⚠️ 未自动审查（来自 fork）"
+            echo
+            echo "这个 PR 来自 fork：自动审查会给陌生人每次推送花掉模型额度，而 fork 的 PR 本来也只能由维护者合并。"
+            echo
+            echo "请人工审查后再决定是否合并。"
+          } > "$RUNNER_TEMP/comment.md"
+
       - name: Read the diff as text
+        if: github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
@@ -58,6 +77,7 @@ jobs:
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json commits --jq '.commits[].messageHeadline' > "$RUNNER_TEMP/pr-commits.txt"
 
       - name: Materialise the PR tree as text
+        if: github.event.pull_request.head.repo.full_name == github.repository
         # Full-file review needs the PR-side content of each changed file. Fetch the
         # PR head and extract the tree with `git archive | tar -x` — a byte-for-byte
         # export into a temp directory. Nothing here executes PR code: the reviewer
@@ -72,6 +92,7 @@ jobs:
           du -sh "$RUNNER_TEMP/pr-tree"
 
       - name: Ask the model
+        if: github.event.pull_request.head.repo.full_name == github.repository
         id: review
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
