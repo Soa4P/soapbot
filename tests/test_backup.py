@@ -410,3 +410,108 @@ def test_a_missing_checksums_key_is_refused(data_dir: Path) -> None:
             handle.writestr(item, body)
     with pytest.raises(BackupError, match="checksums"):
         verify_backup(rebuilt)
+
+
+# ------------------------------------------------------------------ authenticity
+# A checksum stored next to the file it checksums is not evidence: whoever rewrites one
+# rewrites the other. The MAC line needs the master key, which is the difference
+# (audit S-DEP-13).
+
+
+@pytest.fixture
+def master_key():
+    """Install a real (valid) master key for the duration of one test."""
+    from cryptography.fernet import Fernet
+
+    from soapbot.security.crypto import SecretBox, reset_secret_box
+
+    reset_secret_box(SecretBox(Fernet.generate_key()))
+    yield
+    reset_secret_box(None)
+
+
+def _rewrite_archive(path: Path, member: str, body: bytes) -> None:
+    """Replace one member, keeping the archive a valid zip."""
+    with zipfile.ZipFile(path) as handle:
+        items = [(info, handle.read(info.filename)) for info in handle.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as handle:
+        for info, data in items:
+            handle.writestr(info, body if info.filename == member else data)
+
+
+def _sidecar(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".sha256")
+
+
+def test_the_sidecar_records_a_mac_when_a_master_key_exists(
+    data_dir: Path, master_key
+) -> None:
+    report = create_backup(data_dir)
+    lines = _sidecar(report.path).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith(hashlib.sha256(report.path.read_bytes()).hexdigest())
+    assert lines[1].startswith("hmac-sha256:")
+
+
+def test_replacing_the_archive_and_its_digest_together_is_caught(
+    data_dir: Path, master_key
+) -> None:
+    """The attack a plain checksum cannot see: rewrite both files consistently."""
+    report = create_backup(data_dir)
+    archive = report.path
+
+    # ``manifest.json`` is always a member; tampering a path that might not be in the
+    # archive re-zips it byte-identically and the test would pass for the wrong reason.
+    _rewrite_archive(archive, "manifest.json", b'{"schema_version": 6}\n')
+    new_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    side = _sidecar(archive)
+    mac_line = next(
+        line
+        for line in side.read_text(encoding="utf-8").splitlines()
+        if line.startswith("hmac-sha256:")
+    )
+    side.write_text(f"{new_digest}  {archive.name}\n{mac_line}\n", encoding="utf-8")
+
+    with pytest.raises(BackupError, match="HMAC"):
+        restore_backup(archive, data_dir, dry_run=True)
+
+
+def test_dropping_the_mac_line_does_not_bypass_anything_else(
+    data_dir: Path, master_key
+) -> None:
+    """Without the MAC the per-file manifest check is still the floor."""
+    report = create_backup(data_dir)
+    archive = report.path
+    _rewrite_archive(archive, "manifest.json", b'{"schema_version": 1}\n')
+    new_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    _sidecar(archive).write_text(f"{new_digest}  {archive.name}\n", encoding="utf-8")
+
+    with pytest.raises(BackupError):
+        restore_backup(archive, data_dir, dry_run=True)
+
+
+def test_an_old_sidecar_without_a_mac_still_restores(data_dir: Path, master_key) -> None:
+    """Refusing pre-MAC backups would turn a security fix into data loss."""
+    report = create_backup(data_dir)
+    side = _sidecar(report.path)
+    digest_only = side.read_text(encoding="utf-8").splitlines()[0]
+    side.write_text(digest_only + "\n", encoding="utf-8")
+
+    restored = restore_backup(report.path, data_dir, dry_run=True)
+    assert restored["dry_run"] is True
+
+
+def test_a_rotated_master_key_is_reported_rather_than_silently_trusted(
+    data_dir: Path, master_key
+) -> None:
+    from cryptography.fernet import Fernet
+
+    from soapbot.security.crypto import SecretBox, reset_secret_box
+
+    report = create_backup(data_dir)
+    reset_secret_box(SecretBox(Fernet.generate_key()))  # "rotated"
+
+    with pytest.raises(BackupError, match="HMAC"):
+        restore_backup(report.path, data_dir, dry_run=True)
+    # ... and the escape hatch works, because a rotation is not an attack.
+    assert restore_backup(report.path, data_dir, dry_run=True, allow_unverified=True)

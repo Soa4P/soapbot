@@ -31,6 +31,8 @@ unrecoverable without the key.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 import stat
@@ -74,6 +76,27 @@ class SecretBox:
             raise ValueError(
                 "master key is not a valid Fernet key (32 url-safe base64 bytes)"
             ) from exc
+        # Kept so :meth:`mac` can derive a MAC key without exporting this one. The
+        # alternative — returning the key so callers can HMAC with it — would put the
+        # encryption key into every caller's hands for one use.
+        self._raw_key = key
+
+    def mac(self, data: bytes) -> str:
+        """HMAC-SHA256 over ``data``, keyed by a value derived from the master key.
+
+        Used to authenticate artefacts that live outside the encrypted store — the backup
+        manifest in particular (audit S-DEP-13): a checksum stored next to the file it
+        checksum is not evidence, because whoever rewrites one can rewrite the other.
+        A MAC that needs the master key is.
+
+        Derivation is a plain HMAC of a fixed label rather than HKDF: one 32-byte output
+        for one purpose does not need an extract-then-expand.
+        """
+        derived = hmac.new(self._raw_key, b"soapbot-mac-v1", hashlib.sha256).digest()
+        return hmac.new(derived, data, hashlib.sha256).hexdigest()
+
+    def verify_mac(self, data: bytes, expected: str) -> bool:
+        return hmac.compare_digest(self.mac(data), str(expected).strip().lower())
 
     @staticmethod
     def _write_key_file(path: Path, key: bytes) -> None:

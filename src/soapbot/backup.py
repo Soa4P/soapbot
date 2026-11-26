@@ -35,6 +35,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import tempfile
@@ -43,6 +44,8 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: The database file name inside the data directory.
 DB_NAME = "soapbot.db"
@@ -290,7 +293,15 @@ def create_backup(
 
     sidecar = out.with_suffix(out.suffix + ".sha256")
     with contextlib.suppress(OSError):
-        sidecar.write_text(f"{_sha256_file(out)}  {out.name}\n", encoding="utf-8")
+        digest = _sha256_file(out)
+        # Two lines: the plain digest (interoperable with `sha256sum -c`) and a MAC keyed
+        # by the master key. The digest alone proves nothing against someone who can write
+        # the directory — they rewrite the archive and the sidecar together (S-DEP-13).
+        lines = [f"{digest}  {out.name}"]
+        mac = _archive_mac(digest)
+        if mac:
+            lines.append(f"{SIDECAR_MAC_PREFIX}{mac}")
+        sidecar.write_text("\n".join(lines) + "\n", encoding="utf-8")
         sidecar.chmod(0o600)
 
     if archive_path is None and keep > 0:
@@ -354,14 +365,79 @@ def _safe_member(name: str) -> PurePosixPath:
     return path
 
 
-def _check_sidecar(archive: Path) -> None:
-    """Whole-archive integrity, when a sidecar exists next to it."""
+SIDECAR_MAC_PREFIX = "hmac-sha256:"
+
+
+def _archive_mac(digest: str) -> str:
+    """MAC over the archive digest, or "" when no master key is available.
+
+    Empty rather than raising: ``backup create`` must work before the bot has ever
+    started (backing up a fresh install is a normal operation), and a sidecar without a
+    MAC is still useful — it proves integrity, it just cannot prove authenticity.
+    """
+    try:
+        from soapbot.security.crypto import get_secret_box
+
+        return get_secret_box().mac(f"soapbot-backup-v2:{digest}".encode())
+    except Exception as exc:  # pragma: no cover - key unavailable / malformed
+        logger.warning("no master key for the backup MAC (%s); writing a digest only", exc)
+        return ""
+
+
+def _check_sidecar(archive: Path, *, allow_unverified: bool = False) -> None:
+    """Whole-archive integrity and — when recorded — authenticity.
+
+    The digest line catches corruption. The MAC line is what catches *replacement*: an
+    attacker who can write the backup directory rewrites the archive and the digest
+    together, and the one thing they cannot produce is a MAC under the master key (audit
+    S-DEP-13). Archives from before the MAC existed have no such line; they still restore,
+    with a warning — refusing them would turn a security fix into data loss.
+    """
     sidecar = archive.with_suffix(archive.suffix + ".sha256")
     if not sidecar.is_file():
+        logger.warning(
+            "backup %s has no .sha256 sidecar: integrity cannot be checked", archive.name
+        )
         return
-    recorded = sidecar.read_text(encoding="utf-8").split()[0]
-    if _sha256_file(archive) != recorded:
+    lines = [
+        line.strip()
+        for line in sidecar.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    recorded = lines[0].split()[0] if lines else ""
+    actual = _sha256_file(archive)
+    if not recorded or actual != recorded:
         raise BackupError("归档与 .sha256 不一致：备份被修改或损坏")
+
+    mac_line = next((line for line in lines if line.startswith(SIDECAR_MAC_PREFIX)), "")
+    if not mac_line:
+        logger.warning(
+            "backup %s predates the MAC line: integrity checked, authenticity not",
+            archive.name,
+        )
+        return
+
+    expected = mac_line[len(SIDECAR_MAC_PREFIX) :].strip()
+    try:
+        from soapbot.security.crypto import get_secret_box
+
+        box = get_secret_box()
+    except Exception:  # pragma: no cover - key unavailable
+        logger.warning("cannot verify the backup MAC: no master key available")
+        return
+    if box.verify_mac(f"soapbot-backup-v2:{actual}".encode(), expected):
+        return
+    if allow_unverified:
+        logger.warning(
+            "backup %s: MAC mismatch ignored (--allow-unverified)", archive.name
+        )
+        return
+    # A rotated master key looks exactly like tampering from here, so the message names
+    # both possibilities rather than asserting the alarming one.
+    raise BackupError(
+        "备份的 HMAC 校验失败：归档或它的 .sha256 被改写，或者主密钥已轮换。"
+        "确认来源后可以 --allow-unverified 跳过这一步"
+    )
 
 
 def _peek_manifest(archive: Path) -> dict[str, Any]:
@@ -406,7 +482,7 @@ def _verify_checksums(archive: Path, manifest: dict[str, Any]) -> None:
                 )
 
 
-def verify_backup(archive: Path) -> dict[str, Any]:
+def verify_backup(archive: Path, *, allow_unverified: bool = False) -> dict[str, Any]:
     """Sidecar, manifest shape and every per-file digest; return the manifest.
 
     Both layers matter for different attacks: the sidecar covers the archive bytes as
@@ -417,7 +493,7 @@ def verify_backup(archive: Path) -> dict[str, Any]:
     archive = Path(archive)
     if not archive.is_file():
         raise BackupError(f"备份文件不存在：{archive}")
-    _check_sidecar(archive)
+    _check_sidecar(archive, allow_unverified=allow_unverified)
     manifest = _peek_manifest(archive)
     _verify_checksums(archive, manifest)
     return manifest
@@ -503,6 +579,7 @@ def restore_backup(
     with_config: bool = True,
     dry_run: bool = False,
     keep: int = DEFAULT_KEEP,
+    allow_unverified: bool = False,
 ) -> dict[str, Any]:
     """Verify, (optionally) snapshot the current state, then extract.
 
@@ -519,7 +596,7 @@ def restore_backup(
     data_dir = Path(data_dir)
     if not archive.is_file():
         raise BackupError(f"备份文件不存在：{archive}")
-    _check_sidecar(archive)
+    _check_sidecar(archive, allow_unverified=allow_unverified)
     manifest = _peek_manifest(archive)
 
     from soapbot.memory.db import SCHEMA_VERSION
