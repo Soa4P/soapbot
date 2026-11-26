@@ -197,7 +197,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | 群聊对话 / 人格 / 记忆 / RAG | 已有 | 前序 wave |
 | 插件能力逐项授权 + 进程隔离 | 已有 | `test_plugin_isolation` 等 |
 | **流式（分句渐进发送）** | **已完成** | `tests/test_streaming_wiring.py`（14 项，含「trace 是否带上面板要读的两个字段」）；浏览器用真实 stages 生成的数据实测 |
-| **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（12 项）、`test_wave4_plugin_api.py` 上传 3 项 |
+| **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（15 项）、`test_wave4_plugin_api.py` 上传 3 项 |
 | **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（16 项）+ `tests/test_mcp_live.py`（opt-in）；已接真实 filesystem server，14 个工具 |
 | **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
 | **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（30 项） |

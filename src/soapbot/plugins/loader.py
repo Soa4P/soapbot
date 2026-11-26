@@ -70,9 +70,9 @@ from soapbot.plugins.isolation import DEFAULT_PLUGIN_MEMORY_BYTES
 from soapbot.plugins.manifest import (
     MANIFEST_ALT_FILENAME,
     MANIFEST_FILENAME,
+    TRUST_GATED_CAPABILITIES,
     ManifestError,
     PluginManifest,
-    TrustLevel,
     check_host_compatibility,
     digest_bytes,
     parse_manifest,
@@ -268,6 +268,8 @@ class PluginLoader:
         # re-grant it.
         self.approvals = approvals
         self._approved: dict[str, frozenset[str]] = {}
+        #: In-memory trust decisions; see :meth:`operator_trusts`.
+        self._trusted: set[str] = set()
         """plugin name -> approved capability values, set by the operator.
 
         Mirrors ``self.approvals`` for in-process lookups. Populated from the store
@@ -401,8 +403,13 @@ class PluginLoader:
         actor: str = "",
         manifest_digest: str = "",
         content_digest: str | None = None,
+        trusted: bool | None = None,
     ) -> None:
         """Operator action: approve capabilities for a plugin.
+
+        ``trusted`` is the operator's separate answer to "have you read this code?" and
+        is what the sensitive-capability gate reads. ``None`` keeps the previous value,
+        so granting one more capability cannot silently drop (or grant) trust.
 
         Approval is stored **separately from the manifest** on purpose. A plugin
         that updates its manifest to add ``HTTP`` must come back for approval; it
@@ -416,6 +423,13 @@ class PluginLoader:
         self._sync_approvals()
         caps = frozenset(capabilities or ())
         self._approved[name] = caps
+        # In-memory mirror of the trust decision, so a loader without an approval store
+        # (hand-assembled runtimes, tests, embedders) can still record one. The store,
+        # when present, remains the durable answer and is written below.
+        if trusted is True:
+            self._trusted.add(name)
+        elif trusted is False:
+            self._trusted.discard(name)
         # Hash the code as it is *now*, at the moment of the decision. Doing this here
         # rather than at load time is what makes the digest an approval of reviewed
         # bytes: a load-time hash would record whatever is on disk when the plugin is
@@ -447,6 +461,7 @@ class PluginLoader:
                 digest=manifest_digest,
                 content_digest=content_digest,
                 actor=actor or "loader",
+                trusted=trusted,
             )
 
     def revoke(self, name: str, *, actor: str = "") -> None:
@@ -505,19 +520,41 @@ class PluginLoader:
             self._pending_unloads.discard(name)
 
     def approve_from_manifest(
-        self, manifest: PluginManifest, *, actor: str = ""
+        self, manifest: PluginManifest, *, actor: str = "", trusted: bool = True
     ) -> None:
-        """Convenience for 'approve exactly what this manifest declares'."""
+        """Convenience for 'approve exactly what this manifest declares'.
+
+        ``trusted`` defaults to ``True`` here and only here: a caller holding the parsed
+        manifest and granting its full capability set is the operator's own scripts and
+        tests, which have the code in hand. The panel does **not** use this method — it
+        asks the trust question explicitly, and defaults it to no.
+        """
         self.approve(
             manifest.name,
             {c.value for c in manifest.capabilities},
             actor=actor,
             manifest_digest=manifest.manifest_digest,
+            trusted=trusted,
         )
 
     def is_approved(self, name: str) -> bool:
         self._sync_approvals()
         return name in self._approved
+
+    def operator_trusts(self, name: str) -> bool:
+        """Whether the operator marked this plugin's code trustworthy.
+
+        Read from the approval decision, never from the manifest: the manifest is a file
+        the plugin author controls *after* installation, so a trust gate that read it
+        would gate nothing (audit S-SUP-07). ``False`` when nothing recorded it — the
+        closed direction.
+        """
+        if name in self._trusted:
+            return True
+        if self.approvals is None:
+            return False
+        record = self.approvals.get(name)
+        return bool(record is not None and record.trusted)
 
     def approved_capabilities(self, name: str) -> frozenset[str]:
         self._sync_approvals()
@@ -821,23 +858,29 @@ class PluginLoader:
                 f"plugin {name} is not approved; an operator must enable it explicitly"
             )
 
-        # Untrusted code with network/data reach is refused unless explicitly allowed.
-        if (
-            manifest.trust is TrustLevel.UNTRUSTED
-            and manifest.is_sensitive
-            and not self.allow_untrusted
-        ):
+        # Sensitive code nobody vouched for is refused unless the deployment allows it.
+        #
+        # The question is "did the *operator* vouch for this code", not "what does the
+        # manifest say about itself". ``manifest.trust`` is written by the plugin's
+        # author, so reading it here made the whole gate decorative: one word
+        # (``trust: trusted``) in an author-controlled file bypassed it (audit S-SUP-07).
+        # The operator's answer lives in the approval record, is set by an explicit
+        # action, and defaults to untrusted.
+        gated = manifest.capabilities & TRUST_GATED_CAPABILITIES
+        if gated and not self.operator_trusts(name) and not self.allow_untrusted:
             self.audit.record(
                 kind="plugin",
                 action="load",
                 outcome="deny",
-                detail=f"untrusted plugin requests sensitive capabilities "
-                f"{sorted(c.value for c in manifest.capabilities)}",
+                detail=f"trust-gated capabilities {sorted(c.value for c in gated)} "
+                f"without operator trust (manifest says trust={manifest.trust})",
                 plugin=name,
             )
             raise PluginLoadError(
-                f"plugin {name} is marked untrusted and requests sensitive "
-                "capabilities; set allow_untrusted only after reviewing the code"
+                f"plugin {name} requests capabilities that need operator trust "
+                f"({', '.join(sorted(c.value for c in gated))}) but the approval record "
+                "does not say the code was read; re-approve it with trust, or review the "
+                "code and set allow_untrusted"
             )
 
         # ---- content integrity ---------------------------------------------------

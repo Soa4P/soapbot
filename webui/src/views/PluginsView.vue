@@ -162,9 +162,24 @@ async function act(name: string, action: 'load' | 'unload'): Promise<void> {
   }
 }
 
+/**
+ * Operator-owned trust, separate from the capability list.
+ *
+ * A plugin with sensitive capabilities (`send`, `cron`, `http`…) refuses to load
+ * unless the operator says they have read its code. The manifest has a `trust` field
+ * too, but the author writes that one — so it is displayed in the listing and never
+ * consulted for this decision (audit S-SUP-07).
+ *
+ * The checkbox starts unchecked on every approval, including a re-approval: trust is
+ * a statement about code that was reviewed, and reopening the dialog means the code
+ * may have changed.
+ */
+const trustChecked = ref(false)
+
 function startApprove(plugin: any): void {
   approving.value = plugin.name
   selected.value = []
+  trustChecked.value = false
   actionError.value = ''
 }
 
@@ -174,12 +189,22 @@ function toggle(capability: string): void {
   else selected.value.push(capability)
 }
 
+/** Whether this approval grants anything the trust gate actually checks. */
+function approvalNeedsTrust(plugin: any): boolean {
+  return (plugin.pending as string[]).some((cap) => RISKY.has(cap))
+}
+
+/** Whether the plugin already holds a capability the trust gate checks. */
+function hasRiskyGrant(plugin: any): boolean {
+  return ((plugin.granted as string[]) ?? []).some((cap) => RISKY.has(cap))
+}
+
 async function confirmApprove(name: string): Promise<void> {
   if (!selected.value.length) return
   actionError.value = ''
   busy.value = `approve:${name}`
   try {
-    await api.approvePlugin(name, [...selected.value])
+    await api.approvePlugin(name, [...selected.value], trustChecked.value)
     approving.value = ''
     await listing.reload()
   } catch (err) {
@@ -321,6 +346,16 @@ async function deletePlugin(plugin: any): Promise<void> {
                 >
                   {{ t('plugins.codeChanged') }}
                 </span>
+                <!-- Approved but untrusted, with a sensitive capability granted: the
+                     load will be refused. Saying so here beats a failed Load whose
+                     message reads like a bug. -->
+                <span
+                  v-if="plugin.approval && plugin.approval.trusted === false && hasRiskyGrant(plugin)"
+                  class="tag"
+                  :title="t('plugins.approvalUntrustedHint')"
+                >
+                  {{ t('plugins.approvalUntrusted') }}
+                </span>
                 <!-- A version blocked *after* it was installed. Not auto-uninstalled:
                      deleting running code because a list changed is its own outage. But
                      "known bad and still running" is exactly what an operator must see. -->
@@ -425,6 +460,17 @@ async function deletePlugin(plugin: any): Promise<void> {
                       {{ cap }}
                     </label>
                   </div>
+                  <!-- Only when the grant actually includes something the trust gate
+                       checks, so a harmless plugin is not asked to tick a box about
+                       having read code it does not need permission for. -->
+                  <label
+                    v-if="approvalNeedsTrust(plugin)"
+                    class="hint"
+                    style="display: flex; gap: 6px; align-items: flex-start"
+                  >
+                    <input v-model="trustChecked" type="checkbox" style="margin-top: 3px" />
+                    <span>{{ t('plugins.trustLabel') }}</span>
+                  </label>
                   <div class="row">
                     <button
                       class="btn lamp"

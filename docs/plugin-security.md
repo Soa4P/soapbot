@@ -1,7 +1,7 @@
 # 插件体系安全模型
 
 > 本文回答：**第三方插件能否在加载、运行、输出任一环节越权、注入或泄露数据？**
-> 结论见各节，验证见 `tests/test_wave4_plugin_*.py`（194 项）。
+> 结论见各节，验证见 `tests/test_wave4_plugin_*.py`（197 项）。
 >
 > **2026-10-28 已完成独立安全复审**，发现并修复 8 个真实缺陷（含 4 个高危 SSRF / 审计泄露问题）与 130 项依赖漏洞。详见 [`plugin-security-review.md`](./plugin-security-review.md)。
 
@@ -139,13 +139,14 @@ effective = declared ∩ approved
 | 发现 ≠ 加载 | 能写 `data/plugins` 的人否则等于下次重启即代码执行 |
 | 未审批拒绝加载 | 同上 |
 | `untrusted` + 敏感能力需显式 opt-in | "可发网络请求 + 读记忆"应当是深思后的决定 |
+| 敏感能力要求**运营者**亲自担保 | 清单里的 `trust` 字段是作者写的、装完之后还能改，拿它当门禁等于没门禁（S-SUP-07）。担保记在批准记录里（`trusted`，默认否），面板批准时多一个勾选框；门禁集合是「敏感能力去掉 `storage`」——插件自己的存储命名空间由宿主创建，够不上要人担保 |
 | 导入失败包装为 `PluginLoadError` | 否则调用方分不清"插件坏了"和"宿主坏了" |
 | 先卸载再加载 | 反序会有两个实例同时注册同名命令、双份 cron 触发（对外发请求的插件会发两次） |
 | 失败不回落旧版本 | 静默跑旧代码会掩盖"更新没生效"，包括试图修的漏洞 |
 | teardown 抛异常仍卸载 | 留着半死的注册比泄漏句柄更糟 |
 | rmtree 前校验路径containment | `name="../.."` + rmtree = 任意目录删除 |
 
-对应测试：`test_plugin_is_not_loaded_without_approval`、`test_untrusted_plugin_with_sensitive_capability_is_refused`、`test_failed_setup_rolls_back_modules`、`test_removing_plugin_directory_cannot_escape_root`、`test_teardown_failure_still_unloads`、`test_failed_reload_leaves_plugin_unloaded`
+对应测试：`test_plugin_is_not_loaded_without_approval`、`test_untrusted_plugin_with_sensitive_capability_is_refused`、`test_the_manifest_cannot_vouch_for_itself`、`test_an_operator_trusted_plugin_with_sensitive_capability_loads`、`test_trust_survives_a_re_approval_that_does_not_mention_it`、`test_failed_setup_rolls_back_modules`、`test_removing_plugin_directory_cannot_escape_root`、`test_teardown_failure_still_unloads`、`test_failed_reload_leaves_plugin_unloaded`
 
 ## 8. 输入校验：双向
 
@@ -197,7 +198,7 @@ $env:PYTHONPATH="f:/soapbot/src"
 .\.venv\Scripts\python.exe -m pytest tests/test_wave4_plugins.py `
     tests/test_wave4_plugin_security.py tests/test_wave4_plugin_tools.py `
     tests/test_wave4_plugin_api.py -q
-# 128 passed
+# 131 passed
 ```
 
 全量：`435 passed, 1 skipped`（跳过项为 Windows 符号链接测试），`ruff check` 无告警，

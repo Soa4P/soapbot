@@ -279,6 +279,19 @@ SENSITIVE_CAPABILITIES: frozenset[Capability] = frozenset(
     }
 )
 
+TRUST_GATED_CAPABILITIES: frozenset[Capability] = SENSITIVE_CAPABILITIES - {Capability.STORAGE}
+"""Capabilities that require the *operator* to vouch for the code (audit S-SUP-07).
+
+Almost the sensitive set, minus ``storage``: a plugin's storage namespace is created and
+owned by the host, reachable only through ``ctx.storage``, and reaches nothing outside the
+plugin's own data. Requiring an "I read this code" attestation for it would train the
+operator to tick the box without reading anything — which is how a trust control dies.
+
+``SENSITIVE_CAPABILITIES`` stays unchanged because it also drives the per-plugin quota in
+``plugins/sandbox.py``; narrowing that here would loosen rate limiting as a side effect of
+a trust-gate fix.
+"""
+
 #: Capabilities that can cost money or annoy users; always rate limited.
 RATE_LIMITED_CAPABILITIES: frozenset[Capability] = frozenset(
     {Capability.HTTP, Capability.SEND, Capability.SEND_MEDIA, Capability.CRON, Capability.TOOL, Capability.BILIBILI}

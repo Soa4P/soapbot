@@ -38,6 +38,7 @@ from soapbot.plugins.manifest import (
     ManifestError,
     PluginManifest,
     block_key,
+    version_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,8 @@ def install_from_zip(
     *,
     host_version: str = __version__,
     blocked: Mapping[str, str] | None = None,
+    expected_name: str = "",
+    expected_version: str = "",
 ) -> InstallResult:
     """Validate and install a plugin archive. Raises :class:`InstallError`.
 
@@ -114,6 +117,10 @@ def install_from_zip(
     only when it was reachable — and so this function stays free of network state. The
     check runs *after* the manifest is parsed (that is where name and version come from)
     and *before* the commit, so a blocked version never replaces a working install.
+
+    ``expected_name`` / ``expected_version`` are the catalogue entry the operator asked
+    for. Empty means "no expectation" (a manual upload). When given, the archive must
+    describe *that* plugin and release — see the check below for why (audit S-SUP-03).
     """
     if not data:
         raise InstallError("empty upload")
@@ -134,6 +141,24 @@ def install_from_zip(
             root_prefix = _root_prefix(archive)
             _extract(archive, staging, root_prefix)
         manifest = _read_and_check_manifest(staging, host_version)
+        # The archive is not allowed to describe itself when the caller knows what was
+        # asked for (audit S-SUP-03). Without this, "install demo 1.0.0 from the index"
+        # installs whatever the zip's manifest names: a package calling itself
+        # ``mood-diary`` lands in that directory, *replaces* the approved plugin, and
+        # inherits its approval — because approvals are keyed by directory name. The
+        # digest check only proves the bytes match the index entry; it says nothing
+        # about the name the bytes claim, and a compromised or mistaken release can
+        # carry any name it likes.
+        if expected_name and manifest.name != expected_name:
+            raise InstallError(
+                f"发布包声明的插件是 {manifest.name!r}，而索引条目是 {expected_name!r}；"
+                "拒绝以另一个名字安装（会覆盖同名的已批准插件并沿用它的授权）"
+            )
+        if expected_version and version_key(manifest.version) != version_key(expected_version):
+            raise InstallError(
+                f"发布包声明的版本是 {manifest.version}，而索引条目是 {expected_version}；"
+                "拒绝安装另一个版本"
+            )
         # Looked up by canonical key, not by the literal manifest string. The version
         # grammar accepts both `1.0` and `1.0.0`, so a literal lookup lets a package
         # spell its version the other way and walk past a block on the same release.

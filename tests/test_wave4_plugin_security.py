@@ -601,27 +601,71 @@ async def test_plugin_is_not_loaded_without_approval(tmp_path: Path) -> None:
 
 
 async def test_untrusted_plugin_with_sensitive_capability_is_refused(tmp_path: Path) -> None:
-    """Untrusted + network/data reach requires an explicit operator decision."""
+    """Sensitive + network/data reach requires an explicit operator decision."""
     root = tmp_path / "plugins"
     await _make_plugin(root, "spy", capabilities=["command", "http"], trust="untrusted")
 
     loader = PluginLoader(plugins_dir=root, audit=AuditLog(), allow_untrusted=False)
-    loader.approve_from_manifest(loader.discover().found[0])
+    # Granted capabilities, but no trust: the panel's approval without the checkbox.
+    loader.approve("spy", {"command", "http"})
     with pytest.raises(PluginLoadError) as exc:
         await loader.load("spy")
-    assert "untrusted" in str(exc.value)
+    assert "operator trust" in str(exc.value)
 
 
-async def test_trusted_plugin_with_sensitive_capability_loads(tmp_path: Path) -> None:
-    """Control: the same manifest with trust=trusted does load."""
+async def test_the_manifest_cannot_vouch_for_itself(tmp_path: Path) -> None:
+    """``trust: trusted`` is written by the plugin's author, so it gates nothing.
+
+    Before this, one word in an author-controlled file was the whole difference
+    between "refused" and "loaded with network access" (audit S-SUP-07). The gate
+    reads the operator's answer now; the manifest's claim is only displayed.
+    """
     root = tmp_path / "plugins"
     await _make_plugin(root, "spy", capabilities=["command", "http"], trust="trusted")
 
-    loader = PluginLoader(plugins_dir=root, audit=AuditLog())
-    loader.approve_from_manifest(loader.discover().found[0])
+    loader = PluginLoader(plugins_dir=root, audit=AuditLog(), allow_untrusted=False)
+    # `approve_from_manifest` is the trusted shortcut used by scripts and by the other
+    # tests; this test must take the same path the panel takes.
+    loader.approve("spy", {"command", "http"}, trusted=False)
+
+    with pytest.raises(PluginLoadError) as exc:
+        await loader.load("spy")
+    assert "operator trust" in str(exc.value)
+
+
+async def test_an_operator_trusted_plugin_with_sensitive_capability_loads(tmp_path: Path) -> None:
+    """Control: the operator saying "I read this" is what lets it load."""
+    from soapbot.plugins.approvals import ApprovalStore
+
+    root = tmp_path / "plugins"
+    await _make_plugin(root, "spy", capabilities=["command", "http"], trust="untrusted")
+
+    store = ApprovalStore(tmp_path / "approvals.json")
+    loader = PluginLoader(plugins_dir=root, audit=AuditLog(), approvals=store)
+    manifest = loader.discover().found[0]
+    loader.approvals.approve(
+        "spy", {"command", "http"}, digest=manifest.manifest_digest, trusted=True
+    )
+    loader._sync_approvals()
+
     loaded = await loader.load("spy")
     assert loaded.name == "spy"
     await loader.unload("spy")
+
+
+def test_trust_survives_a_re_approval_that_does_not_mention_it(tmp_path: Path) -> None:
+    """Granting one more capability must not silently revoke trust."""
+    from soapbot.plugins.approvals import ApprovalStore
+
+    store = ApprovalStore(tmp_path / "approvals.json")
+    store.approve("spy", {"command"}, trusted=True)
+    store.approve("spy", {"command", "http"})  # trusted=None
+
+    record = store.get("spy")
+    assert record is not None
+    assert record.trusted is True
+    assert record.capabilities == frozenset({"command", "http"})
+
 
 
 async def test_failed_setup_rolls_back_modules(tmp_path: Path) -> None:
@@ -722,3 +766,50 @@ async def test_plugin_added_in_manifest_after_approval_needs_reapproval(tmp_path
     assert Capability.MEMORY_READ not in grant.effective
     assert Capability.COMMAND in grant.effective
     await loader.unload("sleeper")
+
+
+# --------------------------------------------- operator trust (audit S-SUP-07)
+def test_an_old_approval_file_keeps_its_trust_exactly_once(tmp_path: Path) -> None:
+    """Schema 1 has no ``trusted`` key; refusing those plugins on upgrade is a regression.
+
+    The operator already named every capability they granted, so existing records are
+    migrated to trusted and rewritten as schema 2 — after which a record that says
+    ``trusted: false`` stays false.
+    """
+    import json
+
+    from soapbot.plugins.approvals import ApprovalStore
+
+    path = tmp_path / "approvals.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "plugins": {
+                    "old": {
+                        "capabilities": ["send"],
+                        "digest": "sha256:" + "0" * 64,
+                        "content_digest": "",
+                        "approved_at": 1.0,
+                        "approved_by": "webui",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ApprovalStore(path)
+    record = store.get("old")
+    assert record is not None
+    assert record.trusted is True
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["schema"] == 2
+    assert persisted["plugins"]["old"]["trusted"] is True
+
+    # A schema-2 file is taken at its word, in both directions.
+    persisted["plugins"]["old"]["trusted"] = False
+    path.write_text(json.dumps(persisted), encoding="utf-8")
+    assert ApprovalStore(path).get("old").trusted is False
+

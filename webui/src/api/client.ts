@@ -316,10 +316,10 @@ export const api = {
     request<any>(`/api/plugins/${encodeURIComponent(name)}/load`, { method: 'POST' }),
   unloadPlugin: (name: string) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}/unload`, { method: 'POST' }),
-  approvePlugin: (name: string, capabilities: string[]) =>
+  approvePlugin: (name: string, capabilities: string[], trusted = false) =>
     request<any>(`/api/plugins/${encodeURIComponent(name)}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ capabilities }),
+      body: JSON.stringify({ capabilities, trusted }),
     }),
   // Revoke is separate from unload on purpose: "do not start this again" and
   // "stop this now" are different decisions, and a single button would make the
