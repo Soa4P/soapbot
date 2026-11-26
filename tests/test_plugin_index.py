@@ -8,6 +8,7 @@ nested document to a recursive parser.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -447,6 +448,52 @@ async def test_failed_refresh_does_not_lift_remote_blocks() -> None:
     assert not second.available
     assert second.blocked_reason("weather", "1.0.0") == "凭据泄露"
     assert second.to_dict()["blocked"].get("weather@1.0.0") == "凭据泄露"
+
+
+@pytest.mark.asyncio
+async def test_the_index_fetch_ignores_proxy_environment_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S-SUP-12: whoever sets ``HTTPS_PROXY`` must not choose what the index says.
+
+    The rest of the codebase ignores proxy environment variables because a proxy sends
+    the request somewhere the in-process allow-list never looked. This client fetches the
+    index, its signature and release packages from a host nobody here controls, so it is
+    the one place where honouring a proxy hands over the trust anchor.
+
+    Asserted behaviourally, and only in the shape production uses (no injected
+    transport): with ``transport=`` given, httpx skips environment-proxy mounts
+    altogether, so a mock-transport test cannot tell the two settings apart. Here a real
+    listener plays the proxy; if the fetch goes through it, the connection shows up and
+    the test fails. The fetch itself is expected to fail — ``example.invalid`` never
+    resolves — and that failure is the point: it went direct.
+    """
+    accepted: list[int] = []
+
+    def refuse(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        # Count the connection and hang up at once. A proxy that never answers would
+        # leave the fetch waiting for its own timeout, which turns a clear failure into
+        # a slow one; closing immediately makes "it went through the proxy" obvious.
+        accepted.append(1)
+        writer.close()
+
+    server = await asyncio.start_server(refuse, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("ALL_PROXY", f"http://127.0.0.1:{port}")
+    try:
+        snapshot = await IndexClient(
+            "https://example.invalid/plugins.json", timeout=2.0
+        ).snapshot()
+        # Give a proxy connection (if one were made) time to arrive.
+        await asyncio.sleep(0.2)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert snapshot.available is False, "索引应当直连失败，而不是经代理成功"
+    assert accepted == [], "索引请求走了环境变量里的代理"
 
 
 @pytest.mark.asyncio

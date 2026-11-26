@@ -75,3 +75,11 @@ python scripts/sign_plugin_index.py --verify --index-dir .
 
 关掉它只适合你自己签名的本地 fork 在调试时用；关掉会在日志留下 warning，审计里也能
 看到拒绝记录（`plugin install refused: index unsigned`）。
+
+## 抓取时的出站纪律（S-SUP-12）
+
+索引、`index.sig.json` 和发布包的下载都忽略 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`
+（`IndexClient._client()` 里 `trust_env=False`）。理由与项目其它出站路径一致：代理会把请求
+送到进程内白名单从未看过的地方，而这里下的判断是「哪一份是维护者发布的索引」——能把请求
+改道的人就能改道这个答案，签名与 digest 也就无从谈起。需要出网代理的环境请在部署侧做透明
+代理或设置 `PLUGIN_INDEX_URL` 指向镜像，而不是放宽这条规则。

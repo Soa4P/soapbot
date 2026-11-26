@@ -136,6 +136,24 @@ else
 fi
 
 mkdir -p "$DIR"
+# The archive is supposed to contain code only. A tag or mirror that carries `data/`
+# would overwrite the live database, keys and .env; one that carries `.venv/` would
+# replace an interpreter that is currently serving requests. Neither can happen with
+# GitHub's own tarball of this repository, which is exactly why the check is cheap --
+# and why nothing else was verifying it (audit S-DEP-23). Checked before unpacking, so
+# a hostile archive is not even extracted into the temp directory.
+#
+# The listing goes to a file rather than `tar -tzf ... | grep -q`: under `pipefail`, grep
+# exits at the first match, tar takes SIGPIPE, and the *pipeline* then reports failure --
+# which would turn a detected hostile archive into a silent pass. Reading a file has no
+# such race and keeps the listing out of memory.
+tar -tzf "$tmp/soapbot.tar.gz" > "$tmp/listing.txt"
+if grep -E '^[^/]+/(data|\.venv)(/|$)' "$tmp/listing.txt" >/dev/null; then
+  echo "archive contains data/ or .venv/ -- refusing to unpack over a live install:" >&2
+  grep -E '^[^/]+/(data|\.venv)(/|$)' "$tmp/listing.txt" | head -5 >&2
+  echo "  Build the archive from a clean checkout, or install with --dir elsewhere." >&2
+  exit 1
+fi
 tar -xzf "$tmp/soapbot.tar.gz" -C "$tmp"
 inner="$(find "$tmp" -maxdepth 1 -type d -name 'soapbot-*' | head -n1)"
 cp -a "$inner/." "$DIR/"
@@ -161,7 +179,14 @@ ok "dependencies installed"
 
 DATA="$DIR/data"
 ENV_FILE="$DATA/.env"
+# The data directory holds the database (every message the bot has seen), the JWT
+# signing key, the secret box and the bootstrap token. Created at the default umask it
+# is 0755 and the database lands 0644 -- readable by every local user (S-DEP-19). The
+# systemd unit below sets UMask=0077 so files the *service* creates are private too;
+# this covers the ones the installer creates, plus an install that never reaches the
+# service step.
 mkdir -p "$DATA"
+chmod 700 "$DATA" 2>/dev/null || true
 if [ ! -f "$ENV_FILE" ]; then
   step "writing $ENV_FILE"
   {
@@ -193,6 +218,10 @@ Restart=always
 RestartSec=5
 KillSignal=SIGTERM
 TimeoutStopSec=20
+# Files the process creates -- the SQLite database and its WAL/SHM siblings, the JWT
+# key, the secret box, backups -- are operator-only by default (S-DEP-19). Without this
+# a 0644 database is readable by every local account on the host.
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
@@ -204,6 +233,8 @@ EOF
 else
   step "skipping systemd unit"
   ok "start manually: cd $DIR && $VENV/bin/python -m soapbot.cli start"
+  # The unit path above gets UMask=0077; this branch has no unit, so set it here.
+  umask 077
   nohup "$VENV/bin/python" -m soapbot.cli start >"$DIR/panel.log" 2>&1 &
 fi
 
