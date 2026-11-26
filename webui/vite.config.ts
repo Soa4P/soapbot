@@ -30,8 +30,12 @@ export default defineConfig({
         // its own copy of the runtime's import graph and a panel release invalidated
         // the lot. Grouping vue/router/pinia means a release re-downloads only the
         // views that changed.
-        manualChunks: {
-          vendor: ['vue', 'vue-router', 'pinia'],
+        // A function rather than the object form: Rollup's types narrowed the object
+        // form to "one chunk per listed module" and no longer accept the group form,
+        // while the behaviour we want is exactly "everything vue-ish into `vendor`".
+        manualChunks(id: string) {
+          if (/node_modules[\/](vue|vue-router|pinia|@vue)[\/]/.test(id)) return 'vendor'
+          return undefined
         },
       },
     },

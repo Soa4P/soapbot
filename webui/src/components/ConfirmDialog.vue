@@ -43,7 +43,9 @@ const cancelText = computed(() => props.cancelLabel || t('common.cancel'))
 const confirmText = computed(() => props.confirmLabel || t('common.confirm'))
 
 const panel = ref<HTMLElement | null>(null)
-const confirmBtn = ref<HTMLElement | null>(null)
+// The cancel button used to carry a `ref="confirmBtn"` nothing read: the trap focuses
+// the first focusable inside the panel, which *is* cancel. Removed rather than kept
+// "for later" — a misnamed dead ref is how the next reader gets it wrong.
 const isOpen = ref(false)
 
 // `open` is mirrored into a local ref so the trap can watch one reactive source and
@@ -78,7 +80,7 @@ useFocusTrap(panel, isOpen, {
           </p>
         </div>
         <div class="dialog__foot">
-          <button ref="confirmBtn" class="btn ghost" type="button" :disabled="busy" @click="emit('cancel')">
+          <button class="btn ghost" type="button" :disabled="busy" @click="emit('cancel')">
             {{ cancelText }}
           </button>
           <button
