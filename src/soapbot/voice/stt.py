@@ -24,7 +24,7 @@ import socket
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from soapbot.i18n import t
 from soapbot.net import build_timeout, outbound_client
@@ -134,18 +134,78 @@ async def async_check_audio_url(url: str, *, allow_hosts: Collection[str] = ()) 
     return url
 
 
+async def resolve_pinned(
+    url: str, *, allow_hosts: Collection[str] = ()
+) -> tuple[str, str | None]:
+    """Return ``(url_to_fetch, pinned_ip_or_None)``.
+
+    The check and the connection have to agree about *which address* they are talking
+    about. ``async_check_audio_url`` proves the name mapped to public addresses at one
+    instant; handing the same *name* to the HTTP client resolves it **again**, and a
+    host whose DNS the attacker controls can answer ``1.2.3.4`` first and
+    ``127.0.0.1`` second — the check passes and the request reaches the bot's own
+    loopback (audit S-MSG-04).
+
+    So the address that was vetted is the address connected to: the URL is rebuilt
+    around it, and the caller keeps the original ``Host`` header (and SNI, for TLS) so
+    name-based virtual hosting and certificate validation still work.
+
+    An allow-listed host is returned unpinned: it is an operator-named internal
+    endpoint (a same-host NapCat), and pinning it would add a lookup without changing
+    what is trusted.
+    """
+    _, host = _split(url)
+    if host.lower() in {h.lower() for h in allow_hosts}:
+        return url, None
+    try:
+        from soapbot.plugins.sandbox import (
+            SSRFBlockedError,
+            _is_ip,
+            _pin_url_to_ip,
+            resolve_and_verify,
+        )
+
+        try:
+            vetted = await resolve_and_verify(host)
+        except SSRFBlockedError as exc:
+            raise VoiceError(str(exc)) from None
+    except ImportError:  # pragma: no cover - sandbox is part of the package
+        raise VoiceError("audio url pinning is unavailable") from None
+    if _is_ip(host):
+        return url, None
+    parts = urlsplit(url)
+    return _pin_url_to_ip(parts, vetted[0]), vetted[0]
+
+
 async def http_fetch(
     url: str,
     *,
     max_bytes: int = DEFAULT_MAX_BYTES,
     allow_hosts: Collection[str] = (),
 ) -> tuple[bytes, str]:
-    """Download with a hard size cap applied while reading, not after."""
-    await async_check_audio_url(url, allow_hosts=allow_hosts)
+    """Download with a hard size cap applied while reading, not after.
+
+    The request goes to the address that was vetted, not to the name again — see
+    :func:`resolve_pinned` (audit S-MSG-04).
+    """
+    fetch_url, pinned = await resolve_pinned(url, allow_hosts=allow_hosts)
+    parts = urlsplit(url)
+    request_headers: dict[str, str] = {}
+    extensions: dict[str, str] = {}
+    if pinned:
+        # Connected by IP, so both of these have to be supplied explicitly.
+        request_headers["Host"] = parts.netloc.rsplit("@", 1)[-1]
+        extensions["sni_hostname"] = parts.hostname or ""
     # Shared pool. The response is closed in ``finally`` so an over-size abort mid-read
     # returns the socket instead of leaving a half-consumed body holding it.
     async with outbound_client() as client:
-        stream_ctx = client.stream("GET", url, timeout=build_timeout(15.0))
+        stream_ctx = client.stream(
+            "GET",
+            fetch_url,
+            timeout=build_timeout(15.0),
+            headers=request_headers or None,
+            extensions=extensions or None,
+        )
         response = await stream_ctx.__aenter__()
         try:
             if response.status_code != 200:

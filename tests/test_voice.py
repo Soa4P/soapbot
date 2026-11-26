@@ -485,3 +485,90 @@ async def test_several_voice_notes_keep_their_order() -> None:
     assert stage.engine.requests, "the model was never reached"
     sent = stage.engine.requests[0].user_text
     assert sent.index("第一句") < sent.index("第二句")
+
+
+# ------------------------------------------------------- DNS rebinding (S-MSG-04)
+async def test_the_fetch_connects_to_the_vetted_address_not_the_name(monkeypatch) -> None:
+    """Checking a name and then fetching the name resolves it twice.
+
+    An attacker-controlled host can answer ``93.184.216.34`` to the check and
+    ``127.0.0.1`` to the connection — the check passes and the request lands on the
+    bot's own loopback (audit S-MSG-04). The fix pins the connection to the address that
+    was vetted, so this test asserts *which URL the client is asked to fetch*.
+    """
+    from soapbot.voice import stt
+
+    async def fake_resolve(host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr(
+        "soapbot.plugins.sandbox.resolve_and_verify", fake_resolve, raising=False
+    )
+
+    seen: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @property
+        def headers(self) -> dict[str, str]:
+            return {"content-type": "audio/silk", "content-length": "4"}
+
+        async def aiter_bytes(self):
+            yield b"data"
+
+        async def aclose(self):
+            return None
+
+    class FakeStream:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, *exc):
+            return None
+
+    class FakeClient:
+        def stream(self, method, url, **kwargs):
+            seen["url"] = url
+            seen["headers"] = kwargs.get("headers")
+            seen["extensions"] = kwargs.get("extensions")
+            return FakeStream()
+
+    class FakePool:
+        async def __aenter__(self):
+            return FakeClient()
+
+        async def __aexit__(self, *exc):
+            return None
+
+    monkeypatch.setattr(stt, "outbound_client", lambda: FakePool())
+
+    body, mime = await stt.http_fetch("https://rebind.example/x.amr", max_bytes=1024)
+
+    assert body == b"data" and mime == "audio/silk"
+    assert seen["url"] == "https://93.184.216.34/x.amr", seen["url"]
+    # Host and SNI keep the *name*, or TLS verification and vhost routing break.
+    assert seen["headers"] == {"Host": "rebind.example"}
+    assert seen["extensions"] == {"sni_hostname": "rebind.example"}
+
+
+async def test_an_allowlisted_host_is_not_pinned(monkeypatch) -> None:
+    """A same-host NapCat is reached by address the operator named; no lookup needed."""
+    from soapbot.voice import stt
+
+    url, pinned = await stt.resolve_pinned(
+        "http://127.0.0.1:3000/record.amr", allow_hosts=["127.0.0.1"]
+    )
+    assert url == "http://127.0.0.1:3000/record.amr"
+    assert pinned is None
+
+
+async def test_a_private_answer_is_refused_before_connecting(monkeypatch) -> None:
+    from soapbot.voice import stt
+
+    async def private(host: str) -> list[str]:
+        raise stt.VoiceError("refusing audio url resolving to a non-public address: x")
+
+    monkeypatch.setattr("soapbot.plugins.sandbox.resolve_and_verify", private, raising=False)
+    with pytest.raises(VoiceError):
+        await stt.resolve_pinned("https://internal.example/x.amr")
