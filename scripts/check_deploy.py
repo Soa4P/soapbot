@@ -380,6 +380,66 @@ def check_hardening(report: Report) -> None:
         report.add("warn", "hardening.tmpfs", "read_only 为真但未挂载 tmpfs，/tmp 不可写")
 
 
+def check_escape_surfaces(report: Report) -> None:
+    """Assertions about the *shape* of the profile, not just presence of a keyword.
+
+    ``cap_drop:`` matched even ``cap_drop: []``, and nothing looked at the three ways a
+    container escapes its own sandbox without any capability at all: a privileged
+    container, the Docker socket, and the host network. Those are one-line edits that read
+    like convenience (audit S-DEP-16).
+    """
+    compose = _strip_comments(_read(COMPOSE))
+
+    if re.search(r"^\s+privileged:\s*true", compose, re.MULTILINE):
+        report.add("block", "escape.privileged", "privileged: true 关闭了全部隔离")
+    else:
+        report.add("ok", "escape.privileged", "无 privileged 容器")
+
+    if re.search(r"docker\.sock", compose):
+        report.add(
+            "block",
+            "escape.docker-socket",
+            "挂载了 docker.sock：容器内等于宿主机 root（能起容器就能挂 /）",
+        )
+    else:
+        report.add("ok", "escape.docker-socket", "未挂载 docker.sock")
+
+    if re.search(r"^\s+network_mode:\s*[\"']?host", compose, re.MULTILINE):
+        report.add("block", "escape.host-network", "network_mode: host 绕过了端口发布策略")
+    else:
+        report.add("ok", "escape.host-network", "未使用 host 网络")
+
+    # `cap_drop:` with an empty or partial list is the same as not dropping capabilities.
+    if re.search(r"cap_drop:\s*\n\s+-\s*ALL", compose):
+        report.add("ok", "escape.cap-drop-all", "cap_drop 为 ALL")
+    else:
+        report.add(
+            "block",
+            "escape.cap-drop-all",
+            "cap_drop 不是 ALL：列出部分能力等于把其余能力留给被攻陷的插件",
+        )
+
+    # Running as root inside the container is a different failure from running as root on
+    # the host, but it turns every file the container writes into a root-owned file — and
+    # the data volume is shared with the operator's shell.
+    user = re.search(r"^\s+user:\s*[\"']?([^\s\"']+)", compose, re.MULTILINE)
+    if not user:
+        report.add("block", "escape.user", "未设置 user：容器以镜像默认用户（通常是 root）运行")
+    elif user.group(1).split(":")[0] in ("0", "root"):
+        report.add("block", "escape.user", f"user={user.group(1)}（root）")
+    else:
+        report.add("ok", "escape.user", f"user={user.group(1)}")
+
+    if "seccomp=" in compose:
+        report.add("ok", "escape.seccomp", "seccomp 已启用")
+    else:
+        report.add(
+            "warn",
+            "escape.seccomp",
+            "未设置 seccomp：ptrace/mount/bpf 等系统调用对插件进程开放",
+        )
+
+
 def check_image_availability(report: Report, mirror: str | None) -> None:
     """Record the registry situation as a fact, not a guess. Without a reachable
     registry the build fails at the first `FROM`, and that is worth knowing before
@@ -439,6 +499,7 @@ def verify(mirror: str | None = None) -> Report:
     check_host_bind(report)
     check_cli_flags(report)
     check_hardening(report)
+    check_escape_surfaces(report)
     check_image_availability(report, mirror)
     check_ports_documented(report)
     check_settings_writable(report)
