@@ -11,6 +11,15 @@
 # convenient or safe, it is safe, and the compose file documents how to relax it.
 
 # ---------------------------------------------------------------- build stage
+# Tag, not digest, on purpose — and here is how to fix that properly:
+#
+#   python scripts/pin_base_image_digest.py --write     # looks the digest up and rewrites
+#   python scripts/pin_base_image_digest.py --digest sha256:... --write
+#
+# A tag moves: the container can gain a package or lose a patch without a byte of this
+# repository changing (audit S-DEP-08). A digest names exactly one image. The rewrite is a
+# script rather than a pasted hash so the pin is refreshed on purpose and reviewable in a
+# diff, and so nobody has to trust a hash they found in a blog post.
 FROM python:3.12-slim AS build
 
 ENV PIP_NO_CACHE_DIR=1 \

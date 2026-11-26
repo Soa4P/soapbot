@@ -17,6 +17,13 @@ SERVICE=soapbot
 FORCE=0
 NO_SERVICE=0
 TAG=""
+#: Which commit to install. A tag cannot move; a branch can, and a SHA is the only ref
+#: that names exactly one tree. Default stays the branch for a one-command install, but
+#: the choice is printed so "what am I running" is answerable after the fact (S-DEP-08).
+REF="${SOAPBOT_REF:-}"
+#: Optional expected digest of the downloaded archive. Without it the installer prints
+#: what it got, which is what an operator records for the next run.
+EXPECT_SHA256="${SOAPBOT_SHA256:-}"
 TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/heads/master"
 
 while [ $# -gt 0 ]; do
@@ -24,6 +31,8 @@ while [ $# -gt 0 ]; do
     --dir) DIR="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --tag) TAG="$2"; shift 2 ;;
+    --ref) REF="$2"; shift 2 ;;
+    --sha256) EXPECT_SHA256="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --no-service) NO_SERVICE=1; shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
@@ -36,6 +45,35 @@ if [ -n "$TAG" ]; then
   case "$TAG" in
     v[0-9]*) TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/tags/$TAG" ;;
     *) echo "--tag must look like v0.1.0 (a tag ref, not a branch)" >&2; exit 2 ;;
+  esac
+fi
+
+if [ -n "$REF" ]; then
+  # Option injection first: a ref starting with "-" would be read by curl/wget as a flag.
+  case "$REF" in
+    -*) echo "--ref must not start with '-'" >&2; exit 2 ;;
+  esac
+  case "$REF" in
+    *[!0-9a-f]*)
+      # Not a SHA. Tags are fine; anything else is a branch and is *reported* as such,
+      # because a branch resolves to a different tree tomorrow and the operator should
+      # know that is what they asked for.
+      case "$REF" in
+        v[0-9]*) TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/tags/$REF" ;;
+        *)
+          TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/refs/heads/$REF"
+          echo "note: installing from branch '$REF' — that ref changes over time." >&2
+          echo "      For a reproducible install use --tag v0.1.0 or --ref <40-char sha>." >&2
+          ;;
+      esac
+      ;;
+    *)
+      if [ "${#REF}" -ne 40 ]; then
+        echo "--ref looks like a SHA but is ${#REF} characters (expected 40)" >&2
+        exit 2
+      fi
+      TARBALL="https://codeload.github.com/Soa4P/soapbot/tar.gz/$REF"
+      ;;
   esac
 fi
 
@@ -70,6 +108,33 @@ if command -v curl >/dev/null 2>&1; then
 else
   wget -qO "$tmp/soapbot.tar.gz" "$TARBALL"
 fi
+
+# Record what was installed, and check it when the operator pinned a digest. `sha256sum`
+# is coreutils; macOS and some minimal images only have `shasum`. Neither present means
+# the digest is unavailable rather than zero — print that instead of pretending.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  else return 1
+  fi
+}
+if actual_sha="$(sha256_of "$tmp/soapbot.tar.gz")"; then
+  if [ -n "$EXPECT_SHA256" ]; then
+    if [ "${actual_sha}" != "${EXPECT_SHA256}" ]; then
+      # Fail closed: the operator asked for specific bytes and did not get them.
+      echo "archive sha256 does not match --sha256:" >&2
+      echo "  expected ${EXPECT_SHA256}" >&2
+      echo "  actual   ${actual_sha}" >&2
+      exit 1
+    fi
+    ok "archive sha256 verified (${actual_sha:0:16}…)"
+  else
+    ok "archive sha256 ${actual_sha} (record this to pin the next install)"
+  fi
+else
+  echo "note: no sha256sum/shasum available; archive integrity was not computed" >&2
+fi
+
 mkdir -p "$DIR"
 tar -xzf "$tmp/soapbot.tar.gz" -C "$tmp"
 inner="$(find "$tmp" -maxdepth 1 -type d -name 'soapbot-*' | head -n1)"
