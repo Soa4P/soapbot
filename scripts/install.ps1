@@ -39,13 +39,28 @@
 
 .EXAMPLE
     .\install.ps1 -Tag v0.1.0
+
+.EXAMPLE
+    .\install.ps1 -PythonExe 'D:\Tools\Python312\python.exe'
+
+.PARAMETER PythonExe
+    Absolute path to the interpreter used to create the venv. Only needed when Python is
+    installed somewhere Windows does not put it (a user-scope install, a portable copy).
+
+    Why this is a parameter rather than "whatever is on PATH": this script is normally run
+    elevated, and ``python.exe`` in a user-writable directory is a file any standard user
+    can replace. PATH search would then hand an attacker's interpreter administrator
+    rights at the exact moment the bot is being installed (audit S-DEP-07). Machine-wide
+    installs (Program Files, Windows) are trusted automatically; anything else must be
+    named here, which is the operator vouching for it.
 #>
 [CmdletBinding()]
 param(
     [string]$Dir = 'C:\soapbot',
     [int]$Port = 6185,
     [string]$Account = 'NT AUTHORITY\LocalService',
-    [string]$Tag = ''
+    [string]$Tag = '',
+    [string]$PythonExe = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,20 +77,76 @@ $ZipUrl = if ($Tag) {
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok([string]$Message) { Write-Host "    $Message" -ForegroundColor Green }
 
+#: Directories an elevated install may execute an interpreter from. ``Program Files`` and
+#: ``Windows`` are machine-wide (an unprivileged user cannot write them); anything else —
+#: ``%LOCALAPPDATA%\Programs\Python``, a portable copy under a user profile, a temp
+#: extraction — is writable by whoever put it there, so PATH resolution must not reach it.
+$TrustedRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:SystemRoot) |
+    Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+    ForEach-Object { $_.TrimEnd('') }
+
+function Test-TrustedInterpreter([string]$Path) {
+    if (-not $Path) { return $false }
+    try { $full = [IO.Path]::GetFullPath($Path) } catch { return $false }
+    foreach ($root in $TrustedRoots) {
+        if ($full.StartsWith($root + '', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-PythonVersion([string]$Exe, [string[]]$PrefixArgs) {
+    try {
+        $version = & $Exe @PrefixArgs -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+    } catch { return $null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return ($version | Select-Object -First 1).Trim()
+}
+
 function Resolve-Python {
+    # Explicit path: the operator named it, so it is trusted by declaration. Still checked
+    # for existence — a typo deserves a clear message, not a venv created by something else.
+    if ($PythonExe) {
+        if (-not (Test-Path -LiteralPath $PythonExe)) {
+            throw "-PythonExe does not exist: $PythonExe"
+        }
+        $version = Get-PythonVersion $PythonExe @()
+        if (-not $version) { throw "-PythonExe is not a working interpreter: $PythonExe" }
+        $major, $minor = $version.Split('.')
+        if (-not ([int]$major -eq 3 -and [int]$minor -ge 12)) {
+            throw "-PythonExe is Python $version; 3.12+ is required"
+        }
+        if (-not (Test-TrustedInterpreter $PythonExe)) {
+            Write-Host "WARNING: -PythonExe is outside Program Files/Windows; you are vouching for it." -ForegroundColor Yellow
+        }
+        return @{ Exe = $PythonExe; Args = @() }
+    }
+
+    $rejected = @()
     foreach ($candidate in @('py -3.12', 'py -3', 'python')) {
         $parts = $candidate.Split(' ')
         $exe = $parts[0]
-        $command = Get-Command $exe -ErrorAction SilentlyContinue
+        $command = Get-Command $exe -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $command) { continue }
+        $resolved = $command.Source
+        if (-not (Test-TrustedInterpreter $resolved)) {
+            # Skipped rather than used-and-warned: running an elevated interpreter out of a
+            # user-writable directory is the whole vulnerability, not a caveat.
+            $rejected += $resolved
+            continue
+        }
         $args = @()
         if ($parts.Length -gt 1) { $args += $parts[1..($parts.Length - 1)] }
-        try {
-            $version = & $exe @args -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-        } catch { continue }
-        if ($LASTEXITCODE -ne 0) { continue }
-        $major, $minor = $version.Trim().Split('.')
-        if ([int]$major -eq 3 -and [int]$minor -ge 12) { return @{ Exe = $exe; Args = $args } }
+        $version = Get-PythonVersion $resolved @args
+        if (-not $version) { continue }
+        $major, $minor = $version.Split('.')
+        if ([int]$major -eq 3 -and [int]$minor -ge 12) {
+            return @{ Exe = $resolved; Args = $args }
+        }
+    }
+    if ($rejected.Count -gt 0) {
+        Write-Host "Ignored interpreter(s) outside Program Files/Windows (user-writable):" -ForegroundColor Yellow
+        foreach ($path in $rejected) { Write-Host "    $path" -ForegroundColor Yellow }
+        Write-Host "Install Python machine-wide, or pass -PythonExe '<absolute path>'." -ForegroundColor Yellow
     }
     return $null
 }

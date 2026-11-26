@@ -49,6 +49,17 @@ powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-bootstrap.ps1" -Star
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1" -Dir D:\soapbot -Port 7000
 ```
 
+安装脚本**只在可信目录里找 Python**（`Program Files`、`Program Files (x86)`、`Windows`）。
+它通常以管理员身份运行，而 `python.exe` 只要落在任何标准用户可写的目录（`%LOCALAPPDATA%\Programs\Python`、
+便携版、某个临时解压目录），就等于任何人都能在提升的上下文里执行自己的程序。这类解释器会被
+**跳过并打印出来**，而不是"警告后照用"。Python 确实装在这些位置时，显式给路径：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\soapbot-install.ps1" -PythonExe 'D:\Tools\Python312\python.exe'
+```
+
+（`windows-bootstrap.ps1` 走官方安装包并校验签名，不需要这个参数。）
+
 重复执行是安全的：已有 `data\` 不动、已有 `.venv` 复用，计划任务每次都被重写成同一份定义
 （同一个名字、同一个账号）。任务**不再以 SYSTEM 运行**，而是 `NT AUTHORITY\LocalService`：
 插件隔离层拒绝在 LocalSystem 下启动 worker，用 SYSTEM 装出来的机器会静默失去所有插件。升级
