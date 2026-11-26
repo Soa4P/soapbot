@@ -594,6 +594,17 @@ export const api = {
   // Three calls rather than one PUT: the operator approves a concrete diff, and the
   // apply carries both the base hash (was the file still what we read?) and the
   // approved hash (is this the diff they saw?). See api/config_write.py for why.
+  /** QQ official bot menu — a local document; nothing here reaches the platform yet. */
+  qqMenu: () =>
+    request<{ document: { items: Array<Record<string, unknown>> }; path: string; note: string }>(
+      '/api/config/qq-menu',
+    ),
+  qqMenuSave: (document: { items: Array<Record<string, unknown>> }) =>
+    request<{ saved: boolean; document: any; path: string }>('/api/config/qq-menu', {
+      method: 'PUT',
+      body: JSON.stringify(document),
+    }),
+
   configProviders: () => request<ProvidersDocument>('/api/config/providers'),
   configProvidersDiff: (payload: ProvidersPatch) =>
     request<DiffResult>('/api/config/providers/diff', {

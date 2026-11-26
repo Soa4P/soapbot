@@ -18,6 +18,7 @@ import Adapters from '@/components/Adapters.vue'
 import ProtocolEnd from '@/components/ProtocolEnd.vue'
 import McpServers from '@/components/McpServers.vue'
 import PersonaAvatar from '@/components/PersonaAvatar.vue'
+import QqMenuEditor from '@/components/QqMenuEditor.vue'
 import PersonaBindingCard from '@/components/PersonaBindingCard.vue'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
@@ -845,6 +846,7 @@ async function applyChanges(): Promise<void> {
        exists so the operator never has to know it. -->
   <ProtocolEnd />
   <Adapters />
+  <QqMenuEditor />
 <McpServers />
 
   <Teleport to="#persona-card-slot">
