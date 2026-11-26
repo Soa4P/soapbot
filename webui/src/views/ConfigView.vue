@@ -17,6 +17,7 @@ import DiffEditor from '@/components/DiffEditor.vue'
 import Adapters from '@/components/Adapters.vue'
 import ProtocolEnd from '@/components/ProtocolEnd.vue'
 import McpServers from '@/components/McpServers.vue'
+import PersonaAvatar from '@/components/PersonaAvatar.vue'
 import PersonaBindingCard from '@/components/PersonaBindingCard.vue'
 import ProbeBadge from '@/components/ProbeBadge.vue'
 import { t } from '@/i18n'
@@ -919,6 +920,9 @@ async function applyChanges(): Promise<void> {
                     "
                     >{{ row.system_prompt || t('config.emptyPrompt') }}</pre
                   >
+                  <!-- The avatar is per persona and read-only here: dropping a model
+                       into data/avatars/<id>/ is the whole installation. -->
+                  <PersonaAvatar :persona-id="row.id" />
                 </td>
               </tr>
             </template>

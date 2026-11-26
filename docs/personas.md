@@ -18,6 +18,9 @@
 
 3. 重启服务，然后在面板第 07 页确认卡片出现在列表里。
 
+> 想让这张卡在面板里带形象：把 Live2D 模型放进 `data/avatars/<id>/`，见
+> [live2d-avatar.md](live2d-avatar.md)。
+
 > `config/personas/` 里的是**出厂模板**，首次启动会播种到 `data/config/personas/`。之后你改的都是 `data/` 那一份，所以 `git pull` 不会把你的卡改回去。
 
 ## 字段

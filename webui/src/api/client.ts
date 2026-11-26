@@ -119,6 +119,21 @@ export const api = {
   adapters: () => request<any>('/api/adapters'),
   providers: () => request<ProvidersResponse>('/api/providers'),
   personas: () => request<any>('/api/personas'),
+  /** Live2D model discovery for one persona; `available: false` is a normal answer. */
+  personaAvatar: (id: string) =>
+    request<{
+      available: boolean
+      reason?: string
+      model?: string
+      motions?: Record<string, string[]>
+      expressions?: string[]
+      textures?: string[]
+      preview?: string
+      assets?: number
+      bytes?: number
+      renderer?: string
+      hint?: string
+    }>(`/api/personas/${encodeURIComponent(id)}/avatar`),
 
   // Archive accounts (owner-only endpoints; the panel token is the credential).
   accounts: () =>
