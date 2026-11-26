@@ -27,6 +27,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -299,6 +301,28 @@ class IndexClient:
         self._local_blocked: dict[str, str] | None = None
         self._local_blocklist_error = ""
 
+    @asynccontextmanager
+    async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
+        """One short-lived client per request, with the egress rules spelled once.
+
+        ``trust_env=False`` is the point (S-SUP-12). Every other outbound path in this
+        codebase ignores ``HTTP(S)_PROXY`` / ``ALL_PROXY``, because a proxy sends the
+        request somewhere the in-process allow-lists never looked — and this client is
+        the one that fetches the *index*, its signature and release packages from a host
+        nobody in this repository controls. Honouring a proxy here means whoever sets
+        that variable chooses what "the published index" is.
+
+        Four call sites used to build their own ``AsyncClient``; the settings live in one
+        method so a fifth cannot silently miss them.
+        """
+        async with httpx.AsyncClient(
+            timeout=self.timeout,
+            follow_redirects=False,
+            transport=self._transport,
+            trust_env=False,
+        ) as client:
+            yield client
+
     @property
     def local_blocked(self) -> dict[str, str]:
         """Local blocks, read once per process.
@@ -366,11 +390,7 @@ class IndexClient:
     async def _fetch(self) -> IndexSnapshot:
         blocked = dict(self.local_blocked)
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
+            async with self._client() as client:
                 response = await client.get(
                     self.url,
                     headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"},
@@ -487,11 +507,7 @@ class IndexClient:
         the install gate treats exactly like an invalid one.
         """
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
+            async with self._client() as client:
                 response = await client.get(
                     self._signature_url(),
                     headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"},
@@ -536,11 +552,7 @@ class IndexClient:
 
         url = index_archived_url(self.url)
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
+            async with self._client() as client:
                 response = await client.get(
                     url, headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"}
                 )
@@ -573,11 +585,7 @@ class IndexClient:
         """
         url = self._versions_url()
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
+            async with self._client() as client:
                 response = await client.get(
                     url, headers={"accept": "application/json", "user-agent": "soapbot-plugin-index"}
                 )

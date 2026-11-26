@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-27T00:30:00+08:00",
+  "updated_at": "2026-11-27T01:20:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3954,6 +3954,12 @@
           "name": "Low 首批：/readyz 匿名只给代码（S-AUTH-07）、登录时序等化（S-AUTH-08）、provider 响应解压后封顶（S-MSG-11）、撤销清单收口 ADMIN（S-AUTH-12）、确认框焦点陷阱与 Esc 真生效（S-FE-05）",
           "status": "done",
           "note": "S-FE-05 是 UI 真缺陷：isOpen 只在 setup 赋值一次，调用方都在挂载后才打开，陷阱从未生效；provider 封顶放在 aiter_bytes 之后，Content-Length 挡不住 gzip 炸弹"
+        },
+        {
+          "id": "a24-t10",
+          "name": "Low 第二批：索引抓取禁代理（S-SUP-12）、安装器拒收 data//.venv 归档（S-DEP-23）、数据目录 700 + 服务 umask 0077（S-DEP-19）、v-html 门禁认单引号与注释（S-DOC-02）",
+          "status": "done",
+          "note": "S-SUP-12 的测试用真监听器当代理——注入 transport 时 httpx 本来就不看环境变量，那样的测试测不出区别；S-DEP-23 的检查必须在解包前，且不能写 tar|grep -q：pipefail 下 grep 早退会让检测变成静默通过"
         }
       ],
       "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"

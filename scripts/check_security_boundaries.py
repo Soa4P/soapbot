@@ -314,25 +314,34 @@ def _no_silent_catch(code: str, level: str, detail: str) -> Result:
 
 
 def _only_safe_vhtml(code: str, level: str, detail: str) -> Result:
-    """The single v-html use must stay bound to the locally generated QR SVG.
+    """Every ``v-html`` binding must be the locally generated QR SVG.
 
-    Check the *attribute*, not any line containing the word: ProtocolEnd.vue has
-    a comment explaining why the binding is safe, and a naive substring scan
-    reports that comment as a second injection sink.
+    Three properties, each of which the previous version missed (S-DOC-02):
+
+    * **Either quote style.** The regex matched ``v-html="…"`` only, so a template
+      written with single quotes — legal Vue, and what a formatter produces when the
+      value contains a double quote — was not a binding at all as far as this gate was
+      concerned. A single-quoted injection sink would have passed.
+    * **Comments are not sinks.** ProtocolEnd.vue explains in a comment why its binding
+      is safe; a raw substring scan counts that explanation as a violation. HTML
+      comments are removed before scanning.
+    * **A binding must be *found*.** ``found > 0`` keeps the check from passing when a
+      refactor moves the template somewhere this scan no longer looks.
     """
     import re
 
-    binding = re.compile(r'\bv-html\s*=\s*"([^"]+)"')
+    binding = re.compile(r"\bv-html\s*=\s*(?:\"([^\"]*)\"|'([^']*)')")
+    comment = re.compile(r"<!--.*?-->", re.DOTALL)
     hits: list[str] = []
     found = 0
     for path in VUE_FILES:
-        for number, line in enumerate(_text(path).splitlines(), 1):
-            match = binding.search(line)
-            if match is None:
-                continue
-            found += 1
-            if match.group(1).strip() != "qrSvg":
-                hits.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()[:90]}")
+        text = comment.sub("", _text(path))
+        for number, line in enumerate(text.splitlines(), 1):
+            for match in binding.finditer(line):
+                found += 1
+                value = (match.group(1) if match.group(1) is not None else match.group(2)) or ""
+                if value.strip() != "qrSvg":
+                    hits.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()[:90]}")
     evidence = "; ".join(hits) if hits else f"{found} binding(s), all qrSvg"
     return Result(code, level, not hits and found > 0, detail, evidence)
 

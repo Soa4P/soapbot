@@ -89,6 +89,24 @@ def test_a_second_v_html_binding_is_refused(monkeypatch: pytest.MonkeyPatch) -> 
     assert "s04" in _codes(False)
 
 
+def test_a_single_quoted_v_html_binding_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S-DOC-02: the gate used to match double quotes only.
+
+    Single quotes are legal Vue, and are what a formatter produces when the bound value
+    contains a double quote — so that spelling was invisible to the gate.
+    """
+    target = gate.WEBUI / "components" / "ProtocolEnd.vue"
+    _mutate(monkeypatch, target, "\n<div v-html='serverBody'></div>\n")
+    assert "s04" in _codes(False)
+
+
+def test_a_v_html_binding_in_a_comment_is_not_a_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The explanation of *why* a binding is safe must not read as a second binding."""
+    target = gate.WEBUI / "components" / "ProtocolEnd.vue"
+    _mutate(monkeypatch, target, '\n<!-- v-html="anythingElse" would be unsafe here -->\n')
+    assert "s04" not in _codes(False)
+
+
 def test_local_storage_token_is_not_allowed_back(monkeypatch: pytest.MonkeyPatch) -> None:
     _mutate(monkeypatch, gate.CLIENT, "\nlocalStorage.setItem('soapbot.token', t)\n")
     assert "s05" in _codes(False)

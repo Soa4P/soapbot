@@ -95,6 +95,13 @@ bash /tmp/soapbot-install.sh --ref <40 位 commit sha> --sha256 <第一次安装
 - `--sha256` 会把下载到的归档与给定摘要比对，**不一致即失败退出**；不给时安装器会打印
   实际摘要，记下来就是下一次的 pin。机器上既没有 `sha256sum` 也没有 `shasum` 时它会
   明确说「没算摘要」，而不是假装算过。
+- **归档里出现顶层 `data/` 或 `.venv/` 会被拒绝，且在解包之前**（审计 S-DEP-23）。归档
+  只应装代码；带着 `data/` 覆盖上去等于用旧库、旧 `.env`、旧密钥替换线上那一份，带着
+  `.venv/` 则替换掉正在跑的解释器。检查只看顶层：`src/.../data/` 这类正常目录不会被误伤。
+
+数据目录**只有属主可读**：安装器把它建成 `700`，注册的 systemd 单元带 `UMask=0077`
+（不走 systemd 时在启动前 `umask 077`），所以 `soapbot.db`、`jwt.key`、`secret.key`
+和备份都不会以默认的 `0644` 落在磁盘上（审计 S-DEP-19）。
 
 默认 `/opt/soapbot`，以 root 运行时注册 `soapbot.service` 并 `systemctl enable --now`。
 非 root 或加 `--no-service` 时只把服务放到后台并写 `panel.log`。
