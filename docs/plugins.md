@@ -83,5 +83,10 @@ class Plugin:
 ```
 
 清单 `capabilities` 必须声明才能注册对应 API：`command` / `tool` / `cron` /
-`message` / `notice` / `http` / `memory` / `kb` / `send` / `storage`。
+`message` / `notice` / `http` / `memory` / `kb` / `send` / `storage` / `tasks`。
 详见 `docs/wave3-plugin-api.md` 与 `docs/plugin-security.md`。
+
+`tasks` 对应 `ctx.task_update()`（在操作者可见的长任务登记表里声明/完成一项）。它不再
+借用 `storage` 或 `command`：每个 surface 都由一个能力门禁，而这个 surface 写的是宿主
+状态。另有每条目上限 200 行、每插件 30 次/分钟的配额——每次写入都是一次整文件 fsync，
+无上限地写既涨盘也卡事件循环（审计 S-PLUG-08）。

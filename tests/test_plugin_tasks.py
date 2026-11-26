@@ -81,8 +81,10 @@ def surfaces_env(tmp_path, monkeypatch):
     guard = CapabilityGuard(
         CapabilityGrant(
             plugin="p",
-            declared=frozenset({Capability.COMMAND}),
-            approved=frozenset({Capability.COMMAND}),
+            # ``tasks`` gates the surface (audit S-PLUG-08); ``command`` alone is no
+            # longer enough to write host state.
+            declared=frozenset({Capability.COMMAND, Capability.TASKS}),
+            approved=frozenset({Capability.COMMAND, Capability.TASKS}),
         )
     )
     ctx = PluginContext(plugin="p", guard=guard)
@@ -114,3 +116,81 @@ async def test_surface_overdue_reflects_the_expected_window(surfaces_env) -> Non
         result = await surfaces_env.ctx.task_update("slow-job", done=False)
     assert result["task_id"] == "slow-job"
     assert result["done"] is False
+
+
+# ------------------------------------------------ bounds on host state (S-PLUG-08)
+async def test_tasks_update_requires_the_tasks_capability(tmp_path, monkeypatch) -> None:
+    """Every other surface is gated by a capability; this one used to be open.
+
+    A plugin that declared nothing could write into the operator-visible registry —
+    the one place where "what did the plugin promise to finish" is recorded.
+    """
+    from types import SimpleNamespace
+
+    from soapbot.config import settings
+    from soapbot.plugins.context import CallerContext, PluginContext, bind_caller
+    from soapbot.plugins.manifest import Capability
+    from soapbot.plugins.sandbox import (
+        CapabilityDeniedError,
+        CapabilityGrant,
+        CapabilityGuard,
+    )
+    from soapbot.plugins.tasks import PluginTaskStore
+
+    data_dir = tmp_path / "data2"
+    data_dir.mkdir()
+    monkeypatch.setattr(settings, "data_dir", data_dir)
+    manager = SimpleNamespace(tasks=PluginTaskStore(data_dir / "plugin-tasks.json"))
+    monkeypatch.setattr("soapbot.app.get_plugin_manager", lambda: manager)
+
+    guard = CapabilityGuard(
+        CapabilityGrant(
+            plugin="p",
+            declared=frozenset({Capability.COMMAND}),
+            approved=frozenset({Capability.COMMAND}),
+        )
+    )
+    ctx = PluginContext(plugin="p", guard=guard)
+    caller = CallerContext(
+        user_id="u", display_name="u", role="member", session_key="onebot11:group:1", scene="group"
+    )
+    with bind_caller(caller), pytest.raises(CapabilityDeniedError):
+        await ctx.task_update("sneaky")
+    assert manager.tasks.all_tasks() == {}
+
+
+async def test_tasks_update_is_rate_limited_per_plugin(surfaces_env) -> None:
+    """Each write is an fsync + atomic replace; a loop of them is disk and loop stall."""
+    from soapbot.plugins import surfaces
+    from soapbot.plugins.manifest import Capability
+    from soapbot.plugins.sandbox import CapabilityDeniedError
+
+    surfaces._TASK_WRITES.reset("p")
+    budget = surfaces._TASK_WRITES.limit
+    with surfaces_env.bind():
+        for index in range(budget):
+            await surfaces_env.ctx.task_update(f"t{index}")
+        with pytest.raises(CapabilityDeniedError, match="limited to"):
+            await surfaces_env.ctx.task_update("one-too-many")
+    surfaces._TASK_WRITES.reset("p")
+    assert Capability.TASKS.value == "tasks"
+
+
+async def test_a_plugin_cannot_grow_the_registry_without_limit(surfaces_env) -> None:
+    """Well-paced but endless: the row cap is the second bound."""
+    from soapbot.plugins import surfaces
+    from soapbot.plugins.sandbox import CapabilityDeniedError
+
+    surfaces._TASK_WRITES.reset("p")
+    with surfaces_env.bind():
+        # Fill the store directly: the point here is the cap, not the rate window.
+        for index in range(surfaces.MAX_TASKS_PER_PLUGIN):
+            surfaces_env.manager.tasks.update(
+                plugin="p", task_id=f"t{index}", description="", done=False
+            )
+        with pytest.raises(CapabilityDeniedError, match="max"):
+            await surfaces_env.ctx.task_update("the-last-one")
+        # Re-declaring an existing row is still allowed — that is the normal use.
+        result = await surfaces_env.ctx.task_update("t0", done=True)
+    assert result["done"] is True
+    surfaces._TASK_WRITES.reset("p")

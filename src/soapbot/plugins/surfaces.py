@@ -39,6 +39,7 @@ body.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,7 @@ from soapbot.plugins.sandbox import (
     StorageUnavailable,
     scrub_plugin_output,
 )
+from soapbot.security.ratelimit import SlidingWindowLimiter
 
 if TYPE_CHECKING:
     from soapbot.plugins.tasks import PluginTaskStore
@@ -66,6 +68,21 @@ logger = logging.getLogger(__name__)
 #: an unbounded writer is a log-flooding primitive: it can bury a denial from another
 #: plugin in noise, which is a way of hiding an unauthorised action.
 LOG_WRITES_PER_MINUTE = 60
+
+#: ``tasks.update`` budget. Each accepted write ends in fsync + atomic replace of the
+#: whole registry, so the cost per call is disk, not memory. 30 per minute is far more
+#: than the honest use (declare a task, mark it done) and far too slow to fill a disk.
+_TASK_WRITES = SlidingWindowLimiter(limit=30, window_seconds=60.0)
+
+#: Rows one plugin may hold. Old rows are read by the operator, so they are not
+#: auto-deleted; the cap is what keeps "declare a new task id every second" from
+#: turning into unbounded growth.
+MAX_TASKS_PER_PLUGIN = 200
+
+#: Serialises the read-modify-write of the single registry object. The write itself runs
+#: in a thread (see ``_task_update``), and two threads sharing one in-memory dict would
+#: otherwise be able to lose one of the two records.
+_TASK_WRITE_LOCK = asyncio.Lock()
 
 
 class SurfaceRouter:
@@ -297,7 +314,29 @@ class SurfaceRouter:
         and flags tasks past their expected window without ``done_at`` as
         「未确认完成」. Audit records task_id and the done flag — never the note
         body (plugin-authored text does not belong in the audit trail).
+
+        Three bounds, each because this is host state written by plugin code
+        (audit S-PLUG-08):
+
+        * the ``tasks`` capability — every other surface is gated by one, and this was
+          the only one that was not, so a plugin declaring nothing could still write
+          here;
+        * a per-plugin rate window — each write ends in ``fsync`` + atomic replace, and
+          a loop of them is disk growth plus a stalled event loop;
+        * a row cap per plugin, so even a well-paced plugin cannot grow the file
+          without limit. Old rows are not deleted automatically: silently dropping the
+          operator's task history is worse than refusing the 101 000th write.
         """
+        self._guard.check(Capability.TASKS, detail="tasks.update")
+
+        limit = _TASK_WRITES.check(self._plugin)
+        if limit.limited:
+            raise CapabilityDeniedError(
+                self._plugin,
+                Capability.TASKS,
+                f"limited to {_TASK_WRITES.limit} writes per {_TASK_WRITES.window:.0f}s; "
+                f"retry in {limit.retry_after:.0f}s",
+            )
 
         task_id = str(args.get("task_id") or "").strip()[:64]
         if not task_id:
@@ -307,14 +346,27 @@ class SurfaceRouter:
         done = bool(args.get("done"))
         note = str(args.get("note") or "")[:300]
         manager = _task_store()
-        record = manager.update(
-            plugin=self._plugin,
-            task_id=task_id,
-            description=description,
-            expected_within_hours=expected,
-            done=done,
-            note=note,
-        )
+        existing = manager.for_plugin(self._plugin)
+        if task_id not in existing and len(existing) >= MAX_TASKS_PER_PLUGIN:
+            raise CapabilityDeniedError(
+                self._plugin,
+                Capability.TASKS,
+                f"already declared {len(existing)} tasks (max {MAX_TASKS_PER_PLUGIN}); "
+                "mark finished ones done instead of declaring more",
+            )
+        # Off the loop: ``update`` rewrites the whole file with fsync, and this handler
+        # runs on the event loop that also serves chat. The lock keeps two concurrent
+        # writers from interleaving read-modify-write on the same in-memory dict.
+        async with _TASK_WRITE_LOCK:
+            record = await asyncio.to_thread(
+                manager.update,
+                plugin=self._plugin,
+                task_id=task_id,
+                description=description,
+                expected_within_hours=expected,
+                done=done,
+                note=note,
+            )
         if self._audit is not None:
             self._audit.record(
                 kind="plugin",
