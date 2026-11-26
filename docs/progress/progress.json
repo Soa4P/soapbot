@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-25T00:20:00+08:00",
+  "updated_at": "2026-11-27T00:30:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3898,7 +3898,7 @@
     {
       "id": "a24",
       "index": "A24",
-      "name": "外部安全审计 124 项分诊与修复（P0/P1 两批）",
+      "name": "外部安全审计 124 项分诊与修复（High 全清、Medium 收尾、Low 首批）",
       "status": "doing",
       "tasks": [
         {
@@ -3922,8 +3922,8 @@
         {
           "id": "a24-t4",
           "name": "长线：两套备份实现收敛（S-DEP-12）",
-          "status": "todo",
-          "note": "scripts/backup.py（zip+manifest）与 soapbot backup（tar.gz+sidecar）分叉，需单独设计批次"
+          "status": "done",
+          "note": "#111/#114/#115 收敛：服务端 zip+manifest、harden 收旧权限、定时器真机跑通（0600/每日 03:30）"
         },
         {
           "id": "a24-t5",
@@ -3942,6 +3942,18 @@
           "name": "插件 worker 权限分离（S-PLUG-04）：PLUGIN_RUN_UID/GID 让 worker 以另一身份运行",
           "status": "done",
           "note": "同 uid 下 HMAC 是假边界（密钥可读），身份切换才是真隔离；未设置时行为不变，Windows 明确 warn 并忽略"
+        },
+        {
+          "id": "a24-t8",
+          "name": "Medium 收尾（S-MSG-02 记录理由不修）+ 三条产品面（Live2D 占位骨架、QQ 官方菜单本地骨架、B 站直播播报）",
+          "status": "done",
+          "note": "S-MSG-02 注入路径已堵，残留是「用户自己写 canary → 模型复述 → 该轮被丢」的自伤；直播播报只报状态变化、冷启动静默、失败不算事件"
+        },
+        {
+          "id": "a24-t9",
+          "name": "Low 首批：/readyz 匿名只给代码（S-AUTH-07）、登录时序等化（S-AUTH-08）、provider 响应解压后封顶（S-MSG-11）、撤销清单收口 ADMIN（S-AUTH-12）、确认框焦点陷阱与 Esc 真生效（S-FE-05）",
+          "status": "done",
+          "note": "S-FE-05 是 UI 真缺陷：isOpen 只在 setup 赋值一次，调用方都在挂载后才打开，陷阱从未生效；provider 封顶放在 aiter_bytes 之后，Content-Length 挡不住 gzip 炸弹"
         }
       ],
       "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"

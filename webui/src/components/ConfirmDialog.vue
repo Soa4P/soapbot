@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { t } from '@/i18n'
 import { useFocusTrap } from '@/lib/useFocusTrap'
@@ -50,7 +50,20 @@ const isOpen = ref(false)
 
 // `open` is mirrored into a local ref so the trap can watch one reactive source and
 // so that Esc can be refused without mutating a prop.
-isOpen.value = props.open
+//
+// This has to be a *watch*, not a one-time assignment. The dialog is mounted with
+// `open=false` and every caller flips the prop later, so the old
+// `isOpen.value = props.open` copied `false` once and never again: the focus trap
+// never armed, Esc never reached `onEscape`, and focus stayed on the page behind an
+// `aria-modal` dialog. `immediate` keeps the initial state correct for a dialog that
+// is mounted already-open.
+watch(
+  () => props.open,
+  (open) => {
+    isOpen.value = open
+  },
+  { immediate: true },
+)
 
 useFocusTrap(panel, isOpen, {
   // Cancel is the default target: pressing Enter on a destructive dialog should not

@@ -792,7 +792,7 @@ def create_app() -> FastAPI:
         return await health()
 
     @app.get("/readyz", tags=["system"])
-    async def readyz() -> JSONResponse:
+    async def readyz(request: Request) -> JSONResponse:
         """Readiness: can this process do its job right now?
 
         Deliberately narrower than ``/api/runtime``. A readiness probe that fails
@@ -802,7 +802,20 @@ def create_app() -> FastAPI:
         What is checked is what makes the process useless: the data directory cannot be
         written (SQLite writes through it, so a full disk or a read-only mount shows up
         here first), or the runtime was asked for and failed to build.
+
+        Two audiences, one endpoint (S-AUTH-07). The probe must answer without a
+        credential, so the *status* is always public; the detail is not. A data
+        directory path, the text of each failure and the startup-error list together
+        describe the machine — adapter names, plugin failures, where the files live —
+        and an anonymous caller has no business with that. Anonymous callers get
+        machine-readable codes; an operator credential gets the full diagnosis.
         """
+        from soapbot.api.auth import operator_detail_allowed
+
+        full_detail = operator_detail_allowed(request)
+
+        # Codes are the contract with monitoring; the text is for humans.
+        codes: list[str] = []
         problems: list[str] = []
 
         from soapbot.config import settings as live_settings
@@ -814,12 +827,18 @@ def create_app() -> FastAPI:
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
         except OSError as exc:
-            problems.append(f"data directory not writable: {exc}")
+            codes.append("data_dir_not_writable")
+            # The OS message carries the path, which is exactly the leak this
+            # endpoint used to have. It is only assembled for an operator.
+            problems.append(f"data directory not writable: {exc}" if full_detail
+                            else "data directory not writable")
 
         runtime = get_runtime()
         if live_settings.enable_runtime and runtime is None:
+            codes.append("runtime_not_built")
             problems.append("runtime was requested but is not built")
         if runtime is not None and not getattr(runtime, "_running", False):
+            codes.append("runtime_not_running")
             problems.append("runtime is built but not running")
 
         # A writable directory is a proxy for "SQLite can write", which is not the same
@@ -844,8 +863,8 @@ def create_app() -> FastAPI:
                 async with database.engine.connect() as session:
                     await session.execute(text("SELECT 1"))
             except Exception as exc:  # a probe reports, it never raises
-                # Type only: /readyz is unauthenticated and the message can carry a
-                # filesystem path or SQL fragment.
+                # Type only: the message can carry a filesystem path or SQL fragment.
+                codes.append("database_not_usable")
                 problems.append(f"database not usable ({type(exc).__name__})")
 
         errors = get_startup_errors()
@@ -857,15 +876,24 @@ def create_app() -> FastAPI:
             # it without readiness failing.
             logger.debug("readiness note: %d startup errors", len(errors))
 
-        payload = {
-            "status": "ok" if not problems else "unavailable",
+        payload: dict[str, Any] = {
+            "status": "ok" if not codes else "unavailable",
             "version": __version__,
-            "data_dir": str(data_dir),
-            "problems": problems,
-            "startup_errors": errors,
             "degraded": bool(errors),
+            # Codes are safe for anyone who can reach the port: they say *what* is
+            # wrong without saying where the machine keeps its files.
+            "problems": codes,
         }
-        return JSONResponse(payload, status_code=200 if not problems else 503)
+        if full_detail:
+            payload["data_dir"] = str(data_dir)
+            # Operator view keeps the sentences and the error list.
+            payload["details"] = problems
+            payload["startup_errors"] = errors
+        else:
+            # Still enough for monitoring to alert, without naming an adapter or
+            # quoting a plugin traceback.
+            payload["startup_error_count"] = len(errors)
+        return JSONResponse(payload, status_code=200 if not codes else 503)
 
     @app.get("/metrics", tags=["system"], include_in_schema=False)
     async def metrics(_: dict = Depends(require_api_auth)) -> Response:

@@ -22,9 +22,21 @@ SECRET_BODY = '{"error":"invalid key sk-live-' + _ECHO_MARK + ' prompt=<system>å
 
 
 class _FakeResponse:
+    """Stands in for a streamed httpx response on an error status.
+
+    ``aiter_bytes`` rather than only ``aread``: the drain that discards the body is
+    capped now (S-MSG-11), and it reads through ``aiter_bytes`` so the size is checked
+    as bytes arrive instead of after the whole body is in memory. A fake that offers
+    only ``aread`` describes an interface the production code no longer uses, and the
+    mismatch is what these two tests caught.
+    """
+
     def __init__(self) -> None:
         self.status_code = 500
         self.headers: dict[str, str] = {}
+
+    async def aiter_bytes(self):
+        yield SECRET_BODY.encode()
 
     async def aread(self) -> bytes:
         return SECRET_BODY.encode()

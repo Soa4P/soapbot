@@ -400,6 +400,36 @@ async def require_api_auth(request: Request) -> dict[str, Any]:
     return authenticate(request)
 
 
+def operator_detail_allowed(request: Request) -> bool:
+    """Whether this caller may see operational detail on an *open* endpoint.
+
+    ``/readyz`` has to answer without a credential — a container healthcheck and a
+    load balancer both probe it, and neither can hold a token. But the detail that
+    makes it useful to an operator (the data directory path, the text of each
+    problem, the startup-error list) is itself a map of the machine: a filesystem
+    layout, adapter names, plugin failures (S-AUTH-07).
+
+    So the endpoint stays open and the *detail* is gated. This helper answers "is
+    this an operator" without the audit side effects of :func:`authenticate`:
+    calling that here would write a denial row every ten seconds for a monitor that
+    probes from another host, which is how a real denial gets lost in the noise.
+
+    Two callers qualify: a verified credential of any role (accounts are
+    operator-issued), or a loopback client on a deployment that has explicitly
+    trusted loopback. Strict mode — the default — makes an unauthenticated loopback
+    read a *member*, and a member does not get the machine's layout.
+    """
+    service = _auth_state(request).token_service
+    token, _carrier = _credential(request)
+    if token and service is not None:
+        try:
+            service.verify(token)
+        except TokenError:
+            return False
+        return True
+    return is_loopback(request) and not settings.strict_loopback_auth
+
+
 def require_role(minimum, *, require_credential: bool = False):
     """Build a dependency that authenticates and then checks an authority floor.
 
@@ -440,6 +470,23 @@ def require_role(minimum, *, require_credential: bool = False):
         return auth
 
     return _dep
+
+
+def _admin_credential_dependency():
+    """A dependency: ADMIN *and* a real token, resolved lazily.
+
+    Written as a factory rather than ``require_role(Role.ADMIN, ...)`` at module
+    import, because importing ``Role`` at the top of this module would put
+    ``soapbot.security.principal`` — which imports the audit log — ahead of the auth
+    router in the import order, and every consumer of ``soapbot.api.auth`` would pay
+    for it (and could trip a cycle later).
+    """
+    from soapbot.security.principal import Role
+
+    return require_role(Role.ADMIN, require_credential=True)
+
+
+_admin_credential = _admin_credential_dependency()
 
 
 # ----------------------------------------------------------------- endpoint
@@ -759,9 +806,16 @@ async def revoke_all_tokens(
 @router.get("/revocations")
 async def list_revocations(
     request: Request,
-    _auth: dict[str, Any] = Depends(require_api_auth),
+    _auth: dict[str, Any] = Depends(_admin_credential),
 ) -> dict[str, Any]:
-    """What the panel shows on the security page. Read-only, no secrets."""
+    """What the panel shows on the security page.
+
+    Not secret in the sense that a token is — a jti is a random id, and the entries are
+    already dead. It is still a *security* artefact: when credentials were cut off, how
+    many, and at what instant tells a reader who else watches this deployment and when
+    the operator last rotated. That is an operator's view, so the floor is ADMIN with a
+    credential rather than "anyone the API answers" (S-AUTH-12).
+    """
     store = _auth_state(request).revocations
     if store is None:
         return {"revoked_before": 0.0, "count": 0, "tokens": []}
