@@ -200,7 +200,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **插件市场（上传/校验/安装）** | **已完成** | `tests/test_plugin_installer.py`（15 项）、`test_wave4_plugin_api.py` 上传 3 项 |
 | **MCP 客户端** | **已完成** | `tests/test_mcp_wiring.py`（16 项）+ `tests/test_mcp_live.py`（opt-in）；已接真实 filesystem server，14 个工具 |
 | **面板内编辑 MCP 服务器** | **本轮新增** | `tests/test_mcp_write.py`（18 项）+ `test_mcp_config_api.py`（14 项）；浏览器实测「新增→diff→确认→写入→落盘」 |
-| **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（30 项） |
+| **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（33 项） |
 | **多语言（对外文案 + 面板全 13 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；12 个管理页浏览器逐页实测中英双向切换，第 13 页存档由 `test_webui_i18n.py` 保证键齐全与「模板无中文残留」，**未做浏览器实测** |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
 | **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
