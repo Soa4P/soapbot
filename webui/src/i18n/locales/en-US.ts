@@ -305,6 +305,8 @@ export default {
   'plugins.blockedVersion': 'Blocked',
   'plugins.blockedReason': 'Blocked because: {reason}',
   'plugins.blockedInstall': 'This version is blocked; installing it will be refused.',
+  'plugins.withdrawn': 'withdrawn',
+  'plugins.withdrawnHint': 'The maintainer withdrew this plugin from the catalogue: {reason}. Nothing is disabled automatically — whether to keep using it is your call.',
   'plugins.installedBlocked': 'Installed {version} is blocked; reload and restart will refuse to load it',
   'plugins.officialEmpty': 'No plugins ship with this build.',
   'plugins.communityHint': 'One click = download + digest verify + install; approval and loading still happen on the plugins page.',

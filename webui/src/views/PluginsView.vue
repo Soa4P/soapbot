@@ -366,6 +366,16 @@ async function deletePlugin(plugin: any): Promise<void> {
                 >
                   {{ t('plugins.installedBlocked', { version: plugin.blocked.version }) }}
                 </span>
+                <!-- Withdrawn by the maintainer. Also not enforced — an operator may
+                     still want it — but silence is the wrong default: withdrawal is the
+                     only signal that is not tied to one version. -->
+                <span
+                  v-if="plugin.withdrawn"
+                  class="tag bad"
+                  :title="t('plugins.withdrawnHint', { reason: plugin.withdrawn })"
+                >
+                  {{ t('plugins.withdrawn') }}
+                </span>
               </td>
               <td>
                 <span class="pill" :class="plugin.loaded ? 'ok' : ''">
