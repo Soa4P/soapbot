@@ -221,3 +221,73 @@ def test_cli_accepts_start_flags(flag: str) -> None:
     """Belt and braces: the parser really does define them, not just mention them."""
     source = (ROOT / "src" / "soapbot" / "cli.py").read_text(encoding="utf-8")
     assert re.search(rf'add_argument\(\s*"{flag}"', source), f"cli.py 未定义 {flag}"
+
+
+# --------------------------------------------------- escape surfaces (S-DEP-16)
+BASE = "\n".join(
+    [
+        "services:",
+        "  soapbot:",
+        "    image: soapbot:hardened",
+        '    user: "10001:10001"',
+        "    cap_drop:",
+        "      - ALL",
+        "    security_opt:",
+        "      - seccomp=builtin",
+        "",
+    ]
+)
+
+
+def _escape_findings(tmp_path: Path, compose_text: str) -> dict[str, str]:
+    """Run only the escape-surface checks against a candidate compose file."""
+    candidate = tmp_path / "docker-compose.yml"
+    candidate.write_text(compose_text, encoding="utf-8")
+    report = check_deploy.Report()
+    real = check_deploy.COMPOSE
+    check_deploy.COMPOSE = candidate
+    try:
+        check_deploy.check_escape_surfaces(report)
+    finally:
+        check_deploy.COMPOSE = real
+    return {f.code: f.level for f in report.findings if f.code.startswith("escape.")}
+
+
+def test_the_escape_checks_pass_on_the_real_profile(tmp_path: Path) -> None:
+    # tmp_path, not ".": this helper *writes* a docker-compose.yml, and a test that litters
+    # the repository root with one is a test that can change what the gate reads.
+    findings = _escape_findings(tmp_path, BASE)
+    assert all(level == "ok" for level in findings.values()), findings
+
+
+@pytest.mark.parametrize(
+    "override,key",
+    [
+        ({"other": "    privileged: true"}, "escape.privileged"),
+        ({"other": "    network_mode: host"}, "escape.host-network"),
+        (
+            {
+                "other": "    volumes:\n"
+                "      - /var/run/docker.sock:/var/run/docker.sock"
+            },
+            "escape.docker-socket",
+        ),
+        ({"cap_drop": "    cap_drop: []"}, "escape.cap-drop-all"),
+        ({"user": "    user: root"}, "escape.user"),
+        ({"user": '    user: "0:0"'}, "escape.user"),
+    ],
+)
+def test_each_escape_surface_is_a_blocking_finding(
+    tmp_path: Path, override: dict[str, str], key: str
+) -> None:
+    """One-line edits that read like convenience; each is a way out of the sandbox."""
+    text = BASE
+    for name, replacement in override.items():
+        if name == "cap_drop":
+            text = text.replace("    cap_drop:\n      - ALL\n", replacement + "\n")
+        elif name == "user":
+            text = text.replace('    user: "10001:10001"\n', replacement + "\n")
+        else:
+            text = text + replacement + "\n"
+    findings = _escape_findings(tmp_path, text)
+    assert findings.get(key) == "block", f"{key} 没有被拦住：{findings}"
