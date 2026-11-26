@@ -114,3 +114,65 @@ def test_the_registry_checks_provenance_before_either_dispatch_path() -> None:
     # downstream of the admission gate. Anchoring on the external call rather than a
     # literal prefix test keeps the assertion true when routing is tightened.
     assert body.index("vet_arguments(") < body.index("_invoke_external(")
+
+
+# ---------------------------------- paths, amounts and commands (audit S-AIM-05)
+def test_a_model_supplied_path_must_stay_relative() -> None:
+    """A path from model output is one bad string away from reading the host's files."""
+    assert vet_arguments(_args(path="reports/today.html")).allowed
+    for bad in (
+        "/etc/passwd",
+        "../../config/providers.yaml",
+        "reports/../../.env",
+        "C:/Windows/system32/config/SAM",
+        "~/secret.key",
+        "a" + chr(0) + "b",
+        "x" * 2000,
+    ):
+        decision = vet_arguments(_args(path=bad))
+        assert not decision.allowed, bad
+        assert decision.reason == "unsafe_path:path"
+
+
+def test_a_host_vetted_path_is_accepted() -> None:
+    """A tool that genuinely needs an absolute path says so host-side."""
+    args = _args(path="/srv/soapbot/data/out.json")
+    assert not vet_arguments(args).allowed
+    mark_vetted(args, "path")
+    assert vet_arguments(args).allowed
+
+
+def test_amounts_must_be_real_non_negative_numbers() -> None:
+    assert vet_arguments(_args(amount_minor=250)).allowed
+    for bad in ("100", -1, None, float("nan"), float("inf"), True):
+        decision = vet_arguments(_args(amount_minor=bad))
+        assert not decision.allowed, bad
+        assert decision.reason == "insane_amount:amount_minor"
+
+
+def test_a_model_supplied_command_is_never_admitted() -> None:
+    """No validator makes a model-authored shell string safe — checking harder is a lie.
+
+    Not even an innocuous-looking one: the rule is about who wrote it, not what it says.
+    """
+    for name in ("command", "cmd", "script", "shell"):
+        decision = vet_arguments(_args(**{name: "echo hi"}))
+        assert not decision.allowed, name
+        assert decision.reason == f"unvetted_command:{name}"
+
+
+def test_a_host_built_command_can_be_marked_vetted() -> None:
+    """The host constructing the argv itself is the only way a command gets through."""
+    args = _args(cmd="fmt --check src")
+    mark_vetted(args, "cmd")
+    assert vet_arguments(args).allowed
+
+
+def test_operator_supplied_values_skip_the_model_rules() -> None:
+    """These checks exist because the *model* wrote the value; configuration is a host fact."""
+    for kwargs in (
+        {"path": "/etc/hosts"},
+        {"amount_minor": -5},
+        {"command": "systemctl restart soapbot"},
+    ):
+        assert vet_arguments(_args(origin=OPERATOR, **kwargs)).allowed

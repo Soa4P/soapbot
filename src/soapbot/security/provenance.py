@@ -19,11 +19,24 @@ Design
 * No prose inspection. The decision is set membership over a host-owned origin and a
   set of parameter names the host has actually validated.
 
-Scope of this batch: outbound resource identifiers (``url``/``uri``/``endpoint``/
-``host``/``address``), which share a boundary with ``plugins.sandbox``'s URL checks.
-Local paths and command arguments need their own host-side validators before they can
-join this set; leaving them out is an explicit statement of what is not yet covered,
-not an implicit grant.
+Coverage, and what each kind of parameter needs before it can be accepted from model
+output (audit S-AIM-05 — the first version covered only resources):
+
+* **resources** (``url``/``uri``/``endpoint``/``host``/``address``) — the host supplies a
+  deterministic checker (the same SSRF policy the plugin sandbox uses);
+* **paths** (``path``/``file``/``filename``/``dir``/``directory``) — validated here:
+  relative, no ``..``, no drive letter, no NUL, bounded length. A tool that genuinely
+  needs an absolute path must have the host call :func:`mark_vetted` on it;
+* **amounts** (``amount``/``amount_minor``/``price``/``cost``/``quantity``) — finite,
+  non-negative number. The ledger's own checks stay where they are; this only stops a
+  string, ``nan`` or a negative number from reaching a spend path at all;
+* **commands** (``command``/``cmd``/``script``/``shell``) — **never** accepted from model
+  output. There is no validator that makes a model-authored shell string safe: any check
+  is a blocklist of metacharacters, and the interpreter behind it decides what runs. A
+  host that wants to run something constructs the argv itself and marks it vetted.
+
+Leaving a parameter out of these sets is an explicit statement of what is not covered, not
+an implicit grant — the sets are closed by name on purpose.
 """
 
 from __future__ import annotations
@@ -45,6 +58,18 @@ DATA_ONLY_ORIGINS = frozenset({LOG, TELEMETRY, TOOL_RESULT})
 KNOWN_ORIGINS = frozenset({OPERATOR, MODEL, *DATA_ONLY_ORIGINS})
 
 RESOURCE_PARAMETERS = frozenset({"url", "uri", "endpoint", "host", "address"})
+
+PATH_PARAMETERS = frozenset(
+    {"path", "file", "filename", "dir", "directory", "target_path", "output_path"}
+)
+
+AMOUNT_PARAMETERS = frozenset({"amount", "amount_minor", "price", "cost", "quantity"})
+
+COMMAND_PARAMETERS = frozenset({"command", "cmd", "script", "shell"})
+
+#: Bound for a model-supplied path. Long enough for a nested relative path, short enough
+#: that nothing downstream has to think about truncation.
+MAX_PATH_CHARS = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +108,40 @@ def mark_vetted(arguments: ToolArguments, name: str) -> None:
         origin=arguments.provenance.origin,
         vetted=arguments.provenance.vetted | {name},
     )
+
+
+def path_is_safe(value: object) -> bool:
+    """A model-supplied path that cannot leave its intended directory.
+
+    Relative only: an absolute path is either a host decision (mark it vetted) or an
+    attempt to read ``/etc/...`` / ``C:/Windows/...``. ``..`` in any position, a NUL,
+    a drive letter and over-long input are refused for the same reason. Symlinks cannot
+    be judged from the string, so containment remains the caller's job — this is the
+    cheap deterministic half, and saying so is better than implying it is complete.
+    """
+    if not isinstance(value, str) or not value or len(value) > MAX_PATH_CHARS:
+        return False
+    if chr(0) in value:
+        return False
+    normalised = value.replace("\\", "/")
+    if normalised.startswith("/") or normalised.startswith("~"):
+        return False
+    if len(normalised) > 1 and normalised[1] == ":":
+        return False
+    return ".." not in normalised.split("/")
+
+
+def amount_is_sane(value: object) -> bool:
+    """A model-supplied amount: a real, non-negative number and nothing else.
+
+    ``bool`` is excluded explicitly — it is an ``int`` subclass, and ``True`` as a spend
+    amount is a bug that would be very hard to see afterwards.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return False
+    return value >= 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,4 +185,17 @@ def vet_arguments(
                 or not resource_check(value)
             ):
                 return Admission(False, f"unvetted_resource:{name}")
+
+        for name in sorted(PATH_PARAMETERS.intersection(arguments) - provenance.vetted):
+            if not path_is_safe(arguments.get(name)):
+                return Admission(False, f"unsafe_path:{name}")
+
+        for name in sorted(AMOUNT_PARAMETERS.intersection(arguments) - provenance.vetted):
+            if not amount_is_sane(arguments.get(name)):
+                return Admission(False, f"insane_amount:{name}")
+
+        # No validator is consulted: a model-authored command cannot be made safe by
+        # checking it harder.
+        for name in sorted(COMMAND_PARAMETERS.intersection(arguments) - provenance.vetted):
+            return Admission(False, f"unvetted_command:{name}")
     return Admission(True, f"origin={provenance.origin}")

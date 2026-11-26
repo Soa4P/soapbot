@@ -47,6 +47,26 @@ def test_shell_true_is_not_allowed_back(monkeypatch: pytest.MonkeyPatch) -> None
     assert "s02" in _codes(False)
 
 
+def test_shell_keyword_is_caught_in_any_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`shell = True` (spaces) and `os.popen` are the same process as `shell=True`.
+
+    The substring contract only sees the exact spelling, so a formatter or a slightly
+    different helper walked straight past it (audit S-DEP-15).
+    """
+    _mutate(
+        monkeypatch,
+        gate.SRC / "mcp" / "client.py",
+        "\nsubprocess.run(cmd, shell = True)\n",
+    )
+    assert "s02" in _codes(False)
+
+
+def test_os_popen_is_caught_by_the_ast_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`os.popen` starts a shell and takes no `shell` keyword — no text rule named it."""
+    _mutate(monkeypatch, gate.APP, "\nimport os\nos.popen('ls')\n")
+    assert "s02" in _codes(False)
+
+
 def test_pickle_loads_is_not_allowed_back(monkeypatch: pytest.MonkeyPatch) -> None:
     _mutate(monkeypatch, gate.APP, "\nimport pickle\nx = pickle.loads(b'')\n")
     failed = [r for r in gate.checks() if not r.ok]
