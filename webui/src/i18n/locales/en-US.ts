@@ -425,7 +425,7 @@ export default {
   'security.auditWhatBody':
     'Only refusals and state-changing actions. Normal chat never appears. Each row carries time, kind, action, outcome and one line of detail — no message bodies and no secret values.',
   'security.auditKinds':
-    'Common kinds: authz (permission refused), injection (prompt injection blocked), rate_limit (throttled or timed out), budget (spending approvals), plugin (load/approve/revoke), command (admin commands), memory (writes and deletes), moderation (group-management actions), login (sign-in and tokens).',
+    'Common kinds: authz (permission refused), injection (prompt injection blocked), rate_limit (throttled or timed out), budget (spending approvals), plugin (load/approve/revoke), command (admin commands), memory (writes and deletes), moderation (group-management actions), account (invites, membership grants, QQ bindings, enable/disable), login (sign-in and tokens).',
   'intro.summary': 'When to come here',
   'intro.01.purpose': 'Is it alive: process, QQ connection and message handling in one glance.',
   'intro.01.when': 'After a restart, when the group gets no answer, or when you just want to know it is up. Start here before opening logs.',

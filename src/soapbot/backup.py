@@ -63,6 +63,17 @@ ARCHIVE_FORMAT = 2
 
 MANIFEST_NAME = "manifest.json"
 
+#: Ceiling for a single member read into memory during verification or staging (audit
+#: S-DEP-18). A backup archive is operator-supplied, which means it is *not* trusted:
+#: a zip can declare a multi-gigabyte member and the old code did ``handle.read(name)``
+#: — the restore process allocated it, and an archive chosen to exhaust memory could not
+#: be diagnosed because the process was gone. Half a gigabyte is far above a real
+#: database and far below what makes a restore host swap.
+MAX_MEMBER_BYTES = 512 * 1024 * 1024
+
+#: The manifest is a few kilobytes of JSON; anything larger is a mistake or an attack.
+MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+
 #: Members that must come back *with* the database. Keys are what makes an ``enc:``
 #: value readable; ``.env`` holds the master-key reference and the panel's settings.
 DATA_SIBLINGS = ("secret.key", "jwt.key", ".env")
@@ -342,11 +353,48 @@ def rotate_backups(out_dir: Path, keep: int) -> list[str]:
     return removed
 
 
+def _read_member_capped(
+    handle: zipfile.ZipFile,
+    name: str,
+    *,
+    limit: int | None = None,
+) -> bytes:
+    """Read one member, refusing to hold more than ``limit`` bytes of it.
+
+    Two checks, because each catches what the other misses: the declared size in the
+    central directory is a *claim* (checked first, so an honest header is rejected before
+    any work), and the streamed count bounds what is actually decompressed, so a header
+    that understates its payload cannot grow the buffer past the limit either.
+
+    ``limit`` defaults to :data:`MAX_MEMBER_BYTES` *at call time* rather than as a bound
+    default: a default argument is evaluated once at import, which would leave the
+    constant looking configurable while every call used the original value.
+    """
+    ceiling = MAX_MEMBER_BYTES if limit is None else limit
+    try:
+        info = handle.getinfo(name)
+    except KeyError as exc:
+        raise BackupError(f"归档缺少清单里列出的文件：{name}") from exc
+    if info.file_size > ceiling:
+        raise BackupError(
+            f"归档成员过大，拒绝读入内存：{name}（声明 {info.file_size} 字节，上限 {ceiling}）"
+        )
+    body = bytearray()
+    with handle.open(info) as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            body.extend(chunk)
+            if len(body) > ceiling:
+                raise BackupError(f"归档成员解压后超过上限：{name}（上限 {ceiling} 字节）")
+    return bytes(body)
+
+
 def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
     try:
-        raw = archive.read(MANIFEST_NAME)
+        raw = _read_member_capped(archive, MANIFEST_NAME, limit=MAX_MANIFEST_BYTES)
     except KeyError as exc:
         raise BackupError("归档里没有 manifest.json，可能不是 soapbot 备份") from exc
+    except BackupError as exc:
+        raise BackupError(f"manifest.json 无法读取：{exc}") from exc
     try:
         manifest = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -472,10 +520,7 @@ def _verify_checksums(archive: Path, manifest: dict[str, Any]) -> None:
         raise BackupError("manifest.json 里没有 checksums，无法校验备份内容")
     with zipfile.ZipFile(archive) as handle:
         for name, expected in checksums.items():
-            try:
-                body = handle.read(name)
-            except KeyError as exc:
-                raise BackupError(f"归档缺少清单里列出的文件：{name}") from exc
+            body = _read_member_capped(handle, name)
             if _sha256_bytes(body) != expected:
                 raise BackupError(
                     f"文件校验失败：{name} 的内容与清单不一致（备份被修改或损坏）"
@@ -652,7 +697,7 @@ def restore_backup(
                 # Verified but not restorable here (e.g. config under --no-config).
                 continue
             staged.parent.mkdir(parents=True, exist_ok=True)
-            staged.write_bytes(handle.read(name))
+            staged.write_bytes(_read_member_capped(handle, name))
             plan.append((staged, target, is_db))
 
         for staged, _target, is_db in plan:

@@ -57,6 +57,30 @@ def _db(request: Request):
     return runtime.memory.db
 
 
+def _audit(*, action: str, outcome: str, detail: str, actor: Account | None = None) -> None:
+    """Record one account-lifecycle event (audit S-AUTH-09).
+
+    These went to ``logger.info`` only: rotated files, unstructured, and not what the
+    panel's security page reads. Registration, login failures, invites, membership
+    grants, QQ bindings and enable/disable are precisely the actions an operator tries
+    to reconstruct after the fact ("who could read this group, and when did that start"),
+    so they belong in the audit trail with everything else that changes authority.
+
+    ``actor`` is the account that *did* it, when there is one; the target id lives in
+    ``detail``. No password, invite code or token ever enters here — the audit log is
+    shown to admins and mirrored to a file.
+    """
+    from soapbot.security.audit import get_audit_log
+
+    who = f"actor={actor.id} " if actor is not None and actor.id else ""
+    get_audit_log().record(
+        kind="account",
+        action=action,
+        outcome=outcome,
+        detail=f"{who}{detail}",
+    )
+
+
 class Credentials(BaseModel):
     username: str = Field(..., min_length=3, max_length=32)
     password: str = Field(..., min_length=8, max_length=128)
@@ -117,7 +141,9 @@ async def create_first_owner(
     try:
         account = await create_owner(_db(request), username=payload.username, password=payload.password)
     except AccountError as exc:
+        _audit(action="owner_create", outcome="deny", detail=f"reason={exc.message[:80]}")
         raise HTTPException(status_code=409, detail=exc.message) from exc
+    _audit(action="owner_create", outcome="allow", detail=f"account={account.id}", actor=account)
     logger.info("owner account created username=%s", account.username)
     return _issue(request, response, account)
 
@@ -131,6 +157,7 @@ async def register(payload: RegisterRequest, request: Request, response: Respons
     state = _auth_state(request)
     verdict = state.register_limiter.check(host)
     if verdict.limited:
+        _audit(action="register", outcome="deny", detail=f"rate_limited from={host}")
         raise HTTPException(
             status_code=429,
             detail="too many registration attempts",
@@ -144,8 +171,11 @@ async def register(payload: RegisterRequest, request: Request, response: Respons
             password=payload.password,
         )
     except AccountError as exc:
+        # A refused invite is the signal an operator wants when invitations leak.
+        _audit(action="register", outcome="deny", detail=f"reason={exc.message[:80]} from={host}")
         raise HTTPException(status_code=400, detail=exc.message) from exc
     state.register_limiter.reset(host)
+    _audit(action="register", outcome="allow", detail=f"account={account.id} from={host}", actor=account)
     logger.info("account registered username=%s", account.username)
     return _issue(request, response, account)
 
@@ -157,6 +187,7 @@ async def login(payload: Credentials, request: Request, response: Response) -> d
     state = _auth_state(request)
     verdict = state.login_limiter.check(host)
     if verdict.limited:
+        _audit(action="account_login", outcome="deny", detail=f"rate_limited from={host}")
         raise HTTPException(
             status_code=429,
             detail="too many login attempts",
@@ -165,9 +196,12 @@ async def login(payload: Credentials, request: Request, response: Response) -> d
     account = await authenticate(_db(request), username=payload.username, password=payload.password)
     if account is None:
         # Same answer for unknown user and wrong password: the difference is an
-        # account-enumeration oracle.
+        # account-enumeration oracle. The audit row keeps the same property — it says a
+        # login was refused, not whether the user exists.
+        _audit(action="account_login", outcome="deny", detail=f"bad_credentials from={host}")
         raise HTTPException(status_code=401, detail="invalid username or password")
     state.login_limiter.reset(host)
+    _audit(action="account_login", outcome="allow", detail=f"from={host}", actor=account)
     return _issue(request, response, account)
 
 
@@ -206,7 +240,17 @@ async def create_invite_code(
         max_uses=payload.max_uses,
         session_keys=tuple(payload.session_keys),
     )
-    # The code is shown once; only its hash is stored.
+    # The code is shown once; only its hash is stored. It never enters the audit row —
+    # which would put a working invitation into a log read by every admin.
+    _audit(
+        action="invite_create",
+        outcome="allow",
+        detail=(
+            f"role={payload.role} hours={payload.hours} uses={payload.max_uses} "
+            f"sessions={len(payload.session_keys)}"
+        ),
+        actor=account,
+    )
     return {"invite": code, "role": payload.role, "expires_in_hours": payload.hours}
 
 
@@ -251,7 +295,19 @@ async def set_status(
             _db(request), account_id=account_id, status=payload.status
         )
     except AccountError as exc:
+        _audit(
+            action="account_status",
+            outcome="deny",
+            detail=f"target={account_id} reason={exc.message[:80]}",
+            actor=actor,
+        )
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    _audit(
+        action="account_status",
+        outcome="allow",
+        detail=f"target={account_id} status={updated.status}",
+        actor=actor,
+    )
     return {
         "ok": True,
         "account": {
@@ -280,7 +336,20 @@ async def grant(
             created_by=account.id,
         )
     except AccountError as exc:
+        _audit(
+            action="membership_grant",
+            outcome="deny",
+            detail=f"target={payload.account_id} reason={exc.message[:80]}",
+            actor=account,
+        )
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    # "Who can read this group" is the question this answers months later.
+    _audit(
+        action="membership_grant",
+        outcome="allow",
+        detail=f"target={payload.account_id} session={payload.session_key}",
+        actor=account,
+    )
     return {"ok": True}
 
 
@@ -330,8 +399,22 @@ async def bind(
             _db(request), account_id=account_id, qq_user_id=payload.qq_user_id
         )
     except AccountError as exc:
+        _audit(
+            action="qq_bind",
+            outcome="deny",
+            detail=f"target={account_id} reason={exc.message[:80]}",
+            actor=actor,
+        )
         raise HTTPException(status_code=400, detail=exc.message) from exc
     _invalidate_session_mapper()
+    # The binding decides whose platform conversation folds into whose account, so the
+    # link itself is the record worth keeping.
+    _audit(
+        action="qq_bind",
+        outcome="allow",
+        detail=f"target={account_id} qq={payload.qq_user_id}",
+        actor=actor,
+    )
     return {"ok": True, "account": _binding_payload(updated)}
 
 
@@ -348,6 +431,13 @@ async def unbind(
     try:
         updated = await unbind_qq_user(_db(request), account_id=account_id)
     except AccountError as exc:
+        _audit(
+            action="qq_unbind",
+            outcome="deny",
+            detail=f"target={account_id} reason={exc.message[:80]}",
+            actor=actor,
+        )
         raise HTTPException(status_code=400, detail=exc.message) from exc
     _invalidate_session_mapper()
+    _audit(action="qq_unbind", outcome="allow", detail=f"target={account_id}", actor=actor)
     return {"ok": True, "account": _binding_payload(updated)}

@@ -146,8 +146,19 @@ const counts = computed(() => {
 
 // Machine tokens from the audit record (`authz`, `injection`, `deny`, …). Deliberately
 // left untranslated: these are the values an operator greps for in the log, and a
-// translated copy would make the panel and the file disagree.
-const kinds = ['authz', 'injection', 'memory', 'command', 'rate_limit', 'plugin', 'login']
+// translated copy would make the panel and the file disagree. `account` covers the
+// lifecycle events — invite issued, membership granted, QQ bound, account disabled
+// (S-AUTH-09) — which used to be logger lines only and therefore unfilterable here.
+const kinds = [
+  'authz',
+  'injection',
+  'memory',
+  'command',
+  'rate_limit',
+  'plugin',
+  'account',
+  'login',
+]
 
 function outcomeClass(outcome: string): string {
   if (outcome === 'deny') return 'bad'

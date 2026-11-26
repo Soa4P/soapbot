@@ -253,3 +253,68 @@ async def test_the_last_active_owner_cannot_be_disabled(env) -> None:
     )
     assert response.status_code == 400
     assert "owner" in response.json()["detail"]
+
+
+# ------------------------------------------------------- audit trail (S-AUTH-09)
+
+
+def _events(action: str) -> list[dict]:
+    from soapbot.security.audit import get_audit_log
+
+    return [e for e in get_audit_log().recent(limit=500) if e["action"] == action]
+
+
+async def test_a_refused_login_is_recorded(env) -> None:
+    """A stream of these is what credential stuffing looks like from the server side.
+
+    It used to be a ``logger`` line only: rotated, unstructured, and invisible to the
+    panel's security page — the place an operator actually looks.
+    """
+    response = await env.client.post(
+        "/api/accounts/login", json={"username": "bob", "password": "wrong password"}
+    )
+    assert response.status_code == 401
+
+    events = _events("account_login")
+    assert events and events[-1]["outcome"] == "deny"
+    # The row must not reintroduce the enumeration oracle the response body avoids:
+    # no username, and of course no password.
+    assert "bob" not in events[-1]["detail"]
+    assert "wrong" not in events[-1]["detail"]
+
+
+async def test_a_status_change_is_recorded_with_who_did_it(env) -> None:
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    await env.client.post(
+        f"/api/accounts/{env.member.id}/status", json={"status": "disabled"}
+    )
+
+    events = _events("account_status")
+    assert events and events[-1]["outcome"] == "allow"
+    assert f"target={env.member.id}" in events[-1]["detail"]
+    assert f"actor={env.owner.id}" in events[-1]["detail"]
+
+
+async def test_an_invite_is_recorded_without_the_code(env) -> None:
+    """The invitation is a working credential; the audit row must not carry it."""
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    response = await env.client.post("/api/accounts/invites", json={"role": "member"})
+    assert response.status_code == 200
+    code = response.json()["invite"]
+
+    events = _events("invite_create")
+    assert events and events[-1]["outcome"] == "allow"
+    assert code not in events[-1]["detail"]
+    assert "role=member" in events[-1]["detail"]
+
+
+async def test_a_qq_binding_is_recorded(env) -> None:
+    env.current.update({"subject": str(env.owner.id), "role": env.owner.role})
+    response = await env.client.put(
+        f"/api/accounts/{env.member.id}/binding", json={"qq_user_id": "100012345"}
+    )
+    assert response.status_code == 200
+
+    events = _events("qq_bind")
+    assert events and events[-1]["outcome"] == "allow"
+    assert "qq=100012345" in events[-1]["detail"]

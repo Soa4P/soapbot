@@ -459,7 +459,7 @@ export default {
   'security.auditWhatBody':
     '只有「被拒绝」和「改变了系统状态」的动作会进来，正常聊天不会。每条包含时间、类别、动作、结果和一行说明，说明里不含消息正文，也不含密钥的值。',
   'security.auditKinds':
-    '常见类别：authz（权限被拒）、injection（提示注入被拦）、rate_limit（超频或超时丢弃）、budget（额度审批）、plugin（插件加载/批准/拒绝）、command（管理命令）、memory（记忆写入/删除）、moderation（群管操作）、login（登录与令牌）。',
+    '常见类别：authz（权限被拒）、injection（提示注入被拦）、rate_limit（超频或超时丢弃）、budget（额度审批）、plugin（插件加载/批准/拒绝）、command（管理命令）、memory（记忆写入/删除）、moderation（群管操作）、account（邀请签发、成员授权、QQ 绑定、账号启停）、login（登录与令牌）。',
   'intro.summary': '什么时候该来这页',
   'intro.01.purpose': '机器人现在活着吗：进程、QQ 连接、消息处理三层，一眼看完。',
   'intro.01.when': '刚重启、群里没反应、或者你只想确认它还在。先看这页，别急着翻日志。',
