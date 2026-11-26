@@ -52,6 +52,7 @@
 | 群管命令 | ✅ | |
 | 额度审批 | ✅（默认开） | 日/周/月周期与单笔上限（整数分）；状态机、原子预留、禁止自批、批准时重算额度。`POST /api/budget/{id}/approve\|deny` 与 QQ `/budget` 共用账本，都要求 `APPROVE_PAYMENT` + 真实凭据；面板第 10 页可批准/驳回。两条路径都往 `APPROVAL_BUS` 发同一份事件。**仍不**持有支付凭据、调用支付 API 或自动扣款。设计记录：[wave5-budget.md](wave5-budget.md) |
 | B 站元数据与观后感 | ✅（默认关） | L2 公开元数据；L3 登录态由插件的 `bilibili` 能力承担（Cookie 宿主持有，需配 `SOAPBOT_BILI_COOKIE`） |
+| B 站直播播报 | ✅（默认关） | 关注若干直播间，开播/下播各播报一次（`/bili 直播 [房间号]` 可手动查）。**只报状态变化**：进程首次轮询只建立基线、不播报（否则重启会给每个在播房间念一遍），请求失败也不播报（保持上次已知状态）。播报目标是显式配置的会话键，不继承任何请求上下文 |
 | 插件发图片（表情包/照片） | ✅（需逐项批准 `send_media`） | 与 send 同一套会话白名单 + 4 MiB 上限；审计只记大小 |
 | 人格卡自主字段与温度 | ✅ | 人格卡 front matter 可选 `autonomy`（会话白名单 / 每日上限）、`warmth`（起点 / 增速 / 衰减 / 阈值）、`voice_self_select`；非法值回退保守默认，面板保存与版本回滚都不丢。宿主 `WarmthTracker` 只在回复成功归档后计数，`session.view` 只读暴露 `warmth` 标量。**挑音色的管线环节未实现** |
 | WBI 字幕读取 | ✅（L2，默认关） | `BilibiliClient.subtitle(bvid)` 走 `/x/player/wbi/v2` + WBI 签名，**不注入登录 Cookie**；只返回语言与字幕 URL 白名单，L1 明确拒绝。端点 `GET /api/bilibili/subtitle` 由宿主钉死，插件不能自选 path |
