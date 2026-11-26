@@ -128,6 +128,7 @@ PowerShell 命令，以及用 `/api/auth/status` 查真实路径和状态的方�
 |---|---|
 | 从零接上 QQ：NapCat 怎么起、二维码怎么扫、连不上怎么查 | [qq-napcat-setup.md](qq-napcat-setup.md) |
 | 人格卡怎么写、怎么绑到某个群 | [personas.md](personas.md) |
+| 给人格卡挂 Live2D 形象（当前为占位预览） | [live2d-avatar.md](live2d-avatar.md) |
 | MCP 是什么、要不要开、怎么配 | [mcp.md](mcp.md) |
 | 每一个环境变量、配置文件、依赖 | [configuration.md](configuration.md) |
 | 架构、模块划分、一条消息走完全程 | [architecture.md](architecture.md) |

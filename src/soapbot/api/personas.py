@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from soapbot.ai.persona_growth import PersonaGrowthError
 from soapbot.api.auth import require_role
@@ -47,6 +47,47 @@ def _checked(persona_id: str) -> str:
     if not _PERSONA_ID_RE.match(persona_id):
         raise HTTPException(status_code=400, detail="invalid persona id")
     return persona_id
+
+
+@router.get("/{persona_id}/avatar")
+async def avatar(persona_id: str) -> dict[str, Any]:
+    """Whether this persona has a Live2D model installed, and what it declares.
+
+    Always 200 with ``available`` in the body: "no model yet" is a normal state an
+    operator is about to fix, not an error the panel should render as a failure.
+    """
+    _checked(persona_id)
+    from soapbot.ai.avatar import describe
+    from soapbot.config import settings
+
+    return describe(settings.data_dir, persona_id)
+
+
+@router.get("/{persona_id}/avatar/asset")
+async def avatar_asset(persona_id: str, path: str = Query(..., max_length=512)) -> Response:
+    """Serve one file from the persona's avatar directory.
+
+    Containment and the extension allowlist live in ``ai/avatar.resolve_asset``; this
+    handler only turns a resolved pair into a response. A miss is a bare 404 — the panel
+    does not need to know *why* the file is unavailable, and saying so would let a caller
+    probe which files exist.
+    """
+    _checked(persona_id)
+    from soapbot.ai.avatar import resolve_asset
+    from soapbot.config import settings
+
+    found = resolve_asset(settings.data_dir, persona_id, path)
+    if found is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+    target, content_type = found
+    # ``Cache-Control`` because a model is edited rarely and re-downloading a texture on
+    # every panel navigation is pure waste; ``no-transform`` keeps an intermediary from
+    # re-encoding a PNG the renderer needs byte-exact.
+    return Response(
+        content=target.read_bytes(),
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=300, no-transform"},
+    )
 
 
 @router.get("/{persona_id}/growth")
