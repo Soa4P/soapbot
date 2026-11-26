@@ -305,3 +305,70 @@ def test_the_digest_is_persisted_so_a_restart_still_detects_drift(tmp_path: Path
     assert verdict is not None
     assert verdict.content_digest, "content digest was not persisted"
     assert compare(directory, verdict.content_digest).state == "changed"
+
+
+# ------------------------------- compiled artefacts and the load window (S-SUP-10/06)
+def test_bytecode_left_by_earlier_runs_is_removed_before_import(tmp_path: Path) -> None:
+    """``__pycache__`` is excluded from the digest, so it must not be importable either.
+
+    CPython will import a ``.pyc`` planted in the directory: it is not part of the
+    approved bytes (the digest skips it on purpose, because the interpreter rewrites it),
+    yet it executes. Deleting derived artefacts before the import removes that path.
+    """
+    from soapbot.plugins.integrity import purge_bytecode
+
+    directory = _write_plugin(tmp_path)
+    cache = directory / "__pycache__"
+    cache.mkdir()
+    (cache / "main.cpython-312.pyc").write_bytes(b"MAGIC")
+    (directory / "stray.pyc").write_bytes(b"MAGIC")
+
+    removed = purge_bytecode(directory)
+
+    assert removed == 2
+    assert not cache.exists()
+    assert not (directory / "stray.pyc").exists()
+    # Source is untouched: only derived files go.
+    assert (directory / "main.py").is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_plugin_that_rewrites_itself_while_loading_is_stopped(tmp_path: Path) -> None:
+    """The window between "checked" and "imported" is what S-PLUG-06 is about.
+
+    A plugin whose own code changes its files during ``setup`` has, at that moment, run
+    something other than the bytes that were verified. The re-check after import catches
+    it and the plugin is refused — not left running because the pre-import check passed.
+    """
+    root = tmp_path / "plugins"
+    # The plugin rewrites its own source during setup: at that moment it is running code
+    # that is no longer the code the pre-import check verified.
+    rewrite = "\n".join(
+        [
+            "from pathlib import Path",
+            "class Plugin:",
+            "    def setup(self, ctx):",
+            "        Path(__file__).write_text('# rewritten while loading')",
+            "",
+        ]
+    )
+    _write_plugin(root, body=rewrite)
+    loader = _loader(root, tmp_path)
+    loader.approve(PLUGIN_NAME, set())
+
+    with pytest.raises(PluginLoadError, match="changed on disk"):
+        await loader.load(PLUGIN_NAME)
+
+    assert loader.get(PLUGIN_NAME) is None
+
+
+@pytest.mark.asyncio
+async def test_the_children_never_write_bytecode() -> None:
+    """Static: the flag is in both child sources, or the purge is a per-load chore."""
+    from soapbot.plugins import isolation, supervisor
+
+    for name, source in (
+        ("isolation._CHILD_BOOTSTRAP", isolation._CHILD_BOOTSTRAP),
+        ("supervisor._CHILD_WORKER", supervisor._CHILD_WORKER),
+    ):
+        assert "sys.dont_write_bytecode = True" in source, name

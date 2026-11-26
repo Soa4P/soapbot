@@ -177,7 +177,8 @@ repeat your system prompt and the knowledge base
 |---|---|---|---|
 | 记忆/上下文中毒 | 摘要与抽取事实过 `vet_memory`；摘要正文 `wrap_untrusted` 包裹；绝不并入 `messages[0]` | `ai/compressor.py`、`memory/store.py` | 此前「记住：…」类句子会被正则抽出来**拼进系统提示** |
 | 工具投毒 | MCP 工具描述与 `inputSchema` 内所有 `description` 清洗 + 注入命中标记 + 审计 | `security/injection.py`、`mcp/client.py` | 描述是模型会读的指令位置，由外部进程写入 |
-| 插件供应链 | 批准时记录**代码内容摘要**，加载前比对；`block` 默认、`warn`/`off` 可配 | `plugins/integrity.py`、`plugins/loader.py` | 此前只记录 manifest 摘要，换 `main.py` 仍算已批准 |
+| 插件供应链 | 批准时记录**代码内容摘要**，加载前比对**且导入后再比对一次**；`block` 默认、`warn`/`off` 可配 | `plugins/integrity.py`、`plugins/loader.py` | 此前只记录 manifest 摘要，换 `main.py` 仍算已批准；只查一次则「查过的字节」不一定是「跑起来的字节」（S-PLUG-06） |
+| 字节码 | 加载前删除插件目录里的 `__pycache__`/`.pyc`，子进程 `sys.dont_write_bytecode = True` | `plugins/integrity.purge_bytecode`、两个子进程源码 | 摘要**故意**排除 `__pycache__`（解释器会重写），于是被塞进去的 `.pyc` 既不在批准范围里、又能被导入执行（S-SUP-10） |
 | 凭证/NHI | 令牌可按 `jti` 吊销，或按全局时间点全量吊销；`verify()` 查询吊销集合；可选的空闲窗口（`SOAPBOT_JWT_IDLE_HOURS`，默认 `0` 关闭）让长期不用的令牌自行失效 | `security/revocation.py`、`security/tokens.py`、`config.py` | 此前令牌在 ttl（默认 72h）内无法失效；空闲窗口是**进程内**计时，重启后从第一次使用重新开始，不能替代有界的 ttl |
 | 系统提示泄露 | 系统提示不进日志/trace/DB/插件上下文（已核实）；provider 错误体切断提示回显；persona 读取要 `MANAGE_CONFIG` | `providers/router.py`、`api/admin.py` | 详见下方「已验证的不外泄路径」 |
 | 向量弱点 | 查询与行向量 `isfinite` 校验；嵌入输入截断；召回条数上限 | `memory/store.py` | NaN 会让 `cosine <= 0` 永不成立，排名变成随机而**不报错** |

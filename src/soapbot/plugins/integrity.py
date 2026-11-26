@@ -23,6 +23,7 @@ position for manifests.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -170,4 +171,45 @@ def forget(directory: Path) -> None:
     _CACHE.pop(str(Path(directory).resolve()), None)
 
 
-__all__ = ["IntegrityVerdict", "compare", "compare_async", "digest_tree", "forget"]
+def purge_bytecode(directory: Path) -> int:
+    """Delete compiled artefacts inside a plugin directory; return how many files.
+
+    ``__pycache__`` is excluded from the digest on purpose — the interpreter rewrites it
+    on every import, so hashing it would make each successful load look like tampering.
+    The exclusion has a consequence the audit named (S-SUP-10): a ``.pyc`` planted by
+    someone with write access is *not* covered by the approved bytes, and CPython will
+    happily import a ``.pyc`` whose embedded source stamp matches. Deleting them before
+    the import removes that path for anything that was there beforehand, and
+    ``sys.dont_write_bytecode`` in the plugin processes stops the interpreter creating
+    them again (so their absence stays the normal state).
+
+    Derived artefacts only: deleting them costs one re-compile and nothing else.
+    """
+    root = Path(directory)
+    removed = 0
+    for path in list(root.rglob("*")):
+        if path.is_symlink():
+            continue
+        if path.is_dir() and path.name == "__pycache__":
+            for child in path.rglob("*"):
+                if child.is_file():
+                    removed += 1
+            import shutil
+
+            shutil.rmtree(path, ignore_errors=True)
+            continue
+        if path.is_file() and path.suffix in _IGNORED_SUFFIXES:
+            with contextlib.suppress(OSError):
+                path.unlink()
+                removed += 1
+    return removed
+
+
+__all__ = [
+    "IntegrityVerdict",
+    "compare",
+    "compare_async",
+    "digest_tree",
+    "forget",
+    "purge_bytecode",
+]
