@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from soapbot.net import outbound_client
+from soapbot.net import drain_capped, outbound_client
 from soapbot.providers.base import (
     BaseProvider,
     CapabilitySlot,
@@ -143,8 +143,10 @@ class OpenAICompatProvider(BaseProvider):
                     # or another tenant's data on a relay; the non-streaming path was
                     # already fixed this way and this one lagged behind — last_error on
                     # GET /api/providers is member-readable, so the body must not ride
-                    # along. Drain it so the connection can be reused, then discard.
-                    await resp.aread()
+                    # along. Drain it so the connection can be reused, then discard —
+                    # but capped: a plain ``aread()`` here was an unbounded read of
+                    # bytes the relay chooses the size of (S-MSG-11).
+                    await drain_capped(resp)
                     raise ProviderError(
                         f"{self.kind} stream HTTP {resp.status_code}",
                         status=resp.status_code,

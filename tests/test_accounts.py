@@ -142,3 +142,61 @@ async def test_invite_rejects_an_unknown_code(db) -> None:
         await redeem_invite(
             db, code="not-a-real-code", username="bob", password="correct horse battery"
         )
+
+
+async def test_an_unknown_user_costs_the_same_scrypt_as_a_wrong_password(db) -> None:
+    """S-AUTH-08: identical text, identical clock.
+
+    The two paths always answered with the same message. What differed was the work:
+    a wrong password ran scrypt, an unknown username returned before it. Timing that
+    gap at scale identifies real usernames without ever guessing a password.
+
+    Asserted at the seam rather than with a wall-clock measurement, which on a loaded
+    CI runner would flake: the unknown-user branch must call ``verify_password`` —
+    and therefore scrypt — exactly as the wrong-password branch does.
+    """
+    from soapbot.accounts import service as service_module
+
+    await create_owner(db, username="alice", password="correct horse battery")
+
+    calls: list[str] = []
+    real = service_module.verify_password
+
+    def spy(password: str, salt_hex: str, expected_hex: str) -> bool:
+        calls.append(salt_hex)
+        return real(password, salt_hex, expected_hex)
+
+    service_module.verify_password = spy
+    try:
+        assert await authenticate(db, username="nobody", password="whatever123") is None
+        unknown_calls = len(calls)
+        calls.clear()
+        assert await authenticate(db, username="alice", password="wrong password") is None
+        wrong_calls = len(calls)
+    finally:
+        service_module.verify_password = real
+
+    assert unknown_calls == 1, "未知用户也必须付出一次 scrypt，否则时序是可枚举的"
+    assert wrong_calls == 1
+
+
+async def test_a_disabled_account_is_not_told_apart_from_an_unknown_one(db) -> None:
+    """Disabled is the same oracle as unknown, one step removed.
+
+    "This user exists but is off" is still an enumeration signal, and the fix is the
+    same: do the work, then answer identically. The row is disabled between invite
+    redemption and the attempt, so the account genuinely exists.
+    """
+    owner = await create_owner(db, username="alice", password="correct horse battery")
+    code = await create_invite(db, created_by=owner.id)
+    member = await redeem_invite(
+        db, code=code, username="bob", password="correct horse battery"
+    )
+    async with db.write() as session:
+        await session.execute(
+            AccountRow.__table__.update()
+            .where(AccountRow.id == member.id)
+            .values(status="disabled")
+        )
+
+    assert await authenticate(db, username="bob", password="correct horse battery") is None

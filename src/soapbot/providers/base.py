@@ -23,7 +23,7 @@ from typing import Any, TypeVar
 
 import httpx
 
-from soapbot.net import build_timeout, outbound_client
+from soapbot.net import ResponseTooLargeError, build_timeout, outbound_client, read_capped
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,37 @@ class ChatResponse:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+class CappedResponse:
+    """A fully-read response: status, headers, body — nothing else.
+
+    Returned by :meth:`BaseProvider._request` instead of an ``httpx.Response`` taken
+    from ``client.request``, because that call reads the whole body before the caller
+    can look at its size. With a streamed send the body is read by
+    :func:`soapbot.net.read_capped`, which refuses to grow past
+    :data:`soapbot.net.MAX_RESPONSE_BYTES` *after* decompression (S-MSG-11).
+
+    The attribute set is deliberately the small one every provider actually uses:
+    ``status_code``, ``headers`` (for ``Retry-After``) and ``json()``. A dropped body
+    also drops cookies, history and the redirect chain — none of which any provider
+    here reads, and all of which invite code that assumes a live connection.
+    """
+
+    __slots__ = ("content", "headers", "status_code")
+
+    def __init__(self, status_code: int, headers: httpx.Headers, content: bytes) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self.content = content
+
+    def json(self) -> Any:
+        import json
+
+        return json.loads(self.content)
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return f"<CappedResponse {self.status_code} {len(self.content)}B>"
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     """Runtime configuration for one provider instance."""
@@ -274,10 +305,26 @@ class BaseProvider(ABC):
         *,
         client: httpx.AsyncClient | None = None,
         **kwargs: Any,
-    ) -> httpx.Response:
-        """One request on the shared client. Never closes the client."""
+    ) -> CappedResponse:
+        """One request on the shared client, body read under a hard ceiling.
+
+        ``client.request`` was the old shape and it reads the entire body into memory
+        before returning — so a relay that answers with a small gzip bomb got the whole
+        expansion allocated inside this process, and the 10 MB ``Content-Length`` check
+        elsewhere only looked at the *compressed* size (S-MSG-11). Sending with
+        ``stream=True`` and reading through :func:`read_capped` bounds the decoded body
+        instead. Nothing is left open: the body is fully consumed before returning.
+        """
         async with outbound_client(client=client) as http:
-            return await http.request(method, url, timeout=self._timeout(), **kwargs)
+            request = http.build_request(method, url, timeout=self._timeout(), **kwargs)
+            response = await http.send(request, stream=True)
+            try:
+                body = await read_capped(response)
+            except ResponseTooLargeError as exc:
+                raise ProviderError(
+                    f"{self.kind} response too large (limit {exc.limit} bytes)"
+                ) from exc
+            return CappedResponse(response.status_code, response.headers, body)
 
     async def _with_retry(
         self,

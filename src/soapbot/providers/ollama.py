@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from soapbot.net import outbound_client
+from soapbot.net import drain_capped, outbound_client
 from soapbot.providers.base import (
     BaseProvider,
     CapabilitySlot,
@@ -120,8 +120,9 @@ class OllamaProvider(BaseProvider):
             try:
                 if resp.status_code >= 400:
                     # Status only (S-MSG-05): the body can echo the prompt or another
-                    # tenant's data, and last_error is member-readable.
-                    await resp.aread()
+                    # tenant's data, and last_error is member-readable. Capped drain:
+                    # the body's size is the server's choice (S-MSG-11).
+                    await drain_capped(resp)
                     raise ProviderError(
                         f"ollama stream HTTP {resp.status_code}",
                         status=resp.status_code,

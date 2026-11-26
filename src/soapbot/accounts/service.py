@@ -40,6 +40,14 @@ _DKLEN = 32
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 MIN_PASSWORD_LENGTH = 8
 
+#: Fixed salt/hash for the timing-equalising branch in :func:`_burn_password_time`.
+#: The *value* is irrelevant — the branch never matches — but both fields must be
+#: non-empty, or ``verify_password`` returns before doing the scrypt that is the whole
+#: point. Deliberately not a real digest: computing one at import would make every
+#: process pay ~50 ms of scrypt whether or not anyone logs in.
+_DUMMY_SALT = "00" * 16
+_DUMMY_HASH = "00" * 32
+
 
 class AccountError(Exception):
     """A rejected account operation, with a message safe to show the caller."""
@@ -158,12 +166,32 @@ async def create_owner(db: Database, *, username: str, password: str) -> Account
         return _to_account(row)
 
 
+def _burn_password_time(password: str) -> None:
+    """Spend the same scrypt cost as a real verification, then throw the answer away.
+
+    The unknown-user and disabled-user paths used to return before touching scrypt,
+    so they answered in microseconds while a wrong password took ~50 ms. The response
+    body was already identical ("invalid username or password"), which hid the oracle
+    in the text and left it in the clock (S-AUTH-08).
+
+    A fixed salt is fine here: nothing is compared, and the point is the *cost*, not a
+    plausible-looking hash. ``verify_password`` is reused rather than duplicating the
+    scrypt parameters, so a future change to them cannot make this branch cheaper than
+    the real one.
+    """
+    verify_password(password, _DUMMY_SALT, _DUMMY_HASH)
+
+
 async def authenticate(db: Database, *, username: str, password: str) -> Account | None:
     async with db.session_factory()() as session:
         row = (
             await session.execute(select(AccountRow).where(AccountRow.username == username.strip()))
         ).scalar_one_or_none()
         if row is None or row.status != "active":
+            # Same wall-clock cost as a real attempt (S-AUTH-08). "Disabled" is folded
+            # in on purpose: telling a caller that an account exists but is off is the
+            # same enumeration signal with an extra step.
+            _burn_password_time(password)
             return None
         if not verify_password(password, row.salt, row.password_hash):
             return None

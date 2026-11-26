@@ -88,6 +88,68 @@ def trace_headers() -> dict[str, str]:
     return {TRACE_HEADER: tid} if tid else {}
 
 
+#: Ceiling for one non-streaming response body, applied **after** decompression.
+#:
+#: A completion response is a few tens of kilobytes; the largest legitimate one here
+#: is an embedding batch, still well under a megabyte. Eight megabytes leaves an order
+#: of magnitude of headroom and stops the case that motivated the cap (S-MSG-11): a
+#: half-trusted relay can answer with a small gzip bomb, and ``resp.json()`` expands it
+#: in the process's memory before anything gets a chance to look at the size. Streaming
+#: paths never buffer the whole body, so they are not covered by this limit.
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+#: Enough to reuse the connection after an error status without reading the body. The
+#: body of a 4xx/5xx is deliberately kept out of the exception (S-MSG-05), so all this
+#: reader needs to do is drain it.
+DRAIN_LIMIT_BYTES = 64 * 1024
+
+
+class ResponseTooLargeError(RuntimeError):
+    """A response body exceeded :data:`MAX_RESPONSE_BYTES`.
+
+    Raised from :func:`read_capped`. Providers translate it into their own error type;
+    it exists separately so the *reason* survives long enough to be logged as a size
+    problem rather than as a generic parse failure.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"response body exceeded {limit} bytes")
+        self.limit = limit
+
+
+async def read_capped(response: httpx.Response, *, limit: int = MAX_RESPONSE_BYTES) -> bytes:
+    """Read a (streamed) response body, refusing to grow past ``limit``.
+
+    ``aiter_bytes`` yields *decoded* bytes, which is the whole point: checking
+    ``Content-Length`` would miss a gzip bomb, because the header describes the
+    compressed size. Memory use is bounded by ``limit`` plus one chunk.
+    """
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    body = bytearray()
+    try:
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise ResponseTooLargeError(limit)
+    finally:
+        # The caller never sees the response object, so closing is this function's job.
+        await response.aclose()
+    return bytes(body)
+
+
+async def drain_capped(response: httpx.Response, *, limit: int = DRAIN_LIMIT_BYTES) -> None:
+    """Read and discard a body so the connection can be reused — but not unbounded."""
+    read = 0
+    try:
+        async for chunk in response.aiter_bytes():
+            read += len(chunk)
+            if read >= limit:
+                break
+    finally:
+        await response.aclose()
+
+
 def build_timeout(read: float | None = None) -> httpx.Timeout:
     """Layered timeout: short connect, caller-controlled read, short pool wait.
 

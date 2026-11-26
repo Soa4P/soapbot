@@ -182,6 +182,10 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 - `GET /readyz`：就绪探针。只检查「让它无法工作」的事——数据目录不可写（SQLite 会先在这里
   表现出来）、请求了运行时却没构建起来、或构建了但没在跑。**不**因为某个 QQ 号离线就返回
   503，那会把控制台从负载均衡里摘掉，恰好是运维最需要它的时候。
+  响应分两档：匿名调用者只拿到 `status`、`problems`（**机器可读代码**，如
+  `data_dir_not_writable`）和 `startup_error_count`；带有效凭据（或部署显式信任 loopback）
+  才拿到 `data_dir`、`details`（可读句子）与 `startup_errors` 列表。探针必须无凭据可用，
+  而「数据目录在哪、哪个适配器/插件失败」拼起来就是这台机器的地图（S-AUTH-07）。
 - `scripts/backup.py`：用 `sqlite3.Connection.backup` 取一致性快照（服务以 WAL 运行，
   `cp` 出来的库可能缺最后几条已提交的消息），含 `data/soapbot.db` + `config/` + manifest，
   先写临时文件再改名。
@@ -203,7 +207,7 @@ DNS 解析走 `loop.getaddrinfo`，不是同步的 `socket.getaddrinfo`：后者
 | **语音（转写 + 合成）** | **本轮新增（后端）** | `tests/test_voice.py`（33 项） |
 | **多语言（对外文案 + 面板全 13 页）** | **已完成** | 后端 `tests/test_i18n.py`（20 项）、面板 `test_webui_i18n.py`（8 项）；12 个管理页浏览器逐页实测中英双向切换，第 13 页存档由 `test_webui_i18n.py` 保证键齐全与「模板无中文残留」，**未做浏览器实测** |
 | **系统设置页（12 页）** | **已完成** | `tests/test_settings_api.py`（19 项）；浏览器实测保存→重启→生效 |
-| **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（15 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
+| **多用户账号 + 只读聊天存档（13 页）** | **本轮新增（后端 + 网页 + 手机骨架）** | `tests/test_accounts.py`（17 项）、`test_accounts_api.py`（13 项）、`test_chat_api.py`（12 项）；`npm run verify` 全绿并重建 `dist`；**未做浏览器实测与 Flutter 真机构建**，见 [chat-archive.md](chat-archive.md) |
 | **外部仓库分析与去 AI 味规范** | **本轮新增（文档 / 工具）** | `tests/test_ai_flavor_check.py`（7 项）；两处链接拼写纠正由 GitHub API 核实，`dsh-longing` 适配为只读 `warmth-observer` 示例插件。**`Fangi8` 仍 404，待用户提供正确地址**；`ai_flavor_scan.py` 是可选自查工具，不进 CI |
 | **人格卡自主字段 / 温度 / WBI 字幕** | **本轮新增** | `tests/test_persona_autonomy_warmth.py`（17 项）；修好回滚丢 `extra` 的旧缺陷。挑音色管线已实现（voice/picker.py，候选表+缓存+回退，#55）；字幕已做六条真实视频实测（aid/cid 修复，#59） |
 | **QQ 空间读写能力面** | **本轮新增（默认完全关闭）** | `tests/test_qzone_surface.py`（15 项）；读写分开审批、四个白名单协议动作、写三重确认、审计零正文。**未做真实协议端联调**，官方机器人无此接口，个人号风控/冻结风险由操作者承担 |

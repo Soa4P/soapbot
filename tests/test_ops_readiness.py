@@ -50,13 +50,20 @@ def test_healthz_matches_the_documented_health_route(client: TestClient) -> None
 
 
 def test_readyz_reports_ready_when_the_data_dir_is_writable(
-    client: TestClient, tmp_path: Path
+    client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:
+    # The suite turns strict loopback off (loopback == owner); production defaults to
+    # on. Pin the production posture here, because the redaction is about *that* case.
+    monkeypatch.setattr(settings, "strict_loopback_auth", True)
+
     response = client.get("/readyz")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
     assert body["problems"] == []
+    # An anonymous probe learns the verdict, not where the machine keeps its files.
+    assert "data_dir" not in body
+    assert "startup_errors" not in body
     # The probe file must not survive its own check.
     assert not list(tmp_path.glob(".readyz-*"))
 
@@ -66,6 +73,7 @@ def test_readyz_fails_when_the_data_dir_cannot_be_created(
 ) -> None:
     """A file where the data directory should be is the cheapest reliable way to make
     mkdir fail on every platform, including Windows where chmod proves nothing."""
+    monkeypatch.setattr(settings, "strict_loopback_auth", True)
     blocked = tmp_path / "blocked"
     blocked.write_text("not a directory", encoding="utf-8")
     monkeypatch.setattr(settings, "data_dir", blocked)
@@ -73,7 +81,53 @@ def test_readyz_fails_when_the_data_dir_cannot_be_created(
     response = client.get("/readyz")
     assert response.status_code == 503
     assert response.json()["status"] == "unavailable"
-    assert any("data directory" in p for p in response.json()["problems"])
+    assert "data_dir_not_writable" in response.json()["problems"]
+    # The OS message embeds the path; an anonymous caller must not receive it (S-AUTH-07).
+    assert "blocked" not in response.text
+
+
+def test_a_trusted_loopback_still_sees_the_full_diagnosis(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    """Gating the detail must not take it away from the person who needs it.
+
+    A deployment that has turned strict loopback off has already declared local
+    clients to be owners; the readiness probe follows that same decision instead of
+    inventing a second rule.
+    """
+    monkeypatch.setattr(settings, "strict_loopback_auth", False)
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "ops")
+
+    body = client.get("/readyz").json()
+    assert body["data_dir"] == str(tmp_path / "ops")
+    assert body["startup_errors"] == []
+    assert body["details"] == []
+
+
+def test_operator_detail_is_not_granted_to_an_unverified_credential(
+    monkeypatch,
+) -> None:
+    """A junk bearer token is not an operator.
+
+    The case that matters is strict loopback: a caller from 127.0.0.1 that *presents*
+    a credential is asking to be treated as authenticated, and the gate must verify it
+    rather than take the header as proof. (With strict loopback off, loopback is owner
+    by configuration and the token is irrelevant — that is the deployment's own choice,
+    not this helper's.)
+    """
+    from types import SimpleNamespace
+
+    from soapbot.api.auth import operator_detail_allowed
+
+    monkeypatch.setattr(settings, "strict_loopback_auth", True)
+    request = SimpleNamespace(
+        headers={"Authorization": "Bearer not-a-real-token"},
+        cookies={},
+        client=SimpleNamespace(host="127.0.0.1"),
+        app=SimpleNamespace(state=SimpleNamespace()),
+        url="http://127.0.0.1:6185/readyz",
+    )
+    assert operator_detail_allowed(request) is False
 
 
 class _BrokenDatabase:
@@ -100,7 +154,7 @@ def test_readyz_fails_when_the_database_cannot_be_queried(
     response = client.get("/readyz")
     assert response.status_code == 503
     body = response.json()
-    assert any("database not usable" in p for p in body["problems"])
+    assert "database_not_usable" in body["problems"]
     # /readyz is unauthenticated; the driver message can carry a path.
     assert "disk I/O error" not in response.text
 
@@ -148,6 +202,7 @@ def test_readyz_reports_degraded_without_failing(
     """
     from soapbot import app as app_module
 
+    monkeypatch.setattr(settings, "strict_loopback_auth", True)
     monkeypatch.setattr(app_module, "get_startup_errors", lambda: ["adapter qq is offline"])
 
     response = client.get("/readyz")
@@ -155,7 +210,10 @@ def test_readyz_reports_degraded_without_failing(
     body = response.json()
     assert body["status"] == "ok"
     assert body["degraded"] is True
-    assert body["startup_errors"] == ["adapter qq is offline"]
+    # Anonymous: how many, not which ones. The text names the adapter.
+    assert body["startup_error_count"] == 1
+    assert "startup_errors" not in body
+    assert "adapter qq is offline" not in response.text
 
 
 # ------------------------------------------------------------------ /metrics
