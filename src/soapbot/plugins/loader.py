@@ -64,7 +64,7 @@ from soapbot.plugins.attestation import (
 )
 from soapbot.plugins.context import PluginContext
 from soapbot.plugins.integrity import compare_async as compare_integrity_async
-from soapbot.plugins.integrity import digest_tree
+from soapbot.plugins.integrity import digest_tree, purge_bytecode
 from soapbot.plugins.integrity import forget as forget_integrity
 from soapbot.plugins.isolation import DEFAULT_PLUGIN_MEMORY_BYTES
 from soapbot.plugins.manifest import (
@@ -664,6 +664,58 @@ class PluginLoader:
         )
         return "changed"
 
+    async def _verify_unchanged_after_import(self, name: str, directory: Path) -> None:
+        """Re-hash *after* the code ran, and refuse if the tree moved meanwhile.
+
+        The check before import compares the bytes on disk with the approved digest; the
+        import then reads those files. A writer with access to the directory can swap one
+        in between — the checked bytes are not necessarily the executed bytes (audit
+        S-PLUG-06). Re-hashing afterwards closes the window: if the tree no longer
+        matches, what ran is not what was approved, and the caller unloads.
+
+        The hash is deliberately recomputed rather than read from the cache: the cache is
+        keyed on ``(name, size, mtime)`` and a swap can preserve both.
+        """
+        if settings.plugin_integrity_mode == "off" or self.approvals is None:
+            return
+        record = self.approvals.get(name)
+        recorded = record.content_digest if record is not None else ""
+        if not recorded:
+            # ``unknown`` is not ``changed``: a pre-digest approval has nothing to compare
+            # against, and refusing it here would be the upgrade break the pre-import
+            # check already refuses to be.
+            return
+        forget_integrity(directory)
+        verdict = await compare_integrity_async(directory, recorded)
+        if verdict.state != "changed":
+            return
+        if settings.plugin_integrity_mode != "block":
+            # ``warn`` is the operator's explicit choice to keep running changed code;
+            # refusing here would make the mode mean something else than it says. The
+            # event is still recorded, because "it changed while loading" is a stronger
+            # signal than "it changed at some point".
+            self.audit.record(
+                kind="plugin",
+                action="load",
+                outcome="allow",
+                detail="code changed between verification and import (mode=warn) "
+                f"(approved={verdict.recorded[:19]} now={verdict.current[:19]})",
+                plugin=name,
+            )
+            return
+        self.audit.record(
+            kind="plugin",
+            action="load",
+            outcome="deny",
+            detail="code changed between verification and import "
+            f"(approved={verdict.recorded[:19]} now={verdict.current[:19]})",
+            plugin=name,
+        )
+        raise PluginLoadError(
+            f"plugin {name} changed on disk while it was being loaded; it has been "
+            "stopped. Re-approve the plugin to run this code"
+        )
+
     # ------------------------------------------------------------- attestation
     def _attest(
         self,
@@ -889,6 +941,20 @@ class PluginLoader:
         # executed the code it was supposed to vet, which is the failure mode this
         # project has hit three times (a constructor argument nobody read, a guard the
         # streaming path skipped, a sanitiser whose output was thrown away).
+        # Bytecode first: ``digest_tree`` deliberately excludes ``__pycache__`` (the
+        # interpreter rewrites it), which means a planted ``.pyc`` would otherwise be
+        # imported without being part of the approved bytes. The child processes stop
+        # writing new ones; this removes what previous runs left (audit S-SUP-10).
+        removed = purge_bytecode(directory)
+        if removed:
+            self.audit.record(
+                kind="plugin",
+                action="load",
+                outcome="allow",
+                detail=f"removed {removed} compiled artefact(s) before import",
+                plugin=name,
+            )
+
         integrity = await self._enforce_integrity(name, directory)
 
         grant = self.grant_for(manifest)
@@ -916,6 +982,13 @@ class PluginLoader:
             loaded = await self._load_isolated(
                 name, directory, manifest, context, integrity
             )
+            try:
+                await self._verify_unchanged_after_import(name, directory)
+            except PluginLoadError:
+                # The worker already imported the code; stopping it is the only
+                # correct response to "what ran is not what was approved".
+                await self.unload(name)
+                raise
             self._attest(name, directory, manifest, integrity, isolated=True)
             return loaded
 
@@ -966,6 +1039,12 @@ class PluginLoader:
                 plugin=name,
             )
             raise PluginLoadError(f"plugin {name} failed to initialise: {exc}") from exc
+
+        try:
+            await self._verify_unchanged_after_import(name, directory)
+        except PluginLoadError:
+            self._purge_modules(module_names)
+            raise
 
         loaded = LoadedPlugin(
             manifest=manifest,

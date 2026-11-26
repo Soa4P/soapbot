@@ -225,6 +225,13 @@ class WorkerCrashedError(PluginCrashedError):
 _CHILD_WORKER = r'''
 import asyncio, importlib.util, inspect, json, os, sys, traceback
 
+# Never write .pyc: a compiled artefact is not covered by the approved content digest
+# (``integrity.py`` excludes it because the interpreter rewrites it), so one planted in
+# the plugin directory would execute without being part of the reviewed bytes
+# (audit S-SUP-10). The host also purges any that exist before import; this keeps their
+# absence the normal state instead of something to re-clean on every load.
+sys.dont_write_bytecode = True
+
 _stdin = sys.stdin.buffer
 _stdout = sys.stdout.buffer
 
