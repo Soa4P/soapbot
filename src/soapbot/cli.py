@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
     b_restore.add_argument("archive", help="path to a soapbot-backup-*.zip")
     b_restore.add_argument("--dry-run", action="store_true", help="verify and plan, touch nothing")
     b_restore.add_argument("--keep", type=int, default=7, help="how many pre-restore snapshots to keep")
+    b_restore.add_argument(
+        "--allow-unverified",
+        action="store_true",
+        help="accept a backup whose HMAC does not match (rotated master key, or a hand-copied archive)",
+    )
 
     return parser
 
@@ -268,6 +273,7 @@ def _run_backup(args: argparse.Namespace) -> int:
                 config_dir=settings.config_dir,
                 dry_run=args.dry_run,
                 keep=args.keep,
+                allow_unverified=args.allow_unverified,
             )
         except BackupError as exc:
             print(f"恢复被拒绝：{exc}")
