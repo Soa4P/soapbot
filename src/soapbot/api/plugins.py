@@ -90,6 +90,15 @@ class ApproveRequest(BaseModel):
     must name what they are granting, so a fat-fingered click cannot hand out
     network access by default."""
 
+    trusted: bool = False
+    """Whether the operator vouches for this plugin's *code*.
+
+    Separate from the capability list on purpose: granting ``network`` to a plugin you
+    have read is one decision, and declaring its code trustworthy is another. Only this
+    flag lets a plugin with sensitive capabilities load (audit S-SUP-07); the manifest's
+    own ``trust`` field is written by the author and therefore ignored.
+    """
+
 
 def _manager():
     from soapbot.app import get_plugin_manager
@@ -266,6 +275,11 @@ async def install_from_index(body: InstallFromIndexRequest, request: Request) ->
             loader.plugins_dir,
             host_version=loader.host_version,
             blocked=blocked,
+            # The catalogue entry the operator clicked, not what the archive says about
+            # itself: approvals are keyed by directory name, so a package naming another
+            # plugin would take over that plugin's grants (audit S-SUP-03).
+            expected_name=body.name,
+            expected_version=body.version,
         )
     except InstallError as exc:
         logger.warning("plugin install rejected: %s", exc)
@@ -389,6 +403,10 @@ async def list_plugins(request: Request) -> dict:
                     {
                         "approved_at": record.approved_at,
                         "approved_by": record.approved_by,
+                        # Operator-owned trust, which is what the sensitive-capability
+                        # gate reads. Shown so "approved but untrusted" — a plugin that
+                        # will refuse to load — is visible before someone presses Load.
+                        "trusted": record.trusted,
                         # Digest drift: the manifest changed after approval. Reported
                         # rather than enforced (see plugins/approvals.py) but it must be
                         # visible, because "approved v1.0, running v1.1" is exactly the
@@ -551,8 +569,15 @@ async def approve(name: str, body: ApproveRequest, request: Request) -> dict:
         actor="webui",
         manifest_digest=manifest.manifest_digest,
         content_digest=content_digest,
+        trusted=body.trusted,
     )
-    return {"ok": True, "name": name, "granted": body.capabilities, "persisted": True}
+    return {
+        "ok": True,
+        "name": name,
+        "granted": body.capabilities,
+        "trusted": body.trusted,
+        "persisted": True,
+    }
 
 
 @router.post("/{name}/revoke")

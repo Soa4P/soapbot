@@ -66,7 +66,16 @@ logger = logging.getLogger(__name__)
 FILENAME = "plugin-approvals.json"
 """Fixed filename under the data directory."""
 
-_SCHEMA = 1
+_SCHEMA = 2
+"""2 added ``trusted`` (operator-owned trust, audit S-SUP-07).
+
+A file written by schema 1 has no ``trusted`` key at all. Those records are migrated
+to ``trusted: True`` once, on load: the operator had already named every capability
+they granted, so refusing their existing plugins after an upgrade would be a
+regression, and the *point* of the new field is to constrain decisions made from now
+on. New approvals default to ``False`` — the closed direction — and only an explicit
+act turns it on.
+"""
 
 
 @dataclass(slots=True)
@@ -102,6 +111,20 @@ class ApprovalRecord:
     approved_by: str = ""
     """Free-form label for the audit trail (``webui``, ``cli``, an operator id)."""
 
+    trusted: bool = False
+    """Whether the *operator* vouches for this plugin's code.
+
+    The manifest has its own ``trust`` field, and that one is written by the plugin's
+    author — so it decides nothing (audit S-SUP-07). The gate that matters is "sensitive
+    capabilities are refused for code nobody vouched for"; if it read the manifest, one
+    word in an author-controlled file would bypass it.
+
+    Recorded here, changed only through an explicit approval action, and independent of
+    the capability grant: granting ``network`` to a plugin you have read is one decision,
+    and declaring the code trustworthy is another. Default is ``False``, so a record
+    written before this field existed is untrusted — the closed direction.
+    """
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "capabilities": sorted(self.capabilities),
@@ -109,6 +132,7 @@ class ApprovalRecord:
             "content_digest": self.content_digest,
             "approved_at": self.approved_at,
             "approved_by": self.approved_by,
+            "trusted": self.trusted,
         }
 
     @classmethod
@@ -117,6 +141,7 @@ class ApprovalRecord:
         # Defensive parsing: the file is operator-editable and may be hand-edited
         # or truncated by a crash. A malformed entry must degrade to "no
         # capabilities" (the closed direction), never raise and take startup down.
+        # ``trusted`` is read the same way: only a literal ``true`` grants it.
         return cls(
             plugin=plugin,
             capabilities=frozenset(str(c) for c in caps if isinstance(c, str)),
@@ -124,6 +149,7 @@ class ApprovalRecord:
             content_digest=str(raw.get("content_digest") or ""),
             approved_at=float(raw.get("approved_at") or 0.0),
             approved_by=str(raw.get("approved_by") or ""),
+            trusted=raw.get("trusted") is True,
         )
 
 
@@ -171,6 +197,28 @@ class ApprovalStore:
             for name, entry in plugins.items()
             if isinstance(entry, dict)
         }
+
+        # One-time migration to schema 2 — see ``_SCHEMA``. Only a file that predates
+        # the field is migrated; a schema-2 file that says ``trusted: false`` keeps it.
+        try:
+            schema = int(raw.get("schema") or 1)
+        except (TypeError, ValueError):
+            schema = 1
+        if schema < _SCHEMA and self._records:
+            for record in self._records.values():
+                record.trusted = True
+            logger.info(
+                "plugin approvals migrated to schema %d: %d existing approval(s) keep "
+                "their trust; new approvals start untrusted",
+                _SCHEMA,
+                len(self._records),
+            )
+            try:
+                self._flush()
+            except OSError as exc:  # pragma: no cover - read-only deployment
+                # Reading must keep working even when the file cannot be rewritten;
+                # the in-memory records are already migrated for this process.
+                logger.warning("could not persist approval migration: %s", exc)
         return dict(self._records)
 
     def _flush(self) -> None:
@@ -217,9 +265,19 @@ class ApprovalStore:
         digest: str = "",
         content_digest: str = "",
         actor: str = "",
+        trusted: bool | None = None,
     ) -> ApprovalRecord:
+        """Record an operator decision.
+
+        ``trusted=None`` keeps whatever the previous record said. That default matters:
+        re-approving a plugin to grant one more capability must not silently *revoke*
+        trust (nor grant it) — the caller that does not mention trust has not changed
+        its mind about it.
+        """
         import time
 
+        self.load()
+        previous = self._records.get(plugin)
         record = ApprovalRecord(
             plugin=plugin,
             capabilities=frozenset(str(c) for c in (capabilities or ())),
@@ -227,8 +285,8 @@ class ApprovalStore:
             content_digest=content_digest,
             approved_at=time.time(),
             approved_by=actor,
+            trusted=previous.trusted if trusted is None and previous is not None else bool(trusted),
         )
-        self.load()
         self._records[plugin] = record
         self._flush()
         return record

@@ -160,3 +160,46 @@ def test_a_rejected_install_leaves_the_existing_version_intact(tmp_path: Path) -
         install_from_zip(_zip({"demo/plugin.yaml": MANIFEST, "../../x": "y"}), tmp_path)
 
     assert (tmp_path / "demo" / "plugin.yaml").read_text(encoding="utf-8") == before
+
+
+# ------------------------------------- catalogue expectations (audit S-SUP-03)
+def test_an_archive_cannot_install_under_a_different_name(tmp_path: Path) -> None:
+    """One-click install must land the plugin the operator clicked.
+
+    Approvals are keyed by directory name, so a package whose manifest says
+    ``mood-diary`` is written into ``mood-diary/`` — replacing that plugin and
+    inheriting its grants. The index digest proves which bytes were downloaded, not
+    what name those bytes claim, so without this comparison the catalogue is a
+    suggestion rather than a constraint.
+    """
+    install_from_zip(_good(), tmp_path)  # demo 1.0.0 is installed and would be replaced
+    other = _zip(
+        {
+            "other/plugin.yaml": MANIFEST.replace("name: demo", "name: other"),
+            "other/main.py": MAIN,
+        }
+    )
+    with pytest.raises(InstallError, match="另一个名字"):
+        install_from_zip(other, tmp_path, expected_name="demo", expected_version="1.0.0")
+
+    # demo is untouched and `other` never appeared.
+    assert (tmp_path / "demo" / "plugin.yaml").is_file()
+    assert not (tmp_path / "other").exists()
+
+
+def test_a_different_release_than_the_one_requested_is_refused(tmp_path: Path) -> None:
+    """Version is compared canonically: ``1.0`` and ``1.0.0`` are the same release."""
+    install_from_zip(_good(), tmp_path, expected_name="demo", expected_version="1.0")
+
+    newer = _zip({"demo/plugin.yaml": MANIFEST.replace("1.0.0", "2.0.0"), "demo/main.py": MAIN})
+    with pytest.raises(InstallError, match="另一个版本"):
+        install_from_zip(newer, tmp_path, expected_name="demo", expected_version="1.0.0")
+
+    assert (tmp_path / "demo" / "plugin.yaml").read_text(encoding="utf-8").count("2.0.0") == 0
+
+
+def test_a_manual_upload_has_no_expectation_to_check(tmp_path: Path) -> None:
+    """Empty expectations mean "whatever the archive says" — the upload path."""
+    result = install_from_zip(_good(), tmp_path)
+    assert result.name == "demo"
+
