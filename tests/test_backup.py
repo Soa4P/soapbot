@@ -515,3 +515,33 @@ def test_a_rotated_master_key_is_reported_rather_than_silently_trusted(
         restore_backup(report.path, data_dir, dry_run=True)
     # ... and the escape hatch works, because a rotation is not an attack.
     assert restore_backup(report.path, data_dir, dry_run=True, allow_unverified=True)
+
+
+def test_an_oversized_member_is_refused_instead_of_being_read(
+    data_dir: Path, monkeypatch
+) -> None:
+    """S-DEP-18: an archive is operator-supplied, so its member sizes are a claim.
+
+    Both the verification pass and the staging pass used ``handle.read(name)``, which
+    allocates whatever the archive declares. A member chosen to exhaust memory could not
+    even be reported, because the process running the restore was gone. The cap is
+    injected small here so the test does not have to build a half-gigabyte zip.
+    """
+    from soapbot import backup as backup_module
+
+    report = create_backup(data_dir)
+    monkeypatch.setattr(backup_module, "MAX_MEMBER_BYTES", 16)
+
+    with pytest.raises(BackupError, match=r"过大|上限"):
+        restore_backup(report.path, data_dir, dry_run=True)
+
+
+def test_a_manifest_over_the_cap_is_refused(data_dir: Path, monkeypatch) -> None:
+    """Same rule for the manifest: it is parsed before any digest is checked."""
+    from soapbot import backup as backup_module
+
+    report = create_backup(data_dir)
+    monkeypatch.setattr(backup_module, "MAX_MANIFEST_BYTES", 4)
+
+    with pytest.raises(BackupError, match="manifest"):
+        restore_backup(report.path, data_dir, dry_run=True)
