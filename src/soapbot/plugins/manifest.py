@@ -177,6 +177,19 @@ class Capability(StrEnum):
     KB_READ = "kb_read"
     """Query the operator's knowledge base."""
 
+    TASKS = "tasks"
+    """Declare long-running work in the operator-visible task registry.
+
+    Its own capability rather than riding on ``storage`` or ``command``: every surface
+    is gated by a capability, and this one writes *host* state that the panel aggregates
+    and judges ("running / overdue / done"). A plugin with no capabilities could call
+    ``ctx.task_update`` and write into it before this existed (audit S-PLUG-08).
+
+    Not sensitive: rows are namespaced per plugin, capped, and carry no data beyond a
+    300-character description/note. The window that gets abused (an unbounded stream of
+    writes, each a synchronous fsync) is bounded by a per-plugin quota instead.
+    """
+
     SEND = "send"
     """Send messages proactively (rate-limited, group-scoped)."""
 
