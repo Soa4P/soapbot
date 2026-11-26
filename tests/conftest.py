@@ -92,6 +92,12 @@ def _business_tests_are_not_login_scripts(monkeypatch):
     """
     monkeypatch.setattr(settings, "strict_loopback_auth", False)
     monkeypatch.setattr(settings, "strict_startup", False)
+    # TestClient addresses the app as ``testserver``, which is a name, not a loopback
+    # address — and the credential-less loopback path refuses a Host it cannot place on
+    # this machine (S-AUTH-10). Listing it here is what a deployment behind a same-host
+    # reverse proxy does with its own domain; the rule itself is pinned by
+    # tests/test_auth_host_header.py.
+    monkeypatch.setattr(settings, "trusted_hosts", ["testserver"])
 
 
 class RecordedCall:

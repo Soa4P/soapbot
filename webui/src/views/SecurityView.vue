@@ -415,6 +415,10 @@ const revocations = useAsync(() => api.revocations())
 const tokenBusy = ref(false)
 const tokenNote = ref('')
 const tokenError = ref('')
+// The recovery credential the server mints while revoking. Shown once, in this panel:
+// the operator is logged out by the same request, so this is the only place it can
+// appear without a round trip to the server (S-FE-03).
+const newBootstrap = ref('')
 
 const revokedTokens = computed<any[]>(() => revocations.data.value?.tokens ?? [])
 const revokedBefore = computed(() => Number(revocations.data.value?.revoked_before ?? 0))
@@ -423,14 +427,17 @@ async function revokeEveryToken(): Promise<void> {
   tokenBusy.value = true
   tokenNote.value = ''
   tokenError.value = ''
+  newBootstrap.value = ''
   try {
-    await api.revokeAllTokens()
-    // The server rotates the session cookie in the same response. Dropping the
-    // replacement in the client would lock the operator out: the bootstrap token
-    // was consumed at first login and cannot be reused.
+    const result = await api.revokeAllTokens()
+    // No session token comes back any more — the closure redesign removed that. What
+    // arrives is a single-use bootstrap credential that has to be redeemed through
+    // /api/auth/login, which is exactly why it must be shown rather than dropped.
+    newBootstrap.value = result.bootstrap_token || ''
     tokenNote.value = t('security.tokensRevoked')
-    await revocations.reload()
-    await auth.refresh()
+    // Deliberately *not* calling auth.refresh() here. It would flip the shell back to
+    // the login dialog and unmount this panel — taking the credential the operator
+    // needs to get back in with it. The next request will 401 on its own.
   } catch (error) {
     tokenError.value = (error as Error).message
   } finally {
@@ -469,6 +476,11 @@ async function revokeEveryToken(): Promise<void> {
         {{ t('security.revokedBefore', { when: datetime(revokedBefore) }) }}
       </p>
       <p v-if="tokenNote" class="hint" role="status">{{ tokenNote }}</p>
+      <div v-if="newBootstrap" class="stack" role="status">
+        <p class="hint">{{ t('security.bootstrapAfterRevoke') }}</p>
+        <p class="key mono" style="word-break: break-all">{{ newBootstrap }}</p>
+        <p class="hint">{{ t('security.bootstrapShownOnce') }}</p>
+      </div>
       <p v-if="tokenError" class="hint" role="alert" style="color: var(--danger)">
         {{ tokenError }}
       </p>

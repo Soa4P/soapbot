@@ -614,16 +614,31 @@ def ensure_onebot_server(account: str, port: int | None = None) -> dict[str, Any
             "debug": False,
             "heartInterval": 30000,
         }
+        written_token = entry["token"]
         for index, existing in enumerate(servers):
             if isinstance(existing, dict) and (
                 existing.get("name") == "soapbot" or existing.get("port") == target_port
             ):
                 if existing.get("enable") and existing.get("port") == target_port:
                     return {"ok": True, "changed": False, "path": str(path)}
-                servers[index] = {**existing, **entry}
+                # Keep a token the operator already set. Rewriting the entry with the
+                # template (``token: ""``) silently turned an authenticated listener into
+                # an unauthenticated one on the next "reconnect" — the panel looked like
+                # it had fixed the connection while the OneBot socket was open to any
+                # local process (audit S-MSG-10). An empty value here only ever means
+                # "this deployment never had one".
+                preserved = str(existing.get("token") or "") or entry["token"]
+                servers[index] = {**existing, **entry, "token": preserved}
+                written_token = preserved
                 break
         else:
             servers.append(entry)
+        if not written_token:
+            logger.warning(
+                "OneBot WS server on 127.0.0.1:%s has no access token; "
+                "any local process can speak the protocol",
+                target_port,
+            )
         path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("wrote OneBot WS server %s into %s", target_port, path)
         return {"ok": True, "changed": True, "path": str(path)}

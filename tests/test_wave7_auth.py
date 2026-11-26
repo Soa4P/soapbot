@@ -36,9 +36,11 @@ def service(tmp_path) -> TokenService:
 
 
 def _request(host: str, *, headers: dict[str, str] | None = None, method: str = "GET"):
+    # A real request always carries a Host header; the credential-less loopback path now
+    # requires it to name this machine (S-AUTH-10).
     return SimpleNamespace(
         client=SimpleNamespace(host=host),
-        headers=headers or {},
+        headers=headers if headers is not None else {"host": "127.0.0.1"},
         method=method,
         url=SimpleNamespace(path="/api/runtime"),
         state=SimpleNamespace(),

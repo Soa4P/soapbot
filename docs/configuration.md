@@ -240,6 +240,7 @@ pip install -e ".[dev]"           # pytest / ruff / mypy / respx
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SOAPBOT_STRICT_LOOPBACK_AUTH` | `true` | 回环客户端可以读，但任何写操作都要有效凭据。关掉它等于恢复「本机即管理员」的旧行为，只应在测试里出现；`tests/conftest.py` 就是这么做的，认证边界本身由 `tests/test_auth_cookie.py` 在严格模式下验证 |
+| `SOAPBOT_TRUSTED_HOSTS` | 空 | 额外的 `Host` 头取值，逗号分隔。免凭据的本机读取还要求 `Host` 指向本机（`127.0.0.1` / `localhost` / `::1`）——DNS rebinding 能让外部页面发出真正的本机连接，只是 `Host` 写着攻击者的域名（审计 S-AUTH-10）。只有**同一台机器上**用反代以域名访问面板时才需要登记那个域名；带凭据的请求不走这条判断，登录后照常可用 |
 | `SOAPBOT_COOKIE_SECURE` | `false` | 放在 HTTPS 反代后面时设为 `true`。本地纯 HTTP 打开时设 `true` 会让浏览器不回传会话 Cookie，表现为「登录没反应」 |
 | `SOAPBOT_STRICT_STARTUP` | `true` | 已启用的适配器构造失败就在启动阶段中止，而不是几小时后表现为「连不上」。面板专用、允许可选适配器坏掉也要起服务的部署才设 `false` |
 | `SOAPBOT_SLOW_CALL_MS` | `3000` | Provider 调用超过这个毫秒数才记 WARNING；低于阈值记 DEBUG。每次成功调用都记 INFO 会让真正慢的那一次淹没在数字里 |

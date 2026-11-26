@@ -177,7 +177,9 @@ def test_strict_loopback_is_not_an_owner(strict_client: TestClient) -> None:
 
     request = SimpleNamespace(
         client=SimpleNamespace(host="127.0.0.1"),
-        headers={},
+        # A real loopback request names this machine in Host; the credential-less path
+        # now checks that too (S-AUTH-10).
+        headers={"host": "127.0.0.1"},
         cookies={},
         method="GET",
         url=SimpleNamespace(path="/api/security/permissions", hostname="127.0.0.1"),
