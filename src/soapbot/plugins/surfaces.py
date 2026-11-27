@@ -655,6 +655,8 @@ class SurfaceRouter:
         kind = str(args.get("kind") or "get_json")
         if kind == "subtitle":
             return await self._bilibili_subtitle(args)
+        if kind == "view":
+            return await self._bilibili_view(args, caller)
         path = str(args.get("path") or "")
         if not path:
             raise ValueError("bilibili.request needs a path")
@@ -685,6 +687,44 @@ class SurfaceRouter:
         if host_client is None:
             raise RuntimeError("host has no bilibili client installed")
         return await host_client.subtitle_text(bvid)
+
+    async def _bilibili_view(self, args: dict[str, Any], caller) -> Any:
+        """视频信息卡：目标解析、限流与字段白名单都在宿主侧（batch14，参照
+        ``analysis_bilibili`` 机制的 soapbot 形态）。
+
+        插件只发一个目标字符串（BV/av/链接），拿回一份**净化的子集**——没有封面
+        URL、没有播放地址、没有 UP 主 mid：封面是 hdslb 热链，给出去就是引诱插件
+        自己抓图；其余是「一张卡需要的全部」。目标解析走客户端既有的
+        ``parse_target``（BV/av/链接/b23.tv 只读 Location 头），插件永远不碰
+        重定向目标本身。
+        """
+        target = str(args.get("target") or "").strip()
+        if not target:
+            raise ValueError("bilibili.view needs a target (BV/av/url)")
+        if len(target) > 200:
+            raise ValueError("bilibili.view target is implausibly long")
+        self._guard.check(Capability.BILIBILI, detail=f"bilibili view {target[:24]}")
+        host_client = self._bilibili_host_client
+        if host_client is None:
+            raise RuntimeError("host has no bilibili client installed")
+        video = await host_client.video(target)
+        return {
+            "bvid": video.bvid[:32],
+            "title": video.title[:80],
+            "author": video.author[:40],
+            "category": video.category[:40],
+            "duration_text": video.duration_text,
+            "published_at": int(video.published_at),
+            "url": video.url,
+            "stat": {
+                "view": video.stat.view,
+                "danmaku": video.stat.danmaku,
+                "reply": video.stat.reply,
+                "like": video.stat.like,
+                "favorite": video.stat.favorite,
+                "share": video.stat.share,
+            },
+        }
 
     async def _storage_get(self, args: dict[str, Any], caller) -> Any:
         self._guard.check(Capability.STORAGE, detail="storage.get")
@@ -784,6 +824,7 @@ _SURFACE_TABLE = {
     "http.request": SurfaceRouter._http,
     "bilibili.request": SurfaceRouter._bilibili,
     "bilibili.subtitle": SurfaceRouter._bilibili_subtitle,
+    "bilibili.view": SurfaceRouter._bilibili_view,
     "send_media.request": SurfaceRouter._send_media,
     "media.observe": SurfaceRouter._media_observe,
     "tasks.update": SurfaceRouter._task_update,

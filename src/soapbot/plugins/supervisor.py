@@ -197,6 +197,7 @@ ALLOWED_SURFACES = frozenset(
         "http.request",
         "bilibili.request",
         "bilibili.subtitle",
+        "bilibili.view",
         "storage.get",
         "storage.set",
         "storage.delete",
@@ -561,6 +562,11 @@ class _RemoteCtx:
     async def qzone_read(self, action, params=None):
         return _call("qzone.read", {"action": action, "params": params or {}})
 
+    async def bili_view(self, target):
+        """视频信息卡（batch14）：目标解析、限流与白名单字段都在宿主侧。
+        与进程内的 ``PluginContext.bili_view`` 同名同形，插件同一份代码。"""
+        return await _call("bilibili.view", {"kind": "view", "target": str(target)})
+
     async def qzone_write(self, text, *, confirm=False):
         return _call(
             "qzone.write",
@@ -660,6 +666,15 @@ class _RemoteCtx:
                 return await _call(
                     "bilibili.subtitle",
                     {"kind": "subtitle", "bvid": str(bvid)},
+                )
+
+            async def view(self, target):
+                """视频信息卡：目标解析、限流与字段白名单都在宿主侧（batch14）。
+                插件只发一个目标（BV/av/链接），拿回净化的白名单字段——封面与
+                播放地址不过边界。"""
+                return await _call(
+                    "bilibili.view",
+                    {"kind": "view", "target": str(target)},
                 )
 
         return _RemoteBilibili()
