@@ -8,15 +8,18 @@
 # Run all:  pre-commit run --all-files
 
 repos:
+  # revs pinned to SHAs with the tag in a comment (S-DEP-20): a tag is mutable, and a
+  # hook repo is developer-machine supply chain — the same reasoning that pins every
+  # `uses:` in CI to a commit. Same SHAs as the tagged releases, resolved via the API.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: 89c421dff2e1026ba12cdb9ebd731f4a83aa8021 # v0.8.6
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: 2c9f875913ee60ca25ce70243dc24d5b6415598c # v4.6.0
     hooks:
       - id: trailing-whitespace
         # Markdown uses two trailing spaces as a hard line break; trailing-whitespace

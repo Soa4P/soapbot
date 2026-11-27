@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-28T01:50:00+08:00",
+  "updated_at": "2026-11-28T03:10:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3978,6 +3978,12 @@
           "name": "Low 第五批：插件日志四通道统一脱敏（S-PLUG-11）、随包封禁表填入已审阅条目（S-SUP-18）、备份自检要求内容而非仅可打开（S-DEP-17）",
           "status": "done",
           "note": "S-PLUG-11 的 stderr sink 注释一直说「sink 会脱敏」而接线没做——注释与实现分叉就是这类项的来源；S-SUP-18 用测试钉住非空，清空必须是一次有记录的决定；S-DEP-17 的自检对真归档验证过（空卷形状与 24 字节假库都被拒）"
+        },
+        {
+          "id": "a24-t14",
+          "name": "Low 第六批：CSP 去掉裸 ws:/wss: 并补 form-action 与 dist meta（S-FE-04）、pre-commit rev 钉 SHA + pre-push 只跑提交版扫描器（S-DEP-20）",
+          "status": "done",
+          "note": "面板根本没有打开任何 WebSocket——UI 里的 ws:// 全是给操作者看的 NapCat 配置占位文案，裸 scheme 只是给外连发的许可；pre-push 执行工作区脚本是开发机供应链：改得了工作区就改得了 push 那一刻要跑的扫描器，改为 git show HEAD 管进解释器"
         }
       ],
       "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"

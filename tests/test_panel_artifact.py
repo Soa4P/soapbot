@@ -34,6 +34,24 @@ def test_index_title_is_intact_utf8() -> None:
     assert "鎺" not in html and "鈥" not in html
 
 
+def test_index_carries_a_meta_csp_without_bare_websocket_schemes() -> None:
+    """S-FE-04: dist served by anything other than the panel still gets a CSP.
+
+    The API server sends the policy as a response header, but a static file server (or
+    a bundle preview) reads dist/ directly and would send none — the meta tag mirrors
+    the header policy. Bare ``ws:``/``wss:`` scheme sources stay out of it: this page
+    opens no WebSocket (the ws:// strings in the UI are NapCat config placeholders),
+    so those sources were permission to ship data to any host, not a feature.
+    """
+    html = INDEX.read_text(encoding="utf-8")
+    match = re.search(r'<meta[^>]*http-equiv="Content-Security-Policy"[^>]*>', html)
+    assert match, "built index must carry a meta CSP"
+    policy = match.group(0)
+    assert "connect-src 'self'" in policy
+    assert "form-action 'self'" in policy
+    assert "ws:" not in policy, "裸 ws:/wss: 允许向任意主机开 WebSocket"
+
+
 def test_no_asset_in_the_build_is_empty() -> None:
     assets = sorted((DIST / "assets").glob("*"))
     assert assets, "a build with no assets is a failed build, not a small one"

@@ -663,14 +663,21 @@ def create_app() -> FastAPI:
         """Browser-side backstop for the one v-html sink and for cookie theft.
 
         CSP does not replace output escaping — it limits what an escaping mistake can
-        do. ``connect-src 'self'`` also stops a injected script from quietly shipping
+        do. ``connect-src 'self'`` also stops an injected script from quietly shipping
         the page's data to another host.
+
+        No ``ws:``/``wss:`` scheme sources (S-FE-04). The panel opens **no** WebSocket
+        of its own — every ``ws://…`` string in the UI is placeholder text shown to the
+        operator for NapCat's config, not a connection this page makes. The bare scheme
+        sources therefore allowed any WebSocket to any host, which is wider than
+        ``connect-src 'self'`` was meant to be. If a feature ever needs one, it belongs
+        here as an explicit origin, not as a scheme.
         """
         response = await call_next(request)
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self' ws: wss:; "
+            "img-src 'self' data:; connect-src 'self'; form-action 'self'; "
             "object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
         )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

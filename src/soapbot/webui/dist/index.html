@@ -9,6 +9,17 @@
          Nothing in CSS can override those; only this hint and `color-scheme` can. -->
     <meta name="color-scheme" content="light" />
     <meta name="robots" content="noindex, nofollow" />
+    <!-- Mirrors the CSP the API server sends as a header (app.py). It exists for the
+         serving path the middleware does not cover: a static file server or a desktop
+         bundle reading dist/ directly gets no response header from us, and S-FE-04
+         noted exactly that. When both apply (served by the panel), the browser
+         enforces the intersection — same policy, so no behaviour change. No bare
+         ws:/wss: sources: this page opens no WebSocket; the ws:// strings in the UI
+         are placeholder text for NapCat's config, not connections. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    />
     <title>soapbot 控制台</title>
     <script type="module" crossorigin src="/assets/index-DfOy8m2r.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-BB_ocLaT.js">

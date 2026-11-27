@@ -49,6 +49,22 @@ def test_healthz_matches_the_documented_health_route(client: TestClient) -> None
     assert alias.json()["status"] == health.json()["status"] == "ok"
 
 
+def test_the_csp_allows_no_websocket_to_any_host(client: TestClient) -> None:
+    """S-FE-04: bare ``ws:``/``wss:`` scheme sources are permission to any host.
+
+    The panel opens no WebSocket of its own — every ws:// string in the UI is
+    placeholder text for NapCat's config, not a connection this page makes. The
+    scheme sources therefore existed only for an injected script, which is exactly
+    who CSP is supposed to refuse. ``form-action`` joins the policy so a forged form
+    cannot POST the page's cookies anywhere either.
+    """
+    policy = client.get("/api/health").headers["Content-Security-Policy"]
+    assert "connect-src 'self'" in policy
+    assert "form-action 'self'" in policy
+    assert "ws:" not in policy, "裸 ws:/wss: 是给任意主机的 WebSocket 许可"
+    assert "wss:" not in policy
+
+
 def test_readyz_reports_ready_when_the_data_dir_is_writable(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:
