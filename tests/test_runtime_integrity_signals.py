@@ -81,6 +81,32 @@ async def test_log_write_is_deterministically_rate_limited() -> None:
     assert "rate limited" in audit.records[-1]["detail"]
 
 
+@pytest.mark.asyncio
+async def test_log_write_is_redacted_before_it_reaches_the_host_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """S-PLUG-11: the message is plugin-authored; the host log is not its canvas.
+
+    A raw newline used to append a plausible second line to the operator's log, and an
+    inline token rode along. The audit row was already safe (it never carried the body);
+    the ``logger.info`` line was not.
+    """
+    import logging
+
+    router = _router(_Audit())
+    with caplog.at_level(logging.INFO):
+        await router.dispatch(
+            "log.write",
+            {"message": "started\napi_key=sk-abcdef123456\nERROR host compromised"},
+            None,
+        )
+    text = caplog.records[-1].getMessage()
+    body = text.split("msg=", 1)[1]
+    assert "sk-abcdef123456" not in body, "凭据形状的串必须被掩掉"
+    assert "\n" not in body, "控制字符必须被改写，一行就是一行"
+    assert "started" in body, "正文仍应可读，只是不再可伪造"
+
+
 def test_the_ai_review_stays_advisory_and_the_gate_knows_it() -> None:
     gate = _load_gate()
     results = gate.checks()

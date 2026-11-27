@@ -109,16 +109,36 @@ chmod 600 "$ARCHIVE"
 ls -1t "$BACKUP_DIR"/soapbot-*.zip "$BACKUP_DIR"/soapbot-*.tgz 2>/dev/null \
     | tail -n +$((KEEP + 1)) | xargs -r rm -f
 
-# Prove it opens, with the same interpreter that wrote it.
+# Prove it *is* a soapbot backup, not merely an openable zip (audit S-DEP-17).
+# The old self-check was `zipfile.testzip()`: an archive of an empty or wrong volume
+# passes it — every entry intact, nothing inside. What actually distinguishes a usable
+# snapshot is content: a manifest whose checksums name the database, and a database that
+# begins with the SQLite magic at a plausible size. An empty `data/` (volume mount
+# pointing at nothing) fails here instead of producing a green timer every night.
 # `--user root` is required, not a relaxation: the archive is 0600 and owned by root on
 # the host (a credential — it carries secret.key), while the image's default user is
 # uid 10001, so an unprivileged read gets "Permission denied" and the check would report
 # a perfectly good archive as unreadable (measured).
 if ! docker run --rm --network none --user 0:0 --entrypoint python \
     -v "$BACKUP_DIR":/backup:ro "$IMAGE" \
-    -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); sys.exit(1 if z.testzip() else 0)' \
-    "/backup/$(basename "$ARCHIVE")"; then
-    echo "backup archive is not readable: $ARCHIVE" >&2
+    -c 'import json, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+if z.testzip() is not None:
+    sys.exit("corrupt member")
+manifest = json.loads(z.read("manifest.json"))
+checksums = manifest.get("checksums") or {}
+if not isinstance(checksums, dict):
+    sys.exit("manifest has no checksums")
+name = "data/soapbot.db"
+if name not in checksums:
+    sys.exit("manifest does not cover the database; the volume may be empty")
+info = z.getinfo(name)
+if info.file_size < 4096:
+    sys.exit(f"database member is implausibly small ({info.file_size} bytes)")
+if not z.open(name).read(16).startswith(b"SQLite format 3\x00"):
+    sys.exit("database member is not SQLite")
+' "/backup/$(basename "$ARCHIVE")"; then
+    echo "backup archive is not a usable soapbot snapshot: $ARCHIVE" >&2
     exit 1
 fi
 

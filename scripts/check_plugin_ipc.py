@@ -24,6 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PLUGINS = ROOT / "src" / "soapbot" / "plugins"
 SUPERVISOR = PLUGINS / "supervisor.py"
+SURFACES = PLUGINS / "surfaces.py"
+CONTEXT = PLUGINS / "context.py"
 ISOLATION = PLUGINS / "isolation.py"
 LOADER = PLUGINS / "loader.py"
 APP = ROOT / "src" / "soapbot" / "app.py"
@@ -259,6 +261,42 @@ def collect() -> list[Result]:
         out.append(_require(GUARD_TIMER, "WantedBy=timers.target", "ops.guard", "timer is installable"))
     out.append(_require(CI, "check_plugin_ipc.py", "ops.gate", "CI runs the audit"))
     out.append(_require(MAKEFILE, "check_plugin_ipc.py", "ops.gate", "make check runs the audit"))
+    # Plugin-authored text reaches the host log through four channels; each must pass
+    # the shared redaction (S-PLUG-11). A channel added without redaction is exactly
+    # how a newline forges a second log line, so the wiring is pinned here as well as
+    # at runtime.
+    out.append(
+        _require(
+            SUPERVISOR,
+            'plugin_log_line(self.config.plugin, frame.get("message", ""))',
+            "log.redact",
+            "isolated log frames are redacted before the host logger",
+        )
+    )
+    out.append(
+        _require(
+            SUPERVISOR,
+            "stderr_sink=stderr_sink_for(plugin)",
+            "log.redact",
+            "the stderr sink the manager wires redacts",
+        )
+    )
+    out.append(
+        _require(
+            SURFACES,
+            "message = redact_log(str(args.get(\"message\") or \"\"))",
+            "log.redact",
+            "the log.write surface redacts before logging",
+        )
+    )
+    out.append(
+        _require(
+            CONTEXT,
+            "self.log.addFilter(PluginRecordSanitiser())",
+            "log.redact",
+            "ctx.log records are sanitised",
+        )
+    )
     return out
 
 

@@ -148,6 +148,23 @@ class PluginResult:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
+class PluginRecordSanitiser(logging.Filter):
+    """Rewrite one ``ctx.log`` record in place: secrets masked, controls escaped.
+
+    Runs on the plugin's logger only. ``record.getMessage()`` is the *formatted* text,
+    which is where an ``args``-passed token would otherwise hide from a format-string
+    rewrite; storing the formatted text and clearing ``args`` is the documented way to
+    change a record's message from a filter.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from soapbot.security.audit import _redact_detail
+
+        record.msg = _redact_detail(record.getMessage())
+        record.args = None
+        return True
+
+
 class PluginContext:
     """The host API handed to a plugin instance.
 
@@ -175,6 +192,13 @@ class PluginContext:
         self.plugin = plugin
         self._guard = guard
         self.log = logger_ or logging.getLogger(f"soapbot.plugin.{plugin}")
+        # ctx.log is a plain stdlib logger the plugin calls with whatever it likes
+        # (S-PLUG-11). A filter rewrites the *formatted* record — masking credential
+        # shapes and turning control characters into escapes — before any handler
+        # renders it, so a newline in a message cannot forge a second log line and a
+        # token cannot reach the file. Applied here rather than on a handler so the
+        # host's own loggers are untouched.
+        self.log.addFilter(PluginRecordSanitiser())
         self._commands: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, dict[str, Any]] = {}
         self._message_hooks: list[Callable[..., Awaitable[Any]]] = []

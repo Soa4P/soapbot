@@ -335,6 +335,22 @@ def test_archive_and_sidecar_are_owner_only(data_dir: Path) -> None:
 # ------------------------------------------------------- deployment shim contract
 
 
+def test_the_backup_timer_self_check_demands_content_not_just_an_openable_zip() -> None:
+    """S-DEP-17: "the archive opens" is not "the archive is a soapbot backup".
+
+    `zipfile.testzip()` passes for an archive of an empty or wrongly mounted volume —
+    every member intact, nothing inside — which is exactly how a nightly timer stays
+    green while backing up nothing. The self-check must therefore demand content: the
+    manifest naming the database, and SQLite magic at a plausible size.
+    """
+    script = (Path(__file__).resolve().parents[1] / "deploy" / "backup.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "manifest does not cover the database" in script
+    assert "SQLite format 3" in script
+    assert "file_size < 4096" in script
+
+
 def test_the_backup_shim_writes_the_exact_file_the_timer_names(tmp_path: Path) -> None:
     """``deploy/backup.sh`` passes ``--out`` as a *file path* and owns retention.
     The shim must honour both without importing the CLI's directory semantics."""

@@ -95,8 +95,41 @@ from soapbot.plugins.isolation import (
     worker_script_path,
 )
 from soapbot.plugins.sandbox import CapabilityDeniedError
+from soapbot.security.audit import _redact_detail as redact_log
 
 logger = logging.getLogger(__name__)
+
+
+def plugin_log_line(plugin: str, message: Any) -> str:
+    """One host-side log line for plugin-authored text (audit S-PLUG-11).
+
+    Every channel by which a plugin's words reach the host log — the ``log`` frame, the
+    ``stderr`` drain, the in-process ``log.write`` surface — goes through here before
+    ``logger`` does. The text is plugin-authored, so a raw newline would append a second,
+    plausible line (``level=ERROR`` and all) to the operator's log, and an inline token
+    would be published by the very logging the operator reads. ``_redact_detail`` masks
+    credential-shaped substrings and rewrites control characters as ``\\uXXXX`` escapes,
+    which keeps the line a *line*.
+
+    Extracted rather than inlined so a test can pin the contract on the helper itself,
+    and so a fifth channel added later has one obvious function to call.
+    """
+    return redact_log(str(message or ""))[:300]
+
+
+def stderr_sink_for(plugin: str):
+    """The stderr sink the manager wires up, redaction included.
+
+    The reader's comment has promised "the sink redacts" for a while; the wiring used to
+    pass the line through raw, which is exactly the split between a comment that asks
+    nicely and code that does it. Keeping the factory at module level makes that
+    property testable without starting a process.
+    """
+
+    def sink(line: str) -> None:
+        logger.debug("plugin stderr plugin=%s %s", plugin, plugin_log_line(plugin, line))
+
+    return sink
 
 #: Restart policy. Deliberately conservative: plugin crashes should be visible, not
 #: papered over with an infinite retry loop.
@@ -1688,7 +1721,7 @@ class PluginWorker:
                             "plugin log plugin=%s level=%s msg=%s",
                             self.config.plugin,
                             frame.get("level"),
-                            str(frame.get("message", ""))[:300],
+                            plugin_log_line(self.config.plugin, frame.get("message", "")),
                         )
                         continue
 
@@ -1959,9 +1992,7 @@ class PluginSupervisor:
         worker = PluginWorker(
             config,
             surface_handler=self._surface_handler,
-            stderr_sink=lambda line, p=plugin: logger.debug(
-                "plugin stderr plugin=%s %s", p, line
-            ),
+            stderr_sink=stderr_sink_for(plugin),
         )
         try:
             await worker.start()

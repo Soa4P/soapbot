@@ -57,6 +57,7 @@ from soapbot.plugins.sandbox import (
     StorageUnavailable,
     scrub_plugin_output,
 )
+from soapbot.security.audit import _redact_detail as redact_log
 from soapbot.security.ratelimit import SlidingWindowLimiter
 
 if TYPE_CHECKING:
@@ -722,7 +723,11 @@ class SurfaceRouter:
             self._audit_denied("log.write", "rate limited")
             return False
         self._log_writes.append(now)
-        message = str(args.get("message") or "")[:300]
+        # Redact *before* logging (S-PLUG-11): the message is plugin-authored and this
+        # line lands in the host's log, so a newline would forge a second, plausible
+        # line and an inline token would be published by the very surface that exists
+        # to be observable. Same treatment the audit log applies to its own detail.
+        message = redact_log(str(args.get("message") or ""))[:300]
         logger.info("plugin message plugin=%s msg=%s", self._plugin, message)
         if self._audit is not None:
             self._audit.record(
