@@ -1,5 +1,46 @@
 {
   "schema_version": 1,
-  "note": "Versions that must not be installed. Reviewed in this repository so the list works offline and cannot be emptied by whoever controls the community index. A remote index may add entries at runtime; it can never remove one.",
-  "blocked": []
+  "note": "Versions that must not be installed. Reviewed in this repository so the list works offline and cannot be emptied by whoever controls the community index. A remote index may add entries at runtime; it can never remove one. Entries are mirrored from the community index's blocked_versions.json when a block is decided there; a test pins the list non-empty so the offline floor cannot silently regress to nothing (audit S-SUP-18).",
+  "blocked": [
+    {
+      "name": "group-guard",
+      "version": "1.4.2",
+      "reason": "该版本把群成员 QQ 号写入未加密的本地日志，已在 1.5.0 修复。条目随幻影索引清理保留：封锁单向，且若同名版本将来发布仍被拦。"
+    },
+    {
+      "name": "rss-digest",
+      "version": "0.3.0",
+      "reason": "该版本在抓取失败时无限重试，会打满目标站点。条目随幻影索引清理保留：封锁单向。"
+    },
+    {
+      "name": "self-nudge",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    },
+    {
+      "name": "weather-alert",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    },
+    {
+      "name": "bili-scroll",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    },
+    {
+      "name": "fishtalk-lite",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    },
+    {
+      "name": "auto-chat",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    },
+    {
+      "name": "sticker-album",
+      "version": "0.1.0",
+      "reason": "manifest description contains forbidden token '/' — the host refuses to load it; fixed in 0.1.1"
+    }
+  ]
 }

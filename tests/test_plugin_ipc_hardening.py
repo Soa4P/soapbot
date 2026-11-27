@@ -455,3 +455,54 @@ async def test_cancelling_a_write_aborts_the_pipe() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert writer.aborted
+
+
+# ------------------------------------------------------------ log channels (S-PLUG-11)
+
+
+def test_the_log_line_is_one_line_and_carries_no_token() -> None:
+    """Every plugin-authored log line passes through one redaction function.
+
+    A newline in plugin text used to be logged raw — appending a plausible second line
+    to the operator's log — and an inline token rode along unmasked.
+    """
+    line = sup.plugin_log_line("demo", "started\ntoken=abcdef123456\nlevel=ERROR boom")
+    assert "\n" not in line, "控制字符必须被改写，一行就是一行"
+    assert "abcdef123456" not in line, "凭据形状的串必须被掩掉"
+    assert "started" in line
+
+
+def test_the_log_line_survives_none_and_non_string() -> None:
+    # ``str(None)`` is "None" but the helper treats falsy input as empty on purpose:
+    # a plugin logging None should produce an empty line, not the word "None".
+    assert sup.plugin_log_line("demo", None) == ""
+    assert sup.plugin_log_line("demo", {"a": 1})
+
+
+def test_the_log_line_neutralises_controls_but_keeps_the_words() -> None:
+    """The point is one-line-ness and no credentials, not silence.
+
+    Control characters become ``\\uXXXX`` escapes, so the forged ``level=ERROR`` stays
+    inside the same line; the readable prefix survives for diagnosis.
+    """
+    line = sup.plugin_log_line("demo", "started\nlevel=ERROR boom")
+    assert "\n" not in line
+    assert "started" in line and "level=ERROR boom" in line
+
+
+def test_the_stderr_sink_redacts_before_logging(caplog) -> None:
+    """The reader's comment has promised a redacting sink; the wiring used to lie.
+
+    The newline is rewritten as an escape (so the forged line can no longer be a line)
+    and the credential shape is masked. The *words* survive — the sink is for diagnosis,
+    not censorship — but they cannot masquerade as another logger's output.
+    """
+    import logging
+
+    sink = sup.stderr_sink_for("demo")
+    with caplog.at_level(logging.DEBUG, logger="soapbot.plugins.supervisor"):
+        sink("Bearer abcdef123456\nforged line")
+    record = caplog.records[-1]
+    assert "abcdef123456" not in record.getMessage()
+    assert "\n" not in record.getMessage(), "控制字符必须被改写"
+    assert "forged line" in record.getMessage(), "正文保留，只是不再另起一行"

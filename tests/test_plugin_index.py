@@ -252,6 +252,41 @@ def test_shipped_blocklist_is_readable() -> None:
     assert isinstance(load_local_blocklist(), dict)
 
 
+def test_shipped_blocklist_is_not_empty() -> None:
+    """S-SUP-18: the "works offline and cannot be emptied" claim needs entries.
+
+    For a while the shipped file parsed fine and blocked nothing — the offline floor
+    existed as a schema, not as content, and every block depended on the remote index
+    the floor was supposed to outlive. This pins the shipped list to the reviewed
+    decisions: if a future cleanup empties it, the test forces that to be a deliberate
+    act (with a new reason recorded here), not a silent regression.
+    """
+    shipped = load_local_blocklist()
+
+    assert shipped, "随包封禁表不得回退为空——离线防线需要内容而不是结构"
+    # Every entry carries a human-readable reason: a block nobody can explain is a
+    # block nobody can review.
+    for key, reason in shipped.items():
+        assert reason.strip(), f"条目 {key} 缺少封禁理由"
+
+
+@pytest.mark.asyncio
+async def test_a_shipped_block_survives_a_remote_that_sends_nothing(tmp_path: Path) -> None:
+    """The offline floor does its job exactly when the network gives no answer."""
+    payload = json.dumps({"plugins": [], "blocked_versions": []}).encode()
+    client = IndexClient(
+        "https://example.invalid/plugins.json",
+        timeout=1.0,
+        transport=_transport(payload),
+    )
+    snapshot = await client.snapshot()
+
+    shipped = load_local_blocklist()
+    some_key = next(iter(shipped))
+    name, _, version = some_key.rpartition("@")
+    assert snapshot.blocked_reason(name, version) == shipped[some_key]
+
+
 # ---------------------------------------------------------------- manifest channel
 
 
