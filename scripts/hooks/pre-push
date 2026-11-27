@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Push-time secret scan. Runs the **committed** scanner (S-DEP-20), not the working-tree
+# copy: a hook that executes workspace code is part of the machine's supply chain, and
+# whatever modified the checkout also modified what this hook would run at the moment a
+# push moves bytes off it. Piping `git show HEAD:…` through the interpreter pins the
+# scan to the reviewed version. The script is stdlib-only, so it needs no checkout state
+# beyond the git object.
+#
+# Install: cp scripts/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+set -eu
+if [ -x .venv/Scripts/python.exe ]; then
+  PY=.venv/Scripts/python.exe
+elif [ -x .venv/bin/python ]; then
+  PY=.venv/bin/python
+else
+  PY=python3
+fi
+git show HEAD:scripts/check_secrets.py | "$PY" - --pre-push

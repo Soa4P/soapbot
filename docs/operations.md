@@ -145,3 +145,9 @@ soapbot migrate             # 顺序升到本程序支持的版本
 任务拦截，本地不跑就直接推的话，红在 CI 而不是红在 push。
 `tests/test_gate_parity.py` 断言 `make check` 与 CI 的差集恰好是两项（`check_secrets
 --committed` 要 git 历史、`pip-audit` 要联网），两边再漂移就会红。
+
+`pre-push` 执行的是 **HEAD 里提交的扫描器**而不是工作区副本（`git show HEAD:…` 管进解释器，
+S-DEP-20）：钩子是开发机供应链的一部分，能改工作区的东西同样能改钩子在 push 那一刻要跑的
+脚本。版本化的钩子在 `scripts/hooks/pre-push`，安装：`cp scripts/hooks/pre-push
+.git/hooks/pre-push && chmod +x .git/hooks/pre-push`。`.pre-commit-config.yaml` 的 rev
+同样钉在 commit SHA 上（tag 可变），与 CI 里 `uses:` 钉 SHA 是同一条纪律。
