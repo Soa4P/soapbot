@@ -1917,6 +1917,7 @@ class PluginSupervisor:
         self._restarts: dict[str, list[float]] = {}
         self._circuit: dict[str, bool] = {}
         self._last_error: dict[str, str] = {}
+        self._last_crash_tail: dict[str, list[str]] = {}
         self._backoff: dict[str, float] = {}
         # start() checks capacity and then awaits process creation. Without a lock,
         # two concurrent loads can both pass the check and spawn two children while
@@ -1956,8 +1957,13 @@ class PluginSupervisor:
             self._circuit,
             self._backoff,
             self._last_error,
+            self._last_crash_tail,
         ):
             mapping.pop(plugin, None)
+
+    def last_crash_tail(self, plugin: str) -> list[str]:
+        """The redacted stderr tail of the last failed start, for the audit row."""
+        return list(self._last_crash_tail.get(plugin) or [])
 
     def _record_restart(self, plugin: str) -> None:
         now = time.time()
@@ -2013,6 +2019,11 @@ class PluginSupervisor:
             await worker.start()
         except Exception as exc:
             self._last_error[plugin] = type(exc).__name__
+            # The child reports only the exception *type* on the wire; the stack lives
+            # in its stderr. A failed start used to discard the worker — and with it
+            # the only actionable part of the failure — so keep the redacted tail for
+            # the loader's audit row (and therefore the panel's errors view).
+            self._last_crash_tail[plugin] = worker.crash_tail()
             await worker.stop()
             self._record_restart(plugin)
             raise

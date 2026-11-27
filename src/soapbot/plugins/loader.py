@@ -1173,6 +1173,13 @@ class PluginLoader:
             if "setup failed:" in reason:
                 inner = reason.split("setup failed:", 1)[1].strip()
             detail = f"isolated start failed: {inner or type(exc).__name__}"
+            # The child reports the exception *type* only; its stderr carries the
+            # stack. The supervisor keeps the redacted tail of the last failed start
+            # precisely so this row can say where — without it, "ValueError" names a
+            # file nobody can find.
+            tail = self.supervisor.last_crash_tail(name)
+            if tail:
+                detail += "; stderr: " + " | ".join(tail)
             self.audit.record(
                 kind="plugin",
                 action="load",
