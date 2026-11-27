@@ -90,7 +90,7 @@ from soapbot.plugins.isolation import (
     PluginTimeoutError,
     _kill_tree,
     kill_group_after_exit,
-    plugin_identity,
+    privilege_spawn_kwargs,
     sanitize_env,
     worker_script_path,
 )
@@ -1276,7 +1276,6 @@ class PluginWorker:
             }
         )
         try:
-            run_uid, run_gid = plugin_identity()
             self._proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",
@@ -1292,11 +1291,14 @@ class PluginWorker:
                 # plugin could spawn 20 helpers that survived the parent).
                 cwd=str(self.config.plugin_dir),
                 start_new_session=(sys.platform != "win32"),
-                # Privilege separation when configured: the worker runs as its own uid so
-                # it cannot rewrite the host's approval records with the host's
-                # permissions (S-PLUG-04). Both None when unset.
-                user=run_uid,
-                group=run_gid,
+                # Privilege separation only when configured, and only as kwargs the
+                # current loop accepts — uvloop rejects user/group even as None and
+                # broke every isolated load in the production image (measured).
+                # Empty when unconfigured: absent kwargs keep the parent's identity.
+                # Same splat-ignore as isolation.run_entry (dict[str, int] trips
+                # mypy's "overrides every keyword" rule; the helper is constrained
+                # to user/group by inspection in tests).
+                **privilege_spawn_kwargs(),  # type: ignore[arg-type]
             )
             # Windows has no process group that survives a hard kill of the host, so a
             # crash would leave the worker running and holding its pipes. A job object
