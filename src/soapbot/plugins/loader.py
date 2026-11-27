@@ -1180,6 +1180,13 @@ class PluginLoader:
             tail = self.supervisor.last_crash_tail(name)
             if tail:
                 detail += "; stderr: " + " | ".join(tail)
+            elif not inner:
+                # No tail and no child-reported setup error: the exception came from
+                # the *host's own* start path, and its repr is host-authored text —
+                # the type-only rule exists for plugin-authored strings, not for
+                # ours. A bare "ValueError" with neither a tail nor a repr names a
+                # defect nobody can reproduce.
+                detail += f"; host error: {repr(exc)[:300]}"
             self.audit.record(
                 kind="plugin",
                 action="load",
