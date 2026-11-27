@@ -290,3 +290,99 @@ async def test_bili_example_plugin_registers_and_uses_the_surface() -> None:
 
     await ctx.commands["bili-forget"](None, [])
     assert "seen_bvids" not in ctx.storage.data
+
+
+# ------------------------------------------------------------- bilibili.view (batch14)
+
+
+class _FakeVideo:
+    """Just enough of ``VideoInfo`` for the whitelist projection — including its
+    ``duration_text`` property, which the real model computes from seconds."""
+
+    def __init__(self) -> None:
+        self.bvid = "BV1view"
+        self.title = "标题" * 60  # long enough to prove truncation
+        self.author = "UP 主"
+        self.category = "科技"
+        self.duration_seconds = 387
+        self.published_at = 1_700_000_000.0
+        self.url = "https://www.bilibili.com/video/BV1view"
+        from soapbot.bilibili.models import VideoInfo
+
+        real = VideoInfo(bvid="BV1view", duration_seconds=387)
+        self.duration_text = real.duration_text
+        from soapbot.bilibili.models import VideoStat
+
+        self.stat = VideoStat(view=1234, danmaku=5, reply=6, like=7, favorite=8, share=9)
+
+
+def _view_router(audit=None):
+    from soapbot.plugins.sandbox import CapabilityGrant, CapabilityGuard
+    from soapbot.plugins.surfaces import SurfaceRouter
+
+    grant = CapabilityGrant(
+        plugin="card",
+        declared=frozenset({Capability.BILIBILI}),
+        approved=frozenset({Capability.BILIBILI}),
+    )
+    guard = CapabilityGuard(grant, audit=audit)
+
+    class _HostClient:
+        async def video(self, target: str):
+            self.target = target
+            return _FakeVideo()
+
+    host = _HostClient()
+    router = SurfaceRouter(
+        guard=guard, plugin="card", audit=audit, bilibili_host_client=host
+    )
+    return router, host
+
+
+async def test_view_returns_the_whitelist_not_the_raw_payload() -> None:
+    router, _host = _view_router()
+    card = await router.dispatch("bilibili.view", {"kind": "view", "target": "BV1view"}, None)
+
+    assert card["bvid"] == "BV1view"
+    assert len(card["title"]) == 80, "标题按 80 截断"
+    assert card["duration_text"] == "6:27"
+    assert card["stat"]["view"] == 1234
+    # The fields that are *not* on the card are as much the contract as the ones that are.
+    assert "cover_url" not in card and "pic" not in card
+    assert "pages" not in card and "description" not in card and "author_mid" not in card
+
+
+async def test_view_without_the_capability_is_refused() -> None:
+    from soapbot.plugins.sandbox import CapabilityGrant, CapabilityGuard
+    from soapbot.plugins.surfaces import SurfaceRouter
+
+    grant = CapabilityGrant(plugin="card", declared=frozenset(), approved=frozenset())
+    router = SurfaceRouter(
+        guard=CapabilityGuard(grant, audit=None), plugin="card", bilibili_host_client=object()
+    )
+    with pytest.raises(Exception) as caught:
+        await router.dispatch(
+            "bilibili.view", {"kind": "view", "target": "BV1view"}, None
+        )
+    assert "bilibili" in str(caught.value).lower() or "capability" in str(caught.value).lower()
+
+
+def test_the_view_surface_is_wired_for_both_modes() -> None:
+    from soapbot.plugins.surfaces import _SURFACE_TABLE
+
+    assert "bilibili.view" in _SURFACE_TABLE
+    from soapbot.plugins import supervisor as sup
+
+    assert "bilibili.view" in sup.ALLOWED_SURFACES
+    # The child shim exposes the same shape the in-process context does.
+    from soapbot.plugins.supervisor import _CHILD_WORKER
+
+    assert "def view(self, target)" in _CHILD_WORKER
+    assert "async def bili_view(self, target)" in _CHILD_WORKER
+
+
+async def test_view_refuses_an_implausible_target_before_touching_the_client() -> None:
+    router, host = _view_router()
+    with pytest.raises(ValueError):
+        await router.dispatch("bilibili.view", {"kind": "view", "target": "x" * 300}, None)
+    assert not getattr(host, "target", ""), "过长目标应在触碰客户端之前被拒"

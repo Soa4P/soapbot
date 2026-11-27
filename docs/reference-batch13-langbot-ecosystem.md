@@ -184,3 +184,9 @@ tar.gz + SHA-256 边车、可选口令加密（scrypt + AES-256-GCM）、恢复�
    形态直接引用。
 5. 逐仓安全审查未做（本批只到机制级）；任何进入改编排期的仓库需先过 Mimosa +
    云鼎双工具的装前审计（既有纪律）。
+
+---
+
+增量延续：AstrBot 市场 batch12b 之后的新上架插件（82 条）与本批新落地的
+bilibili.view surface + bili-card 仿写，见
+[reference-batch14-astrbot-market-delta.md](reference-batch14-astrbot-market-delta.md)。

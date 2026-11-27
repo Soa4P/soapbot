@@ -539,6 +539,20 @@ class PluginContext:
             host_client=getattr(self, "_bilibili_host_client", None),
         )
 
+    async def bili_view(self, target: str) -> dict:
+        """视频信息卡（batch14）：只发目标（BV/av/链接），只拿白名单字段。
+
+        走宿主的 surface 路径而非 ``ctx.bili`` 的裸 ``get_json``：目标解析
+        （b23.tv 只读 Location 头）、限流与字段白名单都在宿主侧完成，插件拿到的
+        没有封面 URL 也没有播放地址。进程内与隔离 worker 走同一个 surface 分发。
+        """
+        result: dict = await self._surface_router().dispatch(
+            "bilibili.view",
+            {"kind": "view", "target": str(target)},
+            self._require_caller("bili_view"),
+        )
+        return result
+
     async def send(self, text: str, *, session_key: str) -> None:
         """Send an unsolicited message to a session.
 

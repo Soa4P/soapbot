@@ -1,7 +1,7 @@
 {
   "title": "soapbot 完整化路线",
   "subtitle": "从「单链路可跑」到「可交付 + 对标 AstrBot」",
-  "updated_at": "2026-11-28T03:10:00+08:00",
+  "updated_at": "2026-11-28T04:40:00+08:00",
   "current": null,
   "phases": [
     {
@@ -3984,6 +3984,12 @@
           "name": "Low 第六批：CSP 去掉裸 ws:/wss: 并补 form-action 与 dist meta（S-FE-04）、pre-commit rev 钉 SHA + pre-push 只跑提交版扫描器（S-DEP-20）",
           "status": "done",
           "note": "面板根本没有打开任何 WebSocket——UI 里的 ws:// 全是给操作者看的 NapCat 配置占位文案，裸 scheme 只是给外连发的许可；pre-push 执行工作区脚本是开发机供应链：改得了工作区就改得了 push 那一刻要跑的扫描器，改为 git show HEAD 管进解释器"
+        },
+        {
+          "id": "a24-t15",
+          "name": "batch14 市场增量：bilibili.view surface + bili-card 仿写（参照 analysis_bilibili 机制）",
+          "status": "done",
+          "note": "增量 82 条对齐 batch12b；新判例三条（备份内置上传=硬规则、隐私侵害面、欺骗面）；宿主只加一个只读 surface（白名单字段、无封面无播放地址），插件四层限流 TTL 去重失败静默；#150 教训生效——断言钉形态不钉存在"
         }
       ],
       "goal": "把外部审计的结论变成可追溯的修复与登记，而不是一份报告"
