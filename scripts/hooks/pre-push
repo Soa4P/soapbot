@@ -2,9 +2,14 @@
 # Push-time secret scan. Runs the **committed** scanner (S-DEP-20), not the working-tree
 # copy: a hook that executes workspace code is part of the machine's supply chain, and
 # whatever modified the checkout also modified what this hook would run at the moment a
-# push moves bytes off it. Piping `git show HEAD:…` through the interpreter pins the
-# scan to the reviewed version. The script is stdlib-only, so it needs no checkout state
-# beyond the git object.
+# push moves bytes off it.
+#
+# Why a temp file and not a pipe: git hands the hook the push's ref data on stdin, and
+# `git show … | python -` would replace that stdin with the pipe — the scanner would
+# read no ref data and refuse every push ("no pre-push ref data", measured). Writing
+# the committed script to a temp file keeps the hook's stdin untouched.
+#
+# The script is stdlib-only, so it needs no checkout state beyond the git object.
 #
 # Install: cp scripts/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 set -eu
@@ -15,4 +20,7 @@ elif [ -x .venv/bin/python ]; then
 else
   PY=python3
 fi
-git show HEAD:scripts/check_secrets.py | "$PY" - --pre-push
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+git show HEAD:scripts/check_secrets.py > "$TMP"
+"$PY" "$TMP" --pre-push

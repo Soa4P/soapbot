@@ -41,6 +41,20 @@ def test_the_versioned_pre_push_hook_scans_the_committed_scanner() -> None:
     )
 
 
+def test_the_hook_feeds_git_ref_data_not_a_pipe() -> None:
+    """The scanner reads the push's ref data from stdin.
+
+    The first version piped `git show … | python -`, which replaced the hook's stdin —
+    the scanner saw no ref data and refused every push. This was committed and only
+    caught on a real push, because both static assertions passed on either shape. The
+    temp-file form is the contract: materialise the committed script, keep stdin.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    assert 'git show HEAD:scripts/check_secrets.py > "$TMP"' in text
+    assert '"$PY" "$TMP" --pre-push' in text
+    assert "| \"$PY\" - --pre-push" not in text, "管道会顶掉钩子的 stdin（实测拒绝一切 push）"
+
+
 def test_the_installed_hook_matches_the_versioned_one() -> None:
     """A hook that drifted from the reviewed copy is a second, unaudited hook."""
     installed = ROOT / ".git" / "hooks" / "pre-push"
