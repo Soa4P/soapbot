@@ -103,3 +103,65 @@ async def test_the_resident_worker_start_forwards_the_kwargs(monkeypatch, tmp_pa
 def test_platform_guard_is_the_real_one() -> None:
     """Sanity: this suite's platform assumption is explicit rather than accidental."""
     assert sys.platform in {"win32", "linux", "darwin"} or sys.platform.startswith("linux")
+
+
+# ------------------------------------------------- spawn kwargs (uvloop 事故，2026-11-28)
+
+
+def test_unset_passes_no_spawn_kwargs_at_all() -> None:
+    """Not "user=None, group=None" — literally nothing.
+
+    uvloop 的 subprocess transport 连 ``user=None, group=None`` 都拒（生产镜像实测：
+    每一次隔离加载都死于 ``ValueError('unexpected kwargs: user, group')``）。不传
+    kwargs 本来就是缺省语义：保持父进程身份。
+    """
+    assert isolation.privilege_spawn_kwargs() == {}
+
+
+def test_configured_uid_becomes_spawn_kwargs(monkeypatch) -> None:
+    monkeypatch.setattr(isolation.sys, "platform", "linux")
+    monkeypatch.setattr(settings, "plugin_run_uid", 10001, raising=False)
+    monkeypatch.setattr(settings, "plugin_run_gid", 10001, raising=False)
+    assert isolation.privilege_spawn_kwargs() == {"user": 10001, "group": 10001}
+
+
+def test_a_partial_gid_only_carries_the_group(monkeypatch) -> None:
+    monkeypatch.setattr(isolation.sys, "platform", "linux")
+    monkeypatch.setattr(settings, "plugin_run_gid", 20000, raising=False)
+    assert isolation.privilege_spawn_kwargs() == {"group": 20000}
+
+
+@pytest.mark.asyncio
+async def test_configured_under_uvloop_fails_closed(monkeypatch) -> None:
+    """不能丢权限的 loop 上必须响亮失败，而不是悄悄保持宿主身份。
+
+    那种静默降级正是 S-PLUG-04 要拒绝的假边界。检查的是运行中 loop 的模块名，
+    所以测试里用一个 module 名伪装成 uvloop 的假 loop 类就够。
+    """
+    monkeypatch.setattr(isolation.sys, "platform", "linux")
+    monkeypatch.setattr(settings, "plugin_run_uid", 10001, raising=False)
+    monkeypatch.setattr(settings, "plugin_run_gid", 10001, raising=False)
+
+    class _FakeUvloopLoop:
+        pass
+
+    _FakeUvloopLoop.__module__ = "uvloop.loop"
+    monkeypatch.setattr(isolation.asyncio, "get_running_loop", lambda: _FakeUvloopLoop())
+
+    with pytest.raises(isolation.IsolationError, match="uvloop"):
+        isolation.privilege_spawn_kwargs()
+
+
+def test_both_spawn_sites_use_the_shared_helper() -> None:
+    """两个 spawn 点（一次性与常驻）不得各自推导 kwargs。
+
+    这次的形态是：调用点无条件传 user/group 而助手知道分寸；把两个调用点都钉在
+    助手上，未来的第三个 spawn 就不会再犯。
+    """
+    import inspect
+
+    one_shot = inspect.getsource(isolation.IsolatedRunner.run_entry)
+    resident = inspect.getsource(supervisor.PluginWorker.start)
+    assert "**privilege_spawn_kwargs()" in one_shot
+    assert "**privilege_spawn_kwargs()" in resident
+    assert "user=run_uid" not in one_shot and "user=run_uid" not in resident

@@ -171,6 +171,48 @@ def plugin_identity() -> tuple[int | None, int | None]:
     return (uid, gid)
 
 
+def privilege_spawn_kwargs() -> dict[str, int]:
+    """Spawn kwargs for privilege separation, or ``{}`` when unconfigured.
+
+    Two reasons this is not just ``**plugin_identity()`` splatted at both call sites:
+
+    * **uvloop rejects the kwargs outright** — even ``user=None, group=None`` raises
+      ``ValueError('unexpected kwargs: user, group')`` (measured in the production
+      image, where uvicorn's ``loop="auto"`` picks uvloop because the wheel is
+      installed). The unconfigured case therefore passes *nothing*, which is also the
+      historically correct behaviour: absent kwargs mean "keep the parent's identity".
+    * **Configured under uvloop fails closed.** uvloop's subprocess transport cannot
+      drop privileges, so "run as another uid" would silently degrade to "run as the
+      host's uid" — the fake boundary S-PLUG-04 exists to refuse. The error names the
+      fix (run under the standard asyncio loop) instead of a kwargs traceback.
+    """
+    uid, gid = plugin_identity()
+    if uid is None and gid is None:
+        return {}
+    try:
+        import asyncio
+
+        loop_type = type(asyncio.get_running_loop())
+    except RuntimeError:
+        # No running loop (a unit test, or a caller that has not started one): the
+        # kwargs decision does not depend on the loop yet. The spawn site runs inside
+        # one, which is where the uvloop guard actually matters.
+        loop_type = None
+    if loop_type is not None and loop_type.__module__.startswith("uvloop"):
+        raise IsolationError(
+            "PLUGIN_RUN_UID is configured but this process runs on a uvloop event "
+            "loop, whose subprocess transport cannot drop privileges — the worker "
+            "would silently keep the host's uid. Set the loop to asyncio "
+            "(uvicorn loop=\"asyncio\" / run without uvloop) or unset PLUGIN_RUN_UID."
+        )
+    kwargs: dict[str, int] = {}
+    if uid is not None:
+        kwargs["user"] = uid
+    if gid is not None:
+        kwargs["group"] = gid
+    return kwargs
+
+
 def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     """Kill the child *and* anything it spawned.
 
@@ -637,7 +679,6 @@ class IsolatedRunner:
             )
 
         try:
-            run_uid, run_gid = plugin_identity()
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-I",  # isolated mode: ignore PYTHON* env and user site-packages
@@ -662,11 +703,14 @@ class IsolatedRunner:
                 # the direct child and the orphans keep holding CPU and memory.
                 start_new_session=(sys.platform != "win32"),
                 creationflags=(_CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
-                # Privilege separation when the operator configured it: the worker gets
-                # its own uid, so it cannot rewrite the host's approval records with the
-                # host's permissions (S-PLUG-04). Both None when unset.
-                user=run_uid,
-                group=run_gid,
+                # Privilege separation only when configured, and only as kwargs the
+                # current loop accepts (uvloop rejects them even as None). Empty when
+                # unconfigured — absent kwargs mean "keep the parent's identity".
+                # The splat of a plain dict trips mypy's "overrides every keyword"
+                # rule here and in PluginWorker.start (see plugin_identity's
+                # docstring); the helper is constrained to user/group by inspection
+                # in tests, so the ignore is scoped to exactly that risk.
+                **privilege_spawn_kwargs(),  # type: ignore[arg-type]
             )
         except OSError as exc:  # pragma: no cover - depends on environment
             raise IsolationError(f"could not start plugin process: {exc}") from exc
